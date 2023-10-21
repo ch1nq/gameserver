@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Giv akt, kurven!</title>
+</head>
+
+<body>
+    <canvas id="game" width="500" height="500"></canvas>
+    <script type="text/javascript">
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+
+        const uri = 'ws://' + location.host + '/game';
+        const ws = new WebSocket(uri);
+        ws.onopen = function () { console.log('Connected'); };
+        ws.onclose = function () { console.log('Disconnected'); };
+
+        function handleEvent(event) {
+            // console.log(event);
+            if (event.UpdateState) {
+                handleUpdateEvent(event);
+            } else if (event.GameOver) {
+                handleGameOverEvent(event);
+            }
+        }
+
+        function handleUpdateEvent(event) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // dark blue background
+            ctx.fillStyle = '#000033';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            for (const player of Object.values(event.UpdateState.players)) {
+                if (!player.is_alive) {
+                    continue;
+                }
+
+                for (const blob of player.body) {
+                    ctx.fillStyle = '#00ccff';
+                    ctx.beginPath();
+                    ctx.arc(blob.position.x, blob.position.y, blob.size, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+
+                // Give head different color
+                head = player.head;
+                ctx.fillStyle = '#ffcc00';
+                ctx.beginPath();
+                ctx.arc(head.position.x, head.position.y, head.size, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+
+        }
+
+        function handleGameOverEvent(event) {
+            ctx.font = "24px serif";
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(event.GameOver.winner, 40, 40);
+        }
+
+        ws.onmessage = function (msg) {
+            handleEvent(JSON.parse(msg.data));
+        };
+
+        function sendAction(ws, action) {
+            ws.send('{"Action": "' + action + '"}');
+        }
+
+        const keyLeft = 'a';
+        const keyRight = 'd';
+        var leftDown = false;
+        var rightDown = false;
+
+        function updateAction(ws, leftDown, rightDown) {
+            if (leftDown && rightDown)
+                sendAction(ws, 'Forward')
+            else if (leftDown)
+                sendAction(ws, 'Left')
+            else if (rightDown)
+                sendAction(ws, 'Right')
+        }
+
+        document.addEventListener('keydown', function (event) {
+            switch (event.key) {
+                case keyLeft:
+                    leftDown = true;
+                    break;
+                case keyRight:
+                    rightDown = true;
+                    break;
+            }
+            updateAction(ws, leftDown, rightDown);
+        });
+        document.addEventListener('keyup', function (event) {
+            switch (event.key) {
+                case keyLeft:
+                    leftDown = false;
+                    break;
+                case keyRight:
+                    rightDown = false;
+                    break;
+            }
+            updateAction(ws, leftDown, rightDown);
+        });
+    </script>
+</body>
+
+</html>
