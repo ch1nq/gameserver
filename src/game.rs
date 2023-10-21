@@ -7,6 +7,14 @@ const GAME_HEIGHT: f32 = 500.0;
 
 pub type PlayerId = usize;
 
+#[derive(Serialize, Deserialize)]
+pub enum GameEvent {
+    UpdateState(GameState),
+    PlayerDied(PlayerId),
+    PlayerJoined(PlayerId),
+    GameOver { winner: Option<PlayerId> },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameAction {
     Left,
@@ -21,8 +29,11 @@ struct Position {
     y: f32,
 }
 
+type BlobId = usize;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Blob {
+    id: BlobId,
     size: f32,
     position: Position,
 }
@@ -33,16 +44,9 @@ pub struct GameState {
     players: HashMap<PlayerId, Player>,
 }
 
-impl GameState {
-    pub fn diff(&self) -> GameState {
-        let mut diff = self.clone();
-        diff.players = diff
-            .players
-            .into_iter()
-            .map(|(id, player)| (id, player.without_tail()))
-            .collect();
-        diff
-    }
+pub enum GameResult {
+    Winner(PlayerId),
+    NoWinner,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +74,7 @@ impl Player {
         Self {
             is_alive: true,
             head: Blob {
+                id: 0,
                 size: initial_size,
                 position: Position {
                     x: rand::distributions::Uniform::new(0.0, GAME_WIDTH).sample(rng),
@@ -90,117 +95,126 @@ impl Player {
         }
     }
 
-    fn without_tail(&self) -> Player {
+    fn with_tail_diff(&self, other: &Player) -> Self {
         let mut new_player = self.clone();
-        new_player.body.clear();
+        new_player.body = new_player
+            .body
+            .into_iter()
+            .filter(|b1| !other.body.iter().any(|b2| b1.id == b2.id))
+            .collect();
         new_player
     }
 }
 
-pub fn init_game(game_state: &mut GameState, player_ids: impl IntoIterator<Item = PlayerId>) {
-    let mut rng = rand::thread_rng();
+impl GameState {
+    pub fn init_game(&mut self, player_ids: impl IntoIterator<Item = PlayerId>) {
+        let mut rng = rand::thread_rng();
 
-    // Spawn players
-    game_state.players = player_ids
-        .into_iter()
-        .map(|id| (id, Player::new(&mut rng)))
-        .collect();
-}
-
-pub enum GameResult {
-    Winner(PlayerId),
-    NoWinner,
-}
-
-pub fn get_game_result(game_state: &GameState) -> Option<GameResult> {
-    match game_state
-        .players
-        .iter()
-        .filter(|(_, p)| p.is_alive)
-        .collect::<Vec<_>>()
-        .as_slice()
-    {
-        [(&winner_id, _)] => Some(GameResult::Winner(winner_id)),
-        [] => Some(GameResult::NoWinner),
-        _ => None,
+        // Spawn players
+        self.players = player_ids
+            .into_iter()
+            .map(|id| (id, Player::new(&mut rng)))
+            .collect();
     }
-}
 
-pub fn handle_player_action(game_state: &mut GameState, player_id: PlayerId, action: GameAction) {
-    game_state
-        .players
-        .get_mut(&player_id)
-        .expect("player should exist")
-        .action = action;
-}
-
-pub fn handle_player_leave(game_state: &mut GameState, player_id: PlayerId) {
-    kill_player(game_state, player_id);
-}
-
-pub fn update_game_state(game_state: &mut GameState) {
-    game_state.timestep += 1;
-
-    // Update player positions
-    for player in game_state.players.values_mut().filter(|p| p.is_alive) {
-        match player.action {
-            GameAction::Left => player.direction.radians -= player.turning_speed,
-            GameAction::Right => player.direction.radians += player.turning_speed,
-            GameAction::Forward => {}
-        }
-        if game_state.timestep as u32 % player.skip_frequency > player.skip_duration {
-            player.body.push(player.head.clone());
-        }
-        let wrap = |x: f32, max: f32| (x % max + max) % max;
-        player.head = Blob {
-            size: player.size,
-            position: Position {
-                x: wrap(
-                    player.head.position.x + player.direction.radians.cos() * player.speed,
-                    GAME_WIDTH,
-                ),
-                y: wrap(
-                    player.head.position.y + player.direction.radians.sin() * player.speed,
-                    GAME_HEIGHT,
-                ),
-            },
-        };
+    pub fn diff(&self, other: &GameState) -> GameState {
+        let mut diff = self.clone();
+        diff.players = diff
+            .players
+            .into_iter()
+            .map(|(id, player)| (id, other.players.get(&id).unwrap().with_tail_diff(&player)))
+            .collect();
+        diff
     }
-    // Check for collisions
-    let players_to_kill = game_state
-        .players
-        .iter()
-        .flat_map(|(id1, p1)| {
-            game_state
-                .players
-                .iter()
-                .map(move |(id2, p2)| ((*id1, p1), (*id2, p2)))
-        })
-        .filter(|((_, p1), (_, p2))| p1.is_alive && p2.is_alive)
-        .map(|((id1, p1), (id2, p2))| {
-            if id1 == id2 {
-                (id1, self_collision(p1))
-            } else {
-                (id1, collision(p1, p2))
+
+    pub fn get_game_result(&self) -> Option<GameResult> {
+        match self
+            .players
+            .iter()
+            .filter(|(_, p)| p.is_alive)
+            .collect::<Vec<_>>()
+            .as_slice()
+        {
+            [(&winner_id, _)] => Some(GameResult::Winner(winner_id)),
+            [] => Some(GameResult::NoWinner),
+            _ => None,
+        }
+    }
+
+    pub fn handle_player_action(&mut self, player_id: PlayerId, action: GameAction) {
+        self.players
+            .get_mut(&player_id)
+            .expect("player should exist")
+            .action = action;
+    }
+
+    pub fn handle_player_leave(&mut self, player_id: PlayerId) {
+        self.kill_player(player_id);
+    }
+
+    pub fn update_game_state(&mut self) {
+        self.timestep += 1;
+
+        // Update player positions
+        for player in self.players.values_mut().filter(|p| p.is_alive) {
+            match player.action {
+                GameAction::Left => player.direction.radians -= player.turning_speed,
+                GameAction::Right => player.direction.radians += player.turning_speed,
+                GameAction::Forward => {}
             }
-        })
-        .filter_map(|(id, col)| match col {
-            true => Some(id),
-            false => None,
-        })
-        .collect::<Vec<_>>();
-    for player_id in players_to_kill {
-        kill_player(game_state, player_id);
+            if self.timestep as u32 % player.skip_frequency > player.skip_duration {
+                player.body.push(player.head.clone());
+            }
+            let wrap = |x: f32, max: f32| (x % max + max) % max;
+            player.head = Blob {
+                id: player.head.id + 1,
+                size: player.size,
+                position: Position {
+                    x: wrap(
+                        player.head.position.x + player.direction.radians.cos() * player.speed,
+                        GAME_WIDTH,
+                    ),
+                    y: wrap(
+                        player.head.position.y + player.direction.radians.sin() * player.speed,
+                        GAME_HEIGHT,
+                    ),
+                },
+            };
+        }
+        // Check for collisions
+        let players_to_kill = self
+            .players
+            .iter()
+            .filter(|(_, p)| p.is_alive)
+            .flat_map(|(id1, p1)| {
+                self.players
+                    .iter()
+                    .map(move |(id2, p2)| ((*id1, p1), (*id2, p2)))
+            })
+            .map(|((id1, p1), (id2, p2))| {
+                if id1 == id2 {
+                    (id1, self_collision(p1))
+                } else {
+                    (id1, collision(p1, p2))
+                }
+            })
+            .filter_map(|(id, col)| match col {
+                true => Some(id),
+                false => None,
+            })
+            .collect::<Vec<_>>();
+        for player_id in players_to_kill {
+            self.kill_player(player_id);
+        }
     }
-}
 
-fn kill_player(game_state: &mut GameState, player_id: PlayerId) {
-    log::info!("player {} died", player_id);
-    game_state
-        .players
-        .get_mut(&player_id)
-        .expect("player should exist")
-        .is_alive = false;
+    fn kill_player(&mut self, player_id: PlayerId) {
+        log::info!("player {} died", player_id);
+        self.players
+            .get_mut(&player_id)
+            .expect("player should exist")
+            .is_alive = false;
+    }
 }
 
 const COLLISION_SELF_IGNORE_N_LATEST: usize = 10;

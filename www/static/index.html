@@ -2,7 +2,10 @@
 <html lang="en">
 
 <head>
+    <meta charset="UTF-8" />
     <title>Giv akt, kurven!</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="description" content="" />
 </head>
 
 <body>
@@ -16,8 +19,9 @@
         ws.onopen = function () { console.log('Connected'); };
         ws.onclose = function () { console.log('Disconnected'); };
 
+        var bodies = {};
+
         function handleEvent(event) {
-            // console.log(event);
             if (event.UpdateState) {
                 handleUpdateEvent(event);
             } else if (event.GameOver) {
@@ -37,7 +41,15 @@
                     continue;
                 }
 
+                if (!bodies[player.id]) {
+                    bodies[player.id] = [];
+                }
+
                 for (const blob of player.body) {
+                    bodies[player.id].push(blob);
+                }
+
+                for (const blob of bodies[player.id]) {
                     ctx.fillStyle = '#00ccff';
                     ctx.beginPath();
                     ctx.arc(blob.position.x, blob.position.y, blob.size, 0, 2 * Math.PI);
@@ -57,7 +69,7 @@
         function handleGameOverEvent(event) {
             ctx.font = "24px serif";
             ctx.fillStyle = "#ffffff";
-            ctx.fillText(event.GameOver.winner, 40, 40);
+            ctx.fillText("Winner: " + event.GameOver.winner, 40, 40);
         }
 
         ws.onmessage = function (msg) {
@@ -72,14 +84,17 @@
         const keyRight = 'd';
         var leftDown = false;
         var rightDown = false;
+        var action = 'Forward';
 
         function updateAction(ws, leftDown, rightDown) {
-            if (leftDown && rightDown)
-                sendAction(ws, 'Forward')
-            else if (leftDown)
-                sendAction(ws, 'Left')
-            else if (rightDown)
-                sendAction(ws, 'Right')
+            var oldAction = action;
+
+            if (leftDown && rightDown) action = 'Forward'
+            else if (leftDown) action = 'Left'
+            else if (rightDown) action = 'Right'
+            else action = 'Forward'
+
+            if (oldAction != action) sendAction(ws, action);
         }
 
         document.addEventListener('keydown', function (event) {
@@ -90,6 +105,8 @@
                 case keyRight:
                     rightDown = true;
                     break;
+                default:
+                    return;
             }
             updateAction(ws, leftDown, rightDown);
         });
@@ -101,6 +118,8 @@
                 case keyRight:
                     rightDown = false;
                     break;
+                default:
+                    return;
             }
             updateAction(ws, leftDown, rightDown);
         });
