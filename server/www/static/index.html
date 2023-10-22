@@ -22,10 +22,13 @@
         var bodies = {};
 
         function handleEvent(event) {
-            if (event.UpdateState) {
-                handleUpdateEvent(event);
-            } else if (event.GameOver) {
-                handleGameOverEvent(event);
+            switch (event.event.event_type) {
+                case 'UpdateState':
+                    handleUpdateEvent(event.event);
+                    break;
+                case 'GameOver':
+                    handleGameOverEvent(event.event);
+                    break;
             }
         }
 
@@ -36,7 +39,7 @@
             ctx.fillStyle = '#000033';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            for (const player of Object.values(event.UpdateState.players)) {
+            for (const player of Object.values(event.new_state.players)) {
                 if (!player.is_alive) {
                     continue;
                 }
@@ -56,11 +59,12 @@
                     ctx.fill();
                 }
 
+
                 // Give head different color
                 head = player.head;
                 ctx.fillStyle = '#ffcc00';
                 ctx.beginPath();
-                ctx.arc(head.position.x, head.position.y, head.size, 0, 2 * Math.PI);
+                ctx.arc(head.position.x, head.position.y, head.size * 2, 0, 2 * Math.PI);
                 ctx.fill();
             }
 
@@ -69,7 +73,7 @@
         function handleGameOverEvent(event) {
             ctx.font = "24px serif";
             ctx.fillStyle = "#ffffff";
-            ctx.fillText("Winner: " + event.GameOver.winner, 40, 40);
+            ctx.fillText("Winner: " + event.winner, 40, 40);
         }
 
         ws.onmessage = function (msg) {
@@ -77,7 +81,7 @@
         };
 
         function sendAction(ws, action) {
-            ws.send('{"Action": "' + action + '"}');
+            ws.send('{"event_type": "Action", "action": "' + action + '"}');
         }
 
         const keyLeft = 'a';

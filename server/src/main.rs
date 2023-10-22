@@ -15,18 +15,23 @@ use warp::Filter;
 mod game;
 
 #[derive(Serialize, Deserialize)]
+#[serde(tag = "event_type")]
 enum PlayerEvent {
     Join,
     Leave,
-    Action(game::GameAction),
+    Action { action: game::GameAction },
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(tag = "event_type")]
 enum GameEvent {
-    UpdateState(game::GameState),
-    PlayerDied(game::PlayerId),
-    PlayerJoined(game::PlayerId),
+    UpdateState { new_state: game::GameState },
     GameOver { winner: Option<game::PlayerId> },
+}
+
+#[derive(Serialize, Deserialize)]
+struct Event {
+    event: GameEvent,
 }
 
 #[derive(Default, Debug)]
@@ -51,7 +56,7 @@ impl GameSession {
     }
 
     fn broadcast_event(&self, event: GameEvent) {
-        let message = Message::text(serde_json::to_string(&event).unwrap());
+        let message = Message::text(serde_json::to_string(&Event { event }).unwrap());
         for channel in self.player_channels.values() {
             channel.send(message.clone()).unwrap();
         }
@@ -158,10 +163,13 @@ async fn player_connected(ws: WebSocket, state_lock: StateLock) {
         let msg = match result {
             Ok(msg) => msg,
             Err(e) => {
-                eprintln!("websocket error(uid={}): {}", player_id, e);
+                log::error!("websocket error(uid={}): {}", player_id, e);
                 break;
             }
         };
+        if msg.is_close() {
+            break;
+        }
         handle_message(player_id, msg, &state_lock).await;
     }
 
@@ -197,7 +205,7 @@ async fn game_loop(state_lock: StateLock, tick_interval: tokio::time::Duration) 
 
         // Send the updated game state to all players
         let diff = old_game_state.diff(&game_state);
-        game_session.broadcast_event(GameEvent::UpdateState(diff));
+        game_session.broadcast_event(GameEvent::UpdateState { new_state: diff });
 
         // Wait for the next tick
         tokio::time::sleep(tick_interval).await;
@@ -205,22 +213,16 @@ async fn game_loop(state_lock: StateLock, tick_interval: tokio::time::Duration) 
 }
 
 async fn player_disconnected(player_id: game::PlayerId, state_lock: &StateLock) {
-    eprintln!("gamer disconnect: {}", player_id);
+    log::info!("gamer disconnect: {}", player_id);
 
     let mut game_session = state_lock.write().await;
     game_session.player_channels.remove(&player_id);
     game_session.get_game_state().map(|game_state| {
         game_state.handle_player_leave(player_id);
     });
-
-    // Send a message to all players that the player has left
-    game_session.broadcast_event(GameEvent::PlayerDied(player_id));
 }
 
 async fn handle_message(player_id: game::PlayerId, msg: Message, state_lock: &StateLock) {
-    if msg.is_close() {
-        return;
-    }
     let msg_text = match msg.to_str() {
         Ok(s) => s,
         Err(_) => {
@@ -253,20 +255,10 @@ async fn handle_player_event(
     state_lock: &StateLock,
 ) {
     match player_event {
-        PlayerEvent::Action(action) => match state_lock.write().await.get_game_state() {
+        PlayerEvent::Action { action } => match state_lock.write().await.get_game_state() {
             Some(game_state) => game_state.handle_player_action(player_id, action),
             None => log::warn!("player tried to send action to game that is not in progress"),
         },
-        PlayerEvent::Join => {
-            state_lock
-                .read()
-                .await
-                .broadcast_event(GameEvent::PlayerJoined(player_id));
-        }
-        PlayerEvent::Leave => {
-            let mut game_session = state_lock.write().await;
-            game_session.player_channels.remove(&player_id);
-            game_session.broadcast_event(GameEvent::PlayerDied(player_id));
-        }
+        _ => {}
     }
 }
