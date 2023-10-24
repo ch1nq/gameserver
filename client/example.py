@@ -21,7 +21,7 @@ async def main():
 
 async def run_clients() -> None:
     # run three clients concurrently
-    await asyncio.gather(main(), main(), main())
+    await asyncio.gather(*[main() for _ in range(7)])
 
 
 if __name__ == "__main__":
