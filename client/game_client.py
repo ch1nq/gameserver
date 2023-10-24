@@ -1,3 +1,4 @@
+import asyncio
 from typing import Literal
 import websockets
 import pydantic
@@ -16,8 +17,13 @@ class UpdateState(pydantic.BaseModel):
     new_state: game.GameState
 
 
+class AssignPlayerId(pydantic.BaseModel):
+    event_type: Literal["AssignPlayerId"]
+    player_id: game.PlayerId
+
+
 class GameEvent(pydantic.BaseModel):
-    event: GameOver | UpdateState = pydantic.Field(..., discriminator="event_type")
+    event: GameOver | UpdateState | AssignPlayerId = pydantic.Field(..., discriminator="event_type")
 
 
 class ActionEvent(pydantic.BaseModel):
@@ -25,15 +31,7 @@ class ActionEvent(pydantic.BaseModel):
     action: game.GameAction
 
 
-class JoinEvent(pydantic.BaseModel):
-    event_type: Literal["Join"] = "Join"
-
-
-class LeaveEvent(pydantic.BaseModel):
-    event_type: Literal["Leave"] = "Leave"
-
-
-PlayerEvent = ActionEvent | JoinEvent | LeaveEvent
+PlayerEvent = ActionEvent
 
 
 class GameClient:
@@ -45,14 +43,26 @@ class GameClient:
     async def connect(self) -> "ConnectedGameClient":
         uri = f"ws://{self.host}:{self.port}/game"
         connection = await websockets.connect(uri)
-        return ConnectedGameClient(connection, self.strategy)
+        client = ConnectedGameClient(connection, self.strategy)
+        match (await client.receive_event()).event:
+            case AssignPlayerId(player_id=player_id):
+                client.player_id = player_id
+            case event:
+                raise ValueError(f"Expected 'AssignPlayerId' event, but got '{event}'")
+        return client
 
 
-class ConnectedGameClient(GameClient):
-    def __init__(self, connection: websockets.WebSocketClientProtocol, strategy: strategy.Strategy):
+class ConnectedGameClient:
+    def __init__(
+        self,
+        connection: websockets.WebSocketClientProtocol,
+        strategy: strategy.Strategy,
+        player_id: game.PlayerId | None = None,
+    ):
         self.connection = connection
         self.strategy = strategy
-        self.game_state: game.GameState | None = None
+        self.game_state = None
+        self.player_id = player_id
 
     async def send_event(self, player_event: PlayerEvent) -> None:
         await self.connection.send(player_event.model_dump_json())

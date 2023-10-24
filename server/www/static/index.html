@@ -16,13 +16,15 @@
 
         const uri = 'ws://' + location.host + '/game';
         const ws = new WebSocket(uri);
-        ws.onopen = function () { console.log('Connected'); };
-        ws.onclose = function () { console.log('Disconnected'); };
-
+        var my_id = null;
         var bodies = {};
+
 
         function handleEvent(event) {
             switch (event.event.event_type) {
+                case 'AssignPlayerId':
+                    my_id = event.event.player_id;
+                    break;
                 case 'UpdateState':
                     handleUpdateEvent(event.event);
                     break;
@@ -39,33 +41,34 @@
             ctx.fillStyle = '#000033';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            for (const player of Object.values(event.new_state.players)) {
-                if (!player.is_alive) {
-                    continue;
-                }
-
-                if (!bodies[player.id]) {
-                    bodies[player.id] = [];
+            for (const [player_id, player] of Object.entries(event.new_state.players)) {
+                if (!bodies[player_id]) {
+                    bodies[player_id] = [];
                 }
 
                 for (const blob of player.body) {
-                    bodies[player.id].push(blob);
+                    bodies[player_id].push(blob);
                 }
 
-                for (const blob of bodies[player.id]) {
+                if (player_id == my_id) {
+                    ctx.fillStyle = '#ff0000';
+                } else {
                     ctx.fillStyle = '#00ccff';
+                }
+                for (const blob of bodies[player_id]) {
                     ctx.beginPath();
                     ctx.arc(blob.position.x, blob.position.y, blob.size, 0, 2 * Math.PI);
                     ctx.fill();
                 }
 
-
-                // Give head different color
-                head = player.head;
-                ctx.fillStyle = '#ffcc00';
-                ctx.beginPath();
-                ctx.arc(head.position.x, head.position.y, head.size * 2, 0, 2 * Math.PI);
-                ctx.fill();
+                // Draw heads of alive players
+                if (player.is_alive) {
+                    head = player.head;
+                    ctx.fillStyle = '#ffcc00';
+                    ctx.beginPath();
+                    ctx.arc(head.position.x, head.position.y, head.size, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
             }
 
         }
@@ -100,6 +103,12 @@
 
             if (oldAction != action) sendAction(ws, action);
         }
+
+        ws.onopen = function () {
+            console.log('Connected');
+            ws.send('{"event_type": "GetId"}');
+        };
+        ws.onclose = function () { console.log('Disconnected'); };
 
         document.addEventListener('keydown', function (event) {
             switch (event.key) {
