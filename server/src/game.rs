@@ -7,8 +7,9 @@ pub trait GameState<const N: usize> {
     type PlayerId;
     type GameAction;
     type StateDiff;
+    type Config;
 
-    fn init_game(&mut self);
+    fn init_game(config: &Self::Config) -> Self;
     fn get_player_ids(&self) -> [Self::PlayerId; N];
     fn update_game_state(&mut self);
     fn handle_player_action(&mut self, player_id: Self::PlayerId, action: Self::GameAction);

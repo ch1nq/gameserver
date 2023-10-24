@@ -16,6 +16,7 @@ static NEXT_PLAYER_ID: AtomicUsize = AtomicUsize::new(1);
 
 #[derive(Clone)]
 pub struct GameServer<const N: usize, T: game::GameState<N>> {
+    game_config: T::Config,
     lock: Arc<tokio::sync::RwLock<GameSession<N, T>>>,
 }
 
@@ -59,11 +60,20 @@ enum GameSessionStatus<const N: usize, T: game::GameState<N>> {
 
 type ClientId = usize;
 
-#[derive(Default)]
 struct GameSession<const N: usize, T: game::GameState<N>> {
     player_channels: HashMap<ClientId, tokio::sync::mpsc::UnboundedSender<ws::Message>>,
     player_ids: HashMap<ClientId, T::PlayerId>,
     game_status: GameSessionStatus<N, T>,
+}
+
+impl<const N: usize, T: game::GameState<N>> Default for GameSession<N, T> {
+    fn default() -> Self {
+        Self {
+            player_channels: HashMap::new(),
+            player_ids: HashMap::new(),
+            game_status: GameSessionStatus::WaitingForPlayers,
+        }
+    }
 }
 
 impl<const N: usize, T> GameSession<N, T>
@@ -95,25 +105,23 @@ where
     }
 }
 
-impl<const N: usize, T> GameServer<N, T>
-where
-    T: game::GameState<N> + Default,
-    T::PlayerId: Default,
-{
-    pub fn new() -> Self {
+impl<const N: usize, T: game::GameState<N>> GameServer<N, T> {
+    pub fn new(game_config: T::Config) -> Self {
         Self {
-            lock: Default::default(),
+            game_config,
+            lock: Arc::new(tokio::sync::RwLock::new(GameSession::default())),
         }
     }
 }
 
 impl<const N: usize, T> GameServer<N, T>
 where
-    T: game::GameState<N> + Default + Serialize + Send + Sync + Clone + 'static,
+    T: game::GameState<N> + Serialize + Send + Sync + Clone + 'static,
     T::PlayerId: std::hash::Hash + std::fmt::Debug + Copy,
     T::PlayerId: Serialize + Send + Sync,
     T::StateDiff: Serialize + Send,
     T::GameAction: Serialize + DeserializeOwned + Send,
+    T::Config: Clone + Send + Sync,
 {
     pub async fn host_game(self) {
         pretty_env_logger::init();
@@ -182,8 +190,7 @@ where
         // Start the game once we have enough players
         if game_session.player_channels.len() >= N {
             log::info!("All players connected, starting game");
-            let mut game_state = T::default();
-            game_state.init_game();
+            let game_state = T::init_game(&self.game_config);
             game_session.player_ids = game_session
                 .player_channels
                 .iter()

@@ -4,8 +4,22 @@ use std::collections::HashMap;
 
 use crate::game;
 
-const GAME_WIDTH: f32 = 500.0;
-const GAME_HEIGHT: f32 = 500.0;
+#[derive(Debug, Clone)]
+pub struct AchtungConfig {
+    pub arena_width: u32,
+    pub arena_height: u32,
+    pub edge_wrapping: bool,
+}
+
+impl Default for AchtungConfig {
+    fn default() -> Self {
+        Self {
+            arena_width: 1000,
+            arena_height: 200,
+            edge_wrapping: false,
+        }
+    }
+}
 
 pub type PlayerId = usize;
 
@@ -40,10 +54,12 @@ struct Blob {
     position: Position,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Achtung {
     timestep: u64,
     players: HashMap<PlayerId, Player>,
+    #[serde(skip)]
+    config: AchtungConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,7 +84,7 @@ struct Player {
 const COLLISION_SELF_IGNORE_N_LATEST: usize = 10;
 
 impl Player {
-    fn new<R: rand::Rng + ?Sized>(rng: &mut R) -> Self {
+    fn new<R: rand::Rng + ?Sized>(rng: &mut R, config: &AchtungConfig) -> Self {
         let initial_size = 3.0;
         Self {
             is_alive: true,
@@ -76,8 +92,10 @@ impl Player {
                 id: 0,
                 size: initial_size,
                 position: Position {
-                    x: rand::distributions::Uniform::new(0.0, GAME_WIDTH).sample(rng),
-                    y: rand::distributions::Uniform::new(0.0, GAME_HEIGHT).sample(rng),
+                    x: rand::distributions::Uniform::new(0.0, config.arena_width as f32)
+                        .sample(rng),
+                    y: rand::distributions::Uniform::new(0.0, config.arena_height as f32)
+                        .sample(rng),
                 },
             },
             body: vec![],
@@ -128,21 +146,32 @@ impl Player {
                 distance < head.size + blob.size
             })
     }
+
+    fn wall_collision(&self, config: &AchtungConfig) -> bool {
+        let head = &self.head;
+        head.position.x < 0.0
+            || head.position.x > config.arena_width as f32
+            || head.position.y < 0.0
+            || head.position.y > config.arena_height as f32
+    }
 }
 
 impl<const N: usize> game::GameState<N> for Achtung {
     type PlayerId = PlayerId;
     type GameAction = GameAction;
     type StateDiff = Achtung;
+    type Config = AchtungConfig;
 
-    fn init_game(&mut self) {
+    fn init_game(config: &AchtungConfig) -> Self {
         let mut rng = rand::thread_rng();
-
-        // Spawn players
-        self.players = (0..N)
-            .into_iter()
-            .map(|id| (id, Player::new(&mut rng)))
-            .collect();
+        Self {
+            timestep: 0,
+            players: (0..N)
+                .into_iter()
+                .map(|id| (id, Player::new(&mut rng, &config)))
+                .collect(),
+            config: config.clone(),
+        }
     }
 
     fn get_player_ids(&self) -> [Self::PlayerId; N] {
@@ -203,19 +232,26 @@ impl<const N: usize> game::GameState<N> for Achtung {
                 player.body.push(player.head.clone());
             }
             let wrap = |x: f32, max: f32| (x % max + max) % max;
-            player.head = Blob {
-                id: player.head.id + 1,
-                size: player.size,
-                position: Position {
+            let pos = match self.config.edge_wrapping {
+                true => Position {
                     x: wrap(
                         player.head.position.x + player.direction.radians.cos() * player.speed,
-                        GAME_WIDTH,
+                        self.config.arena_width as f32,
                     ),
                     y: wrap(
                         player.head.position.y + player.direction.radians.sin() * player.speed,
-                        GAME_HEIGHT,
+                        self.config.arena_height as f32,
                     ),
                 },
+                false => Position {
+                    x: player.head.position.x + player.direction.radians.cos() * player.speed,
+                    y: player.head.position.y + player.direction.radians.sin() * player.speed,
+                },
+            };
+            player.head = Blob {
+                id: player.head.id + 1,
+                size: player.size,
+                position: pos,
             };
         }
         // Check for collisions
@@ -230,9 +266,9 @@ impl<const N: usize> game::GameState<N> for Achtung {
             })
             .map(|((id1, p1), (id2, p2))| {
                 if id1 == id2 {
-                    (id1, p1.self_collision())
+                    (id1, p1.self_collision() || p1.wall_collision(&self.config))
                 } else {
-                    (id1, p1.collision(p2))
+                    (id1, p1.collision(p2) || p1.wall_collision(&self.config))
                 }
             })
             .filter_map(|(id, col)| match col {
