@@ -8,9 +8,12 @@ import game_client
 
 
 class RandomStrategy(strategy.Strategy):
-    def take_action(self, _game_state: game.GameState) -> game.GameAction | None:
+    def take_action(self, _game_state: game.GameState, player_id: game.PlayerId) -> game.GameAction | None:
+        action = random.choice(list(game.GameAction))
         time.sleep(abs(random.gauss(0.2, 0.05)))
-        return random.choice(list(game.GameAction))
+        # if player_id == 1:
+        #     print("Taking action ", action)
+        return action
 
 
 async def main():
@@ -20,8 +23,12 @@ async def main():
 
 
 async def run_clients() -> None:
-    # run three clients concurrently
-    await asyncio.gather(*[main() for _ in range(7)])
+    # run multiple clients concurrently
+    tasks = []
+    for _ in range(4):
+        tasks.append(asyncio.create_task(main()))
+
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":

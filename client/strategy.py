@@ -6,7 +6,7 @@ import game
 
 class Strategy(abc.ABC):
     @abc.abstractmethod
-    def take_action(self, game_state: game.GameState) -> game.GameAction | None:
+    def take_action(self, game_state: game.GameState, player_id: game.PlayerId) -> game.GameAction | None:
         ...
 
 
@@ -17,9 +17,9 @@ class SlowStrategy(Strategy):
         self.strategy = strategy
         self.action_job: Future[game.GameAction | None] | None = None
 
-    def take_action(self, game_state: game.GameState) -> game.GameAction | None:
+    def take_action(self, game_state: game.GameState, player_id: game.PlayerId) -> game.GameAction | None:
         if self.action_job is None:
-            self.action_job = ThreadPoolExecutor().submit(self.strategy.take_action, game_state)
+            self.action_job = ThreadPoolExecutor().submit(self.strategy.take_action, game_state, player_id)
             return None
         elif self.action_job.done():
             action = self.action_job.result()

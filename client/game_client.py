@@ -31,6 +31,10 @@ class ActionEvent(pydantic.BaseModel):
     action: game.GameAction
 
 
+class RequestUpdate(pydantic.BaseModel):
+    event_type: Literal["RequestUpdate"] = "RequestUpdate"
+
+
 PlayerEvent = ActionEvent
 
 
@@ -41,7 +45,7 @@ class GameClient:
         self.strategy = strategy
 
     async def connect(self) -> "ConnectedGameClient":
-        uri = f"ws://{self.host}:{self.port}/game"
+        uri = f"ws://{self.host}:{self.port}/join/player"
         connection = await websockets.connect(uri)
         client = ConnectedGameClient(connection, self.strategy)
         match (await client.receive_event()).event:
@@ -83,7 +87,7 @@ class ConnectedGameClient:
             match event.event:
                 case UpdateState(new_state=state):
                     self.game_state = self.game_state.merge_with_diff(state) if self.game_state else state
-                    if action := self.strategy.take_action(state):
+                    if self.player_id is not None and (action := self.strategy.take_action(state, self.player_id)):
                         await self.send_event(ActionEvent(action=action))
                 case GameOver(winner=player_id):
                     print(f"Game over! {player_id} won!")

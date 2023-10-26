@@ -1,6 +1,6 @@
 use rand::prelude::Distribution;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::game;
 
@@ -254,30 +254,20 @@ impl<const N: usize> game::GameState<N> for Achtung {
                 position: pos,
             };
         }
-        // Check for collisions
-        let players_to_kill = self
-            .players
-            .iter()
-            .filter(|(_, p)| p.is_alive)
-            .flat_map(|(id1, p1)| {
-                self.players
-                    .iter()
-                    .map(move |(id2, p2)| ((*id1, p1), (*id2, p2)))
-            })
-            .map(|((id1, p1), (id2, p2))| {
-                if id1 == id2 {
-                    (id1, p1.self_collision() || p1.wall_collision(&self.config))
-                } else {
-                    (id1, p1.collision(p2) || p1.wall_collision(&self.config))
+        let mut players_to_kill = HashSet::new();
+        for (id1, p1) in self.players.iter().filter(|(_, p)| p.is_alive) {
+            if p1.wall_collision(&self.config) || p1.self_collision() {
+                players_to_kill.insert(*id1);
+                continue;
+            }
+            for (id2, p2) in self.players.iter() {
+                if id1 != id2 && p1.collision(p2) {
+                    players_to_kill.insert(*id1);
                 }
-            })
-            .filter_map(|(id, col)| match col {
-                true => Some(id),
-                false => None,
-            })
-            .collect::<Vec<_>>();
-        for player_id in players_to_kill {
-            self.kill_player(player_id);
+            }
+        }
+        for id in players_to_kill {
+            self.kill_player(id);
         }
     }
 }

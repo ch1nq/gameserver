@@ -11,8 +11,28 @@ use std::sync::{
 use warp::ws;
 use warp::Filter;
 
-/// Our global unique player id counter.
-static NEXT_PLAYER_ID: AtomicUsize = AtomicUsize::new(1);
+type ClientId = usize;
+
+/// Our global unique client id counter.
+static NEXT_CLIENT_ID: AtomicUsize = AtomicUsize::new(1);
+
+#[derive(Clone, Copy)]
+enum ClientType {
+    Player,
+    Observer,
+}
+
+impl std::str::FromStr for ClientType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "player" => Ok(Self::Player),
+            "observer" => Ok(Self::Observer),
+            _ => Err(format!("invalid client type: {}", s)),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct GameServer<const N: usize, T: game::GameState<N>> {
@@ -50,7 +70,7 @@ where
     event: GameEvent<N, T>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Eq, PartialEq)]
 enum GameSessionStatus<const N: usize, T: game::GameState<N>> {
     #[default]
     WaitingForPlayers,
@@ -58,9 +78,8 @@ enum GameSessionStatus<const N: usize, T: game::GameState<N>> {
     GameOver,
 }
 
-type ClientId = usize;
-
 struct GameSession<const N: usize, T: game::GameState<N>> {
+    oberserver_channels: HashMap<ClientId, tokio::sync::mpsc::UnboundedSender<ws::Message>>,
     player_channels: HashMap<ClientId, tokio::sync::mpsc::UnboundedSender<ws::Message>>,
     player_ids: HashMap<ClientId, T::PlayerId>,
     game_status: GameSessionStatus<N, T>,
@@ -69,6 +88,7 @@ struct GameSession<const N: usize, T: game::GameState<N>> {
 impl<const N: usize, T: game::GameState<N>> Default for GameSession<N, T> {
     fn default() -> Self {
         Self {
+            oberserver_channels: HashMap::new(),
             player_channels: HashMap::new(),
             player_ids: HashMap::new(),
             game_status: GameSessionStatus::WaitingForPlayers,
@@ -87,12 +107,17 @@ where
     fn reset(&mut self) {
         log::info!("resetting game");
         self.player_channels.clear();
+        self.oberserver_channels.clear();
         self.game_status = GameSessionStatus::WaitingForPlayers;
     }
 
     fn broadcast_event(&self, event: GameEvent<N, T>) {
         let message = ws::Message::text(serde_json::to_string(&Event { event }).unwrap());
-        for channel in self.player_channels.values() {
+        for channel in self
+            .player_channels
+            .values()
+            .chain(self.oberserver_channels.values())
+        {
             channel.send(message.clone()).unwrap();
         }
     }
@@ -127,47 +152,42 @@ where
         pretty_env_logger::init();
 
         let index = warp::path::end().and(warp::fs::file("www/static/index.html"));
-
-        // GET /game -> websocket upgrade
-        let game = warp::path("game")
-            // The `ws()` filter will prepare Websocket handshake...
+        let ws_routes = warp::path!("join" / ClientType)
+            .and(warp::path::end())
             .and(warp::ws())
             .and(warp::any().map(move || self.clone()))
-            .map(|ws: warp::ws::Ws, state_lock: Self| {
-                // This will call our function if the handshake succeeds.
-                ws.on_upgrade(move |socket| state_lock.player_connected(socket))
+            .map(|client_type: ClientType, ws: warp::ws::Ws, server: Self| {
+                ws.on_upgrade(move |socket| server.client_connected(client_type, socket))
             });
 
-        warp::serve(index.or(game))
+        warp::serve(index.or(ws_routes))
             .run(([127, 0, 0, 1], 3030))
             .await;
     }
 
-    async fn player_connected(mut self, ws: ws::WebSocket) {
+    async fn client_connected(mut self, client_type: ClientType, ws: ws::WebSocket) {
         let mut game_session = self.lock.write().await;
 
-        match game_session.game_status {
-            GameSessionStatus::WaitingForPlayers => {}
-            _ => {
-                log::warn!("player tried to connect to a game that is not waiting for players");
+        match (&game_session.game_status, &client_type) {
+            (GameSessionStatus::InProgress(_), ClientType::Player) => {
+                log::warn!("client tried to join a game that is in progress");
                 ws.close().await.unwrap();
                 return;
             }
+            (GameSessionStatus::GameOver, _) => {
+                log::warn!("client tried to connect to a game that is over");
+                ws.close().await.unwrap();
+                return;
+            }
+            _ => {}
         }
 
-        // Use a counter to assign a new unique ID for this user.
-        let client_id = NEXT_PLAYER_ID.fetch_add(1, Ordering::Relaxed);
-
+        let client_id = NEXT_CLIENT_ID.fetch_add(1, Ordering::Relaxed);
         log::info!("Client connected: {}", client_id);
 
-        // Split the socket into a sender and receiver of messages.
         let (mut client_ws_tx, mut client_ws_rx) = ws.split();
-
-        // Use an unbounded channel to handle buffering and flushing of messages
-        // to the websocket...
         let (internal_tx, internal_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut internal_rx = tokio_stream::wrappers::UnboundedReceiverStream::new(internal_rx);
-
         tokio::task::spawn(async move {
             while let Some(message) = internal_rx.next().await {
                 client_ws_tx
@@ -179,66 +199,78 @@ where
             }
         });
 
-        // Save the sender in our list of connected users.
-        game_session.player_channels.insert(client_id, internal_tx);
+        let channel = match client_type {
+            ClientType::Player => &mut game_session.player_channels,
+            ClientType::Observer => &mut game_session.oberserver_channels,
+        };
+        channel.insert(client_id, internal_tx);
 
-        log::info!(
-            "number of players connected: {}",
-            game_session.player_channels.len()
-        );
-
-        // Start the game once we have enough players
-        if game_session.player_channels.len() >= N {
-            log::info!("All players connected, starting game");
-            let game_state = T::init_game(&self.game_config);
-            game_session.player_ids = game_session
-                .player_channels
-                .iter()
-                .zip(game_state.get_player_ids().into_iter())
-                .map(|((&client_id, channel), player_id)| {
-                    let message = ws::Message::text(
-                        serde_json::to_string(&Event {
-                            event: GameEvent::<N, T>::AssignPlayerId { player_id },
-                        })
-                        .unwrap(),
-                    );
-                    channel.send(message).unwrap();
-                    (client_id, player_id)
-                })
-                .collect();
-            game_session.game_status = GameSessionStatus::InProgress(game_state);
-
-            let tick_interval = tokio::time::Duration::from_millis(16);
-            tokio::task::spawn(self.clone().game_loop(tick_interval));
+        match client_type {
+            ClientType::Player => {
+                if game_session.player_channels.len() == N {
+                    log::info!("All players connected, starting game");
+                    self.start_game(&mut game_session).await;
+                }
+            }
+            ClientType::Observer => {}
         }
 
         let _ = game_session.downgrade();
 
-        // Return a `Future` that is basically a state machine managing
-        // this specific players connection.
         while let Some(result) = client_ws_rx.next().await {
-            let msg = match result {
-                Ok(msg) => msg,
-                Err(e) => {
-                    log::error!("websocket error(player={}): {}", client_id, e);
+            match result {
+                Ok(msg) if msg.is_close() => break,
+                Ok(msg) if msg.is_text() => match client_type {
+                    ClientType::Player => self.handle_message(client_id, msg).await,
+                    ClientType::Observer => {}
+                },
+                Ok(_) => {}
+                Err(error) => {
+                    log::error!("websocket error(client={}): {}", client_id, error);
                     break;
                 }
-            };
-            if msg.is_close() {
-                break;
             }
-            self.handle_message(client_id, msg).await;
         }
 
-        // the above stream will keep processing as long as the user stays
-        // connected. Once they disconnect, then...
-        self.player_disconnected(client_id).await;
+        match client_type {
+            ClientType::Player => self.player_disconnected(client_id).await,
+            ClientType::Observer => self.observer_disconnected(client_id).await,
+        }
+    }
+
+    async fn start_game(&self, game_session: &mut GameSession<N, T>) {
+        let game_state = T::init_game(&self.game_config);
+        game_session.player_ids = game_session
+            .player_channels
+            .iter()
+            .zip(game_state.get_player_ids().into_iter())
+            .map(|((&client_id, channel), player_id)| {
+                let message = ws::Message::text(
+                    serde_json::to_string(&Event {
+                        event: GameEvent::<N, T>::AssignPlayerId { player_id },
+                    })
+                    .unwrap(),
+                );
+                channel.send(message).unwrap();
+                (client_id, player_id)
+            })
+            .collect();
+        game_session.game_status = GameSessionStatus::InProgress(game_state);
+
+        let tick_interval = tokio::time::Duration::from_millis(16);
+        tokio::task::spawn(self.clone().game_loop(tick_interval));
     }
 
     async fn game_loop(self, tick_interval: tokio::time::Duration) {
         loop {
             let mut game_session = self.lock.write().await;
-            let game_state = game_session.get_game_state().expect("game state not found");
+            let game_state = match game_session.get_game_state() {
+                Some(game_state) => game_state,
+                None => {
+                    log::info!("game ended, stopping game loop");
+                    return;
+                }
+            };
             let old_game_state = game_state.clone();
 
             // Update the game state
@@ -269,17 +301,24 @@ where
         }
     }
 
+    async fn observer_disconnected(&mut self, client_id: ClientId) {
+        log::info!("observer disconnect: {}", client_id);
+        let mut game_session = self.lock.write().await;
+        game_session.oberserver_channels.remove(&client_id);
+    }
+
     async fn player_disconnected(&mut self, client_id: ClientId) {
         log::info!("gamer disconnect: {}", client_id);
         let mut game_session = self.lock.write().await;
         game_session.player_channels.remove(&client_id);
-        let player_id = *game_session
-            .player_ids
-            .get(&client_id)
-            .expect("player id should exist");
-        game_session.get_game_state().map(|game_state| {
-            game_state.handle_player_leave(player_id);
-        });
+        match game_session.player_ids.get(&client_id) {
+            Some(&player_id) => {
+                game_session
+                    .get_game_state()
+                    .map(|game_state| game_state.handle_player_leave(player_id));
+            }
+            None => {}
+        };
     }
 
     async fn handle_message(&mut self, client_id: ClientId, msg: ws::Message) {
