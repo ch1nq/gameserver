@@ -1,10 +1,10 @@
-import asyncio
 from typing import Literal
-import websockets
-import pydantic
 
+import attrs
 import game
+import pydantic
 import strategy
+import websockets
 
 
 class GameOver(pydantic.BaseModel):
@@ -22,8 +22,11 @@ class AssignPlayerId(pydantic.BaseModel):
     player_id: game.PlayerId
 
 
+GameEventT = GameOver | UpdateState | AssignPlayerId
+
+
 class GameEvent(pydantic.BaseModel):
-    event: GameOver | UpdateState | AssignPlayerId = pydantic.Field(..., discriminator="event_type")
+    event: GameEventT = pydantic.Field(..., discriminator="event_type")
 
 
 class ActionEvent(pydantic.BaseModel):
@@ -31,65 +34,59 @@ class ActionEvent(pydantic.BaseModel):
     action: game.GameAction
 
 
-class RequestUpdate(pydantic.BaseModel):
+class RequestUpdateEvent(pydantic.BaseModel):
     event_type: Literal["RequestUpdate"] = "RequestUpdate"
 
 
-PlayerEvent = ActionEvent
+PlayerEventT = ActionEvent | RequestUpdateEvent
 
 
+@attrs.define(kw_only=True)
 class GameClient:
-    def __init__(self, host: str, port: int, strategy: strategy.Strategy):
-        self.host = host
-        self.port = port
-        self.strategy = strategy
+    game_strategy: strategy.Strategy = attrs.field()
+    request_updates: bool = attrs.field(default=False)
 
-    async def connect(self) -> "ConnectedGameClient":
-        uri = f"ws://{self.host}:{self.port}/join/player"
-        connection = await websockets.connect(uri)
-        client = ConnectedGameClient(connection, self.strategy)
-        match (await client.receive_event()).event:
-            case AssignPlayerId(player_id=player_id):
-                client.player_id = player_id
-            case event:
-                raise ValueError(f"Expected 'AssignPlayerId' event, but got '{event}'")
-        return client
+    async def connect(self, host: str, port: int) -> "ConnectedGameClient":
+        connection = await websockets.connect(f"ws://{host}:{port}/join/player")
+        return ConnectedGameClient(connection=connection, **attrs.asdict(self))
 
 
-class ConnectedGameClient:
-    def __init__(
-        self,
-        connection: websockets.WebSocketClientProtocol,
-        strategy: strategy.Strategy,
-        player_id: game.PlayerId | None = None,
-    ):
-        self.connection = connection
-        self.strategy = strategy
-        self.game_state = None
-        self.player_id = player_id
+@attrs.define(kw_only=True)
+class ConnectedGameClient(GameClient):
+    _connection: websockets.WebSocketClientProtocol = attrs.field()
+    _game_state: game.GameState = attrs.field(factory=game.GameState.default, init=False)
 
-    async def send_event(self, player_event: PlayerEvent) -> None:
-        await self.connection.send(player_event.model_dump_json())
+    async def send_event(self, player_event: PlayerEventT) -> None:
+        await self._connection.send(player_event.model_dump_json())
 
-    async def receive_event(self) -> GameEvent:
-        match await self.connection.recv():
+    async def receive_event(self) -> GameEventT:
+        match await self._connection.recv():
             case bytes() as data:
                 event_data = data.decode("utf-8")
             case str() as data:
                 event_data = data
             case data:
                 raise ValueError(f"Unexpected type {type(data)}")
-        return GameEvent.model_validate_json(event_data)
+        return GameEvent.model_validate_json(event_data).event
 
     async def run(self) -> None:
+        # Expect server to assign us a player id before the game starts
+        match await self.receive_event():
+            case AssignPlayerId(player_id=id):
+                player_id = id
+            case event:
+                raise ValueError(f"Expected 'AssignPlayerId' event, but got '{event}'")
+
         while True:
-            event = await self.receive_event()
-            match event.event:
+            if self.request_updates:
+                await self.send_event(RequestUpdateEvent())
+            match await self.receive_event():
                 case UpdateState(new_state=state):
-                    self.game_state = self.game_state.merge_with_diff(state) if self.game_state else state
-                    if self.player_id is not None and (action := self.strategy.take_action(state, self.player_id)):
+                    self._game_state = self._game_state.merge_with_diff(state)
+                    action = self.game_strategy.take_action(state, player_id)
+                    if action is not None:
                         await self.send_event(ActionEvent(action=action))
                 case GameOver(winner=player_id):
                     print(f"Game over! {player_id} won!")
-                    await self.connection.close()
+                    await self._connection.close()
                     break

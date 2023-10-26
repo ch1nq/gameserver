@@ -3,8 +3,9 @@ use gameserver::server;
 
 #[tokio::main]
 async fn main() {
-    const NUMBER_OF_PLAYERS: usize = 4;
+    const NUMBER_OF_PLAYERS: usize = 8;
     server::GameServer::<NUMBER_OF_PLAYERS, games::achtung::Achtung>::new(
+        None, // Some(tokio::time::Duration::from_millis(16)),
         games::achtung::AchtungConfig {
             arena_width: 1000,
             arena_height: 1000,

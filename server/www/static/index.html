@@ -104,10 +104,7 @@
             if (oldAction != action) sendAction(ws, action);
         }
 
-        ws.onopen = function () {
-            console.log('Connected');
-            ws.send('{"event_type": "GetId"}');
-        };
+        ws.onopen = function () { console.log('Connected') };
         ws.onclose = function () { console.log('Disconnected'); };
 
         document.addEventListener('keydown', function (event) {

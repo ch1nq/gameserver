@@ -9,10 +9,18 @@ readme = "README.md"
 python = ">=3.10"
 pydantic = "^2.4.2"
 websockets = "^12.0"
+attrs = "^23.1.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^23.10.0"
 ruff = "^0.1.1"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.isort]
+# Use a single line after each import block.
+lines-after-imports = 1
 
 [build-system]
 requires = ["poetry-core"]

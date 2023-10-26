@@ -36,6 +36,7 @@ impl std::str::FromStr for ClientType {
 
 #[derive(Clone)]
 pub struct GameServer<const N: usize, T: game::GameState<N>> {
+    tick_interval: Option<tokio::time::Duration>,
     game_config: T::Config,
     lock: Arc<tokio::sync::RwLock<GameSession<N, T>>>,
 }
@@ -44,6 +45,7 @@ pub struct GameServer<const N: usize, T: game::GameState<N>> {
 #[serde(tag = "event_type")]
 enum PlayerEvent<const N: usize, T: game::GameState<N>> {
     Action { action: T::GameAction },
+    RequestUpdate,
 }
 
 #[derive(Serialize)]
@@ -98,14 +100,18 @@ impl<const N: usize, T: game::GameState<N>> Default for GameSession<N, T> {
 
 impl<const N: usize, T> GameSession<N, T>
 where
-    T: Serialize,
+    T: Serialize + Clone,
     T: game::GameState<N>,
-    T::PlayerId: Serialize,
+    T::PlayerId: Serialize + std::fmt::Debug + Copy,
     T::StateDiff: Serialize,
     T::GameAction: Serialize,
 {
     fn reset(&mut self) {
         log::info!("resetting game");
+        self.player_channels
+            .values()
+            .chain(self.oberserver_channels.values())
+            .for_each(|channel| channel.send(ws::Message::close()).unwrap());
         self.player_channels.clear();
         self.oberserver_channels.clear();
         self.game_status = GameSessionStatus::WaitingForPlayers;
@@ -128,11 +134,46 @@ where
             _ => None,
         }
     }
+
+    fn update_game_state(&mut self) -> Option<game::GameResult<T::PlayerId>> {
+        let game_state = match self.get_game_state() {
+            Some(game_state) => game_state,
+            None => {
+                log::warn!("game ended, cannot update game state");
+                return None;
+            }
+        };
+        let old_game_state = game_state.clone();
+
+        // Update the game state
+        game_state.update_game_state();
+
+        // Check if the game is over
+        if let Some(result) = game_state.get_game_result() {
+            self.game_status = GameSessionStatus::GameOver;
+            let winner = match &result {
+                game::GameResult::Winner(player_id) => Some(player_id),
+                game::GameResult::NoWinner => None,
+            };
+            log::info!("game over, winner: {:?}", winner);
+            self.broadcast_event(GameEvent::GameOver {
+                winner: winner.copied(),
+            });
+            self.reset();
+            Some(result)
+        } else {
+            // Send the updated game state to all players
+            let diff = old_game_state.diff(&game_state);
+            self.broadcast_event(GameEvent::UpdateState { new_state: diff });
+            None
+        }
+    }
 }
 
 impl<const N: usize, T: game::GameState<N>> GameServer<N, T> {
-    pub fn new(game_config: T::Config) -> Self {
+    pub fn new(tick_interval: Option<tokio::time::Duration>, game_config: T::Config) -> Self {
         Self {
+            tick_interval,
             game_config,
             lock: Arc::new(tokio::sync::RwLock::new(GameSession::default())),
         }
@@ -257,47 +298,17 @@ where
             .collect();
         game_session.game_status = GameSessionStatus::InProgress(game_state);
 
-        let tick_interval = tokio::time::Duration::from_millis(16);
-        tokio::task::spawn(self.clone().game_loop(tick_interval));
+        if let Some(tick_interval) = self.tick_interval {
+            tokio::task::spawn(self.clone().game_loop(tick_interval));
+        }
     }
 
     async fn game_loop(self, tick_interval: tokio::time::Duration) {
         loop {
-            let mut game_session = self.lock.write().await;
-            let game_state = match game_session.get_game_state() {
-                Some(game_state) => game_state,
-                None => {
-                    log::info!("game ended, stopping game loop");
-                    return;
-                }
-            };
-            let old_game_state = game_state.clone();
-
-            // Update the game state
-            game_state.update_game_state();
-
-            // Check if the game is over
-            match game_state.get_game_result() {
-                Some(result) => {
-                    game_session.game_status = GameSessionStatus::GameOver;
-                    let winner = match result {
-                        game::GameResult::Winner(player_id) => Some(player_id),
-                        game::GameResult::NoWinner => None,
-                    };
-                    log::info!("game over, winner: {:?}", winner);
-                    game_session.broadcast_event(GameEvent::GameOver { winner });
-                    game_session.reset();
-                    return;
-                }
-                None => {}
+            match self.lock.write().await.update_game_state() {
+                Some(_) => break,
+                None => tokio::time::sleep(tick_interval).await,
             }
-
-            // Send the updated game state to all players
-            let diff = old_game_state.diff(&game_state);
-            game_session.broadcast_event(GameEvent::UpdateState { new_state: diff });
-
-            // Wait for the next tick
-            tokio::time::sleep(tick_interval).await;
         }
     }
 
@@ -323,15 +334,15 @@ where
 
     async fn handle_message(&mut self, client_id: ClientId, msg: ws::Message) {
         let msg_text = match msg.to_str() {
-            Ok(s) => s,
+            Ok(s) => {
+                log::debug!("received message from player {}: {}", client_id, s);
+                s
+            }
             Err(_) => {
                 log::warn!("received non-text message from player: {}", client_id);
                 return;
             }
         };
-
-        log::info!("received message from player {}: {}", client_id, msg_text);
-
         let event: PlayerEvent<N, T> = match serde_json::from_str(msg_text) {
             Ok(event) => event,
             Err(error) => {
@@ -344,7 +355,6 @@ where
                 return;
             }
         };
-
         self.handle_player_event(client_id, event).await;
     }
 
@@ -359,6 +369,14 @@ where
                 Some(game_state) => game_state.handle_player_action(player_id, action),
                 None => log::warn!("player tried to send action to game that is not in progress"),
             },
+            PlayerEvent::RequestUpdate if self.tick_interval.is_some() => log::warn!(
+                "player {} requested tick not allowed when tick interval is set",
+                client_id
+            ),
+            PlayerEvent::RequestUpdate => {
+                log::debug!("player {} requested tick", client_id);
+                game_session.update_game_state();
+            }
         }
     }
 }

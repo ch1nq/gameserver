@@ -1,6 +1,6 @@
 import pydantic
 import enum
-from typing import Sequence, NewType
+from typing import NewType
 
 PlayerId = NewType("PlayerId", int)
 BlobId = NewType("BlobId", int)
@@ -44,7 +44,12 @@ class GameState(pydantic.BaseModel):
     timestep: int
     players: dict[PlayerId, Player]
 
+    @classmethod
+    def default(cls) -> "GameState":
+        return GameState(timestep=0, players={})
+
     def merge_with_diff(self, diff: "GameState") -> "GameState":
         for id, player in diff.players.items():
-            player.body.extend(self.players[id].body)
+            if id in self.players:
+                player.body.extend(self.players[id].body)
         return diff
