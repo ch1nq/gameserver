@@ -2,7 +2,7 @@ import json
 from typing import Literal
 
 import attrs
-import game
+import achtung
 import strategy
 import websockets
 import cattrs
@@ -11,25 +11,25 @@ import cattrs
 @attrs.define
 class GameOver:
     e: Literal["GameOver"]
-    winner: game.PlayerId
+    winner: achtung.PlayerId
 
 
 @attrs.define
 class UpdateState:
     e: Literal["UpdateState"]
-    new_state: game.GameStateDiff
+    diff: achtung.GameStateDiff
 
 
 @attrs.define
 class InitialState:
     e: Literal["InitialState"]
-    state: game.GameState
+    state: achtung.GameState
 
 
 @attrs.define
 class AssignPlayerId:
     e: Literal["AssignPlayerId"]
-    player_id: game.PlayerId
+    player_id: achtung.PlayerId
 
 
 GameEventT = GameOver | UpdateState | InitialState | AssignPlayerId
@@ -42,7 +42,7 @@ class GameEvent:
 
 @attrs.define
 class ActionEvent:
-    action: game.GameAction
+    action: achtung.GameAction
     e: Literal["Action"] = attrs.field(default="Action")
 
 
@@ -77,7 +77,8 @@ class ConnectedGameClient(GameClient):
     _connection: websockets.WebSocketClientProtocol = attrs.field()
 
     async def send_event(self, player_event: PlayerEventT) -> None:
-        await self._connection.send(serialize_player_event(player_event))
+        if self._connection.open:
+            await self._connection.send(serialize_player_event(player_event))
 
     async def receive_event(self) -> GameEventT:
         match await self._connection.recv():
@@ -94,19 +95,19 @@ class ConnectedGameClient(GameClient):
             case (AssignPlayerId(player_id=id), InitialState(state=initial_state)):
                 player_id = id
                 game_state = initial_state
-            case event:
-                raise ValueError(f"Expected 'AssignPlayerId' event, but got '{event}'")
+            case (event1, event2):
+                raise ValueError(f"Expected 'AssignPlayerId' followed by 'InitialState', but got '{event1}, {event2}'")
 
         while True:
             if self.request_updates:
                 await self.send_event(RequestUpdateEvent())
             match await self.receive_event():
-                case UpdateState(new_state=diff):
-                    game_state.merge_with_diff(diff)
+                case UpdateState(diff=state_diff):
+                    game_state.merge_with_diff(state_diff)
                     action = self.game_strategy.take_action(game_state, player_id)
                     if action is not None:
                         await self.send_event(ActionEvent(action=action))
                 case GameOver(winner=player_id):
-                    print(f"Game over! {player_id} won!")
+                    print(f"Game over! {player_id} won after {game_state.timestep} timesteps.")
                     await self._connection.close()
                     break

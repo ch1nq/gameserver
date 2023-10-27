@@ -1,12 +1,12 @@
 import abc
 from concurrent.futures import Future, ThreadPoolExecutor
 
-import game
+import achtung
 
 
 class Strategy(abc.ABC):
     @abc.abstractmethod
-    def take_action(self, game_state: game.GameState, player_id: game.PlayerId) -> game.GameAction | None:
+    def take_action(self, game_state: achtung.GameState, player_id: achtung.PlayerId) -> achtung.GameAction | None:
         ...
 
 
@@ -15,9 +15,9 @@ class SlowStrategy(Strategy):
 
     def __init__(self, strategy: Strategy):
         self.strategy = strategy
-        self.action_job: Future[game.GameAction | None] | None = None
+        self.action_job: Future[achtung.GameAction | None] | None = None
 
-    def take_action(self, game_state: game.GameState, player_id: game.PlayerId) -> game.GameAction | None:
+    def take_action(self, game_state: achtung.GameState, player_id: achtung.PlayerId) -> achtung.GameAction | None:
         if self.action_job is None:
             self.action_job = ThreadPoolExecutor().submit(self.strategy.take_action, game_state, player_id)
             return None

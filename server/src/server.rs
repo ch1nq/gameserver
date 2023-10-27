@@ -59,7 +59,7 @@ where
 {
     AssignPlayerId { player_id: T::PlayerId },
     InitialState { state: T },
-    UpdateState { new_state: T::StateDiff },
+    UpdateState { diff: T::StateDiff },
     GameOver { winner: Option<T::PlayerId> },
 }
 
@@ -101,25 +101,11 @@ impl<const N: usize, T: game::GameState<N>> Default for GameSession<N, T> {
 }
 
 fn encode_message<T: Serialize>(message: &T) -> ws::Message {
-    // let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    // encoder
-    //     .write_all(serde_json::to_string(message).unwrap().as_bytes())
-    //     .unwrap();
-    // let compressed = encoder.finish().unwrap();
-
-    // let compressed = smaz::compress(serde_json::to_string(message).unwrap().as_bytes());
-
-    // log::info!("compressed message to {:?}", compressed);
     ws::Message::binary(serde_json::to_string(message).unwrap().as_bytes())
 }
 
 fn decode_message<T: DeserializeOwned>(message: ws::Message) -> serde_json::Result<T> {
-    // let mut decoder = flate2::read::ZlibDecoder::new(message.as_bytes());
-    // let mut buffer = Vec::new();
-    // decoder.read_to_end(&mut buffer).unwrap();
-    // let decompressed = smaz::decompress(message.as_bytes()).unwrap();
-    let decompressed = message.as_bytes();
-    serde_json::from_slice(&decompressed)
+    serde_json::from_slice(&message.as_bytes())
 }
 
 impl<const N: usize, T> GameSession<N, T>
@@ -188,7 +174,7 @@ where
         } else {
             // Send the updated game state to all players
             let diff = old_game_state.diff(&game_state);
-            self.broadcast_event(GameEvent::UpdateState { new_state: diff });
+            self.broadcast_event(GameEvent::UpdateState { diff });
             None
         }
     }

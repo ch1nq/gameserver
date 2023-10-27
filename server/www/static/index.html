@@ -17,45 +17,46 @@
         const uri = 'ws://' + location.host + '/join/observer';
         const ws = new WebSocket(uri);
         var my_id = null;
-        var bodies = {};
+        var game_state = null;
 
-
-        function handleEvent(event) {
-            switch (event.event.event_type) {
-                case 'AssignPlayerId':
-                    my_id = event.event.player_id;
-                    break;
-                case 'UpdateState':
-                    handleUpdateEvent(event.event);
-                    break;
-                case 'GameOver':
-                    handleGameOverEvent(event.event);
-                    break;
-            }
+        function handleInitialStateEvent(event) {
+            game_state = event.state;
+            drawGameState();
         }
 
-        function handleUpdateEvent(event) {
+        function handleUpdateStateEvent(event) {
+            for (const [player_id, player_diff] of Object.entries(event.diff.players)) {
+                if (player_diff.body == null) continue;
+                for (const blob of player_diff.body)
+                    game_state.players[player_id].body.push(blob);
+                // TODO: Update other fields
+            }
+            drawGameState();
+        }
+
+        function handleGameOverEvent(event) {
+            ctx.font = "24px serif";
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText("Winner: " + event.winner, 40, 40);
+        }
+
+
+        function drawGameState() {
+            if (game_state == null) return;
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             // dark blue background
             ctx.fillStyle = '#000033';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            for (const [player_id, player] of Object.entries(event.new_state.players)) {
-                if (!bodies[player_id]) {
-                    bodies[player_id] = [];
-                }
-
-                for (const blob of player.body) {
-                    bodies[player_id].push(blob);
-                }
-
+            for (const [player_id, player] of Object.entries(game_state.players)) {
                 if (player_id == my_id) {
                     ctx.fillStyle = '#ff0000';
                 } else {
                     ctx.fillStyle = '#00ccff';
                 }
-                for (const blob of bodies[player_id]) {
+                for (const blob of player.body) {
                     ctx.beginPath();
                     ctx.arc(blob.position.x, blob.position.y, blob.size, 0, 2 * Math.PI);
                     ctx.fill();
@@ -73,14 +74,24 @@
 
         }
 
-        function handleGameOverEvent(event) {
-            ctx.font = "24px serif";
-            ctx.fillStyle = "#ffffff";
-            ctx.fillText("Winner: " + event.winner, 40, 40);
-        }
 
-        ws.onmessage = function (msg) {
-            handleEvent(JSON.parse(msg.data));
+        ws.onmessage = async function (msg) {
+            const data = await msg.data.text();
+            const event = JSON.parse(data).event;
+            switch (event.e) {
+                case 'InitialState':
+                    handleInitialStateEvent(event);
+                    break;
+                case 'AssignPlayerId':
+                    my_id = event.player_id;
+                    break;
+                case 'UpdateState':
+                    handleUpdateStateEvent(event);
+                    break;
+                case 'GameOver':
+                    handleGameOverEvent(event);
+                    break;
+            }
         };
 
         function sendAction(ws, action) {
@@ -104,6 +115,7 @@
             if (oldAction != action) sendAction(ws, action);
         }
 
+        ws.binaryType = "blob";
         ws.onopen = function () { console.log('Connected') };
         ws.onclose = function () { console.log('Disconnected'); };
 

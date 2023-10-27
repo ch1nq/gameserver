@@ -51,6 +51,7 @@ class GameState:
     players: dict[PlayerId, Player]
 
     def merge_with_diff(self, diff: "GameStateDiff") -> None:
+        self.timestep = diff.timestep
         for id, player_diff in diff.players.items():
             match (self.players.get(id), player_diff.body):
                 case (None, _) | (_, None):
