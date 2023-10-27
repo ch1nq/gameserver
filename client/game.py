@@ -1,4 +1,4 @@
-import pydantic
+import attrs
 import enum
 from typing import NewType
 
@@ -6,28 +6,33 @@ PlayerId = NewType("PlayerId", int)
 BlobId = NewType("BlobId", int)
 
 
-class Angle(pydantic.BaseModel):
+@attrs.define
+class Angle:
     radians: float
 
 
-class Position(pydantic.BaseModel):
+@attrs.define
+class Position:
     x: float
     y: float
 
 
-class Blob(pydantic.BaseModel):
+@attrs.define
+class Blob:
     id: BlobId
     size: float
     position: Position
 
 
+@enum.unique
 class GameAction(enum.Enum):
     LEFT = "Left"
     RIGHT = "Right"
     FORWARD = "Forward"
 
 
-class Player(pydantic.BaseModel):
+@attrs.define
+class Player:
     is_alive: bool
     head: Blob
     body: list[Blob]
@@ -40,16 +45,36 @@ class Player(pydantic.BaseModel):
     skip_duration: int
 
 
-class GameState(pydantic.BaseModel):
+@attrs.define
+class GameState:
     timestep: int
     players: dict[PlayerId, Player]
 
-    @classmethod
-    def default(cls) -> "GameState":
-        return GameState(timestep=0, players={})
+    def merge_with_diff(self, diff: "GameStateDiff") -> None:
+        for id, player_diff in diff.players.items():
+            match (self.players.get(id), player_diff.body):
+                case (None, _) | (_, None):
+                    continue
+                case (player, body_diff):
+                    player.body.extend(body_diff)
+            # TODO: handle other fields
 
-    def merge_with_diff(self, diff: "GameState") -> "GameState":
-        for id, player in diff.players.items():
-            if id in self.players:
-                player.body.extend(self.players[id].body)
-        return diff
+
+@attrs.define
+class PlayerDiff:
+    is_alive: bool | None = None
+    head: Blob | None = None
+    body: list[Blob] | None = None
+    direction: Angle | None = None
+    speed: float | None = None
+    turning_speed: float | None = None
+    size: float | None = None
+    action: GameAction | None = None
+    skip_frequency: int | None = None
+    skip_duration: int | None = None
+
+
+@attrs.define
+class GameStateDiff:
+    timestep: int
+    players: dict[PlayerId, PlayerDiff]

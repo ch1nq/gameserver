@@ -8,6 +8,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
+use warp::filters::ws::Message;
 use warp::ws;
 use warp::Filter;
 
@@ -42,14 +43,14 @@ pub struct GameServer<const N: usize, T: game::GameState<N>> {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "event_type")]
+#[serde(tag = "e")]
 enum PlayerEvent<const N: usize, T: game::GameState<N>> {
     Action { action: T::GameAction },
     RequestUpdate,
 }
 
 #[derive(Serialize)]
-#[serde(tag = "event_type")]
+#[serde(tag = "e")]
 enum GameEvent<const N: usize, T>
 where
     T: game::GameState<N> + Serialize,
@@ -57,6 +58,7 @@ where
     T::StateDiff: Serialize,
 {
     AssignPlayerId { player_id: T::PlayerId },
+    InitialState { state: T },
     UpdateState { new_state: T::StateDiff },
     GameOver { winner: Option<T::PlayerId> },
 }
@@ -98,6 +100,28 @@ impl<const N: usize, T: game::GameState<N>> Default for GameSession<N, T> {
     }
 }
 
+fn encode_message<T: Serialize>(message: &T) -> ws::Message {
+    // let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    // encoder
+    //     .write_all(serde_json::to_string(message).unwrap().as_bytes())
+    //     .unwrap();
+    // let compressed = encoder.finish().unwrap();
+
+    // let compressed = smaz::compress(serde_json::to_string(message).unwrap().as_bytes());
+
+    // log::info!("compressed message to {:?}", compressed);
+    ws::Message::binary(serde_json::to_string(message).unwrap().as_bytes())
+}
+
+fn decode_message<T: DeserializeOwned>(message: ws::Message) -> serde_json::Result<T> {
+    // let mut decoder = flate2::read::ZlibDecoder::new(message.as_bytes());
+    // let mut buffer = Vec::new();
+    // decoder.read_to_end(&mut buffer).unwrap();
+    // let decompressed = smaz::decompress(message.as_bytes()).unwrap();
+    let decompressed = message.as_bytes();
+    serde_json::from_slice(&decompressed)
+}
+
 impl<const N: usize, T> GameSession<N, T>
 where
     T: Serialize + Clone,
@@ -118,7 +142,7 @@ where
     }
 
     fn broadcast_event(&self, event: GameEvent<N, T>) {
-        let message = ws::Message::text(serde_json::to_string(&Event { event }).unwrap());
+        let message = encode_message(&Event { event });
         for channel in self
             .player_channels
             .values()
@@ -261,7 +285,7 @@ where
         while let Some(result) = client_ws_rx.next().await {
             match result {
                 Ok(msg) if msg.is_close() => break,
-                Ok(msg) if msg.is_text() => match client_type {
+                Ok(msg) if msg.is_binary() => match client_type {
                     ClientType::Player => self.handle_message(client_id, msg).await,
                     ClientType::Observer => {}
                 },
@@ -286,16 +310,16 @@ where
             .iter()
             .zip(game_state.get_player_ids().into_iter())
             .map(|((&client_id, channel), player_id)| {
-                let message = ws::Message::text(
-                    serde_json::to_string(&Event {
-                        event: GameEvent::<N, T>::AssignPlayerId { player_id },
-                    })
-                    .unwrap(),
-                );
+                let message = encode_message(&Event {
+                    event: GameEvent::<N, T>::AssignPlayerId { player_id },
+                });
                 channel.send(message).unwrap();
                 (client_id, player_id)
             })
             .collect();
+        game_session.broadcast_event(GameEvent::InitialState {
+            state: game_state.clone(),
+        });
         game_session.game_status = GameSessionStatus::InProgress(game_state);
 
         if let Some(tick_interval) = self.tick_interval {
@@ -332,26 +356,11 @@ where
         };
     }
 
-    async fn handle_message(&mut self, client_id: ClientId, msg: ws::Message) {
-        let msg_text = match msg.to_str() {
-            Ok(s) => {
-                log::debug!("received message from player {}: {}", client_id, s);
-                s
-            }
-            Err(_) => {
-                log::warn!("received non-text message from player: {}", client_id);
-                return;
-            }
-        };
-        let event: PlayerEvent<N, T> = match serde_json::from_str(msg_text) {
+    async fn handle_message(&mut self, client_id: ClientId, msg: Message) {
+        let event: PlayerEvent<N, T> = match decode_message(msg) {
             Ok(event) => event,
             Err(error) => {
-                log::warn!(
-                    "error in parsing event {} from player {}: {}",
-                    msg_text,
-                    client_id,
-                    error
-                );
+                log::warn!("error in parsing event {} from player {}", client_id, error);
                 return;
             }
         };

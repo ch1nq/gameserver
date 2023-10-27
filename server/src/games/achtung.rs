@@ -31,7 +31,7 @@ pub enum GameEvent {
     GameOver { winner: Option<PlayerId> },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum GameAction {
     Left,
     Right,
@@ -39,7 +39,7 @@ pub enum GameAction {
     // More like use item, etc.
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 struct Position {
     x: f32,
     y: f32,
@@ -47,7 +47,7 @@ struct Position {
 
 type BlobId = usize;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 struct Blob {
     id: BlobId,
     size: f32,
@@ -62,7 +62,7 @@ pub struct Achtung {
     config: AchtungConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 struct Angle {
     radians: f32,
 }
@@ -79,6 +79,36 @@ struct Player {
     action: GameAction,
     skip_frequency: u32,
     skip_duration: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AchtungDiff {
+    timestep: u64,
+    players: HashMap<PlayerId, PlayerDiff>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlayerDiff {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_alive: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    head: Option<Blob>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    body: Vec<Blob>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    direction: Option<Angle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speed: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    turning_speed: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    action: Option<GameAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_frequency: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_duration: Option<u32>,
 }
 
 const COLLISION_SELF_IGNORE_N_LATEST: usize = 10;
@@ -112,14 +142,26 @@ impl Player {
         }
     }
 
-    fn with_tail_diff(&self, other: &Player) -> Self {
-        let mut new_player = self.clone();
-        new_player.body = new_player
-            .body
-            .into_iter()
-            .filter(|b1| !other.body.iter().any(|b2| b1.id == b2.id))
-            .collect();
-        new_player
+    fn diff(&self, other: &Player) -> PlayerDiff {
+        // TODO: Make a macro for this
+        PlayerDiff {
+            is_alive: (self.is_alive != other.is_alive).then(|| self.is_alive),
+            head: (self.head != other.head).then(|| self.head),
+            body: self
+                .body
+                .iter()
+                .filter(|b1| !other.body.iter().any(|b2| b1.id == b2.id))
+                .copied()
+                .collect(),
+            direction: (self.direction != other.direction).then(|| self.direction),
+            speed: (self.speed != other.speed).then(|| self.speed),
+            turning_speed: (self.turning_speed != other.turning_speed).then(|| self.turning_speed),
+            size: (self.size != other.size).then(|| self.size),
+            action: (self.action != other.action).then(|| self.action),
+            skip_frequency: (self.skip_frequency != other.skip_frequency)
+                .then(|| self.skip_frequency),
+            skip_duration: (self.skip_duration != other.skip_duration).then(|| self.skip_duration),
+        }
     }
 
     // Checks if player_1's head is colliding with player_2's body or own body
@@ -159,7 +201,7 @@ impl Player {
 impl<const N: usize> game::GameState<N> for Achtung {
     type PlayerId = PlayerId;
     type GameAction = GameAction;
-    type StateDiff = Achtung;
+    type StateDiff = AchtungDiff;
     type Config = AchtungConfig;
 
     fn init_game(config: &AchtungConfig) -> Self {
@@ -183,14 +225,15 @@ impl<const N: usize> game::GameState<N> for Achtung {
             .expect("should have N players")
     }
 
-    fn diff(&self, other: &Achtung) -> Achtung {
-        let mut diff = self.clone();
-        diff.players = diff
-            .players
-            .into_iter()
-            .map(|(id, player)| (id, other.players.get(&id).unwrap().with_tail_diff(&player)))
-            .collect();
-        diff
+    fn diff(&self, other: &Achtung) -> AchtungDiff {
+        AchtungDiff {
+            timestep: self.timestep,
+            players: self
+                .players
+                .iter()
+                .map(|(&id, player)| (id, other.players.get(&id).unwrap().diff(&player)))
+                .collect(),
+        }
     }
 
     fn get_game_result(&self) -> Option<game::GameResult<PlayerId>> {
