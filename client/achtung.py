@@ -1,6 +1,7 @@
 import attrs
 import enum
 from typing import NewType
+import game
 
 PlayerId = NewType("PlayerId", int)
 BlobId = NewType("BlobId", int)
@@ -46,22 +47,6 @@ class Player:
 
 
 @attrs.define
-class GameState:
-    timestep: int
-    players: dict[PlayerId, Player]
-
-    def merge_with_diff(self, diff: "GameStateDiff") -> None:
-        self.timestep = diff.timestep
-        for id, player_diff in diff.players.items():
-            match (self.players.get(id), player_diff.body):
-                case (None, _) | (_, None):
-                    continue
-                case (player, body_diff):
-                    player.body.extend(body_diff)
-            # TODO: handle other fields
-
-
-@attrs.define
 class PlayerDiff:
     is_alive: bool | None = None
     head: Blob | None = None
@@ -76,6 +61,28 @@ class PlayerDiff:
 
 
 @attrs.define
-class GameStateDiff:
+class AchtungDiff:
     timestep: int
     players: dict[PlayerId, PlayerDiff]
+
+
+@attrs.define
+class Achtung(game.GameState):
+    timestep: int
+    players: dict[PlayerId, Player]
+    player_id_type = PlayerId
+    game_action_type = GameAction
+    state_diff_type = AchtungDiff
+
+    def merge_with_diff(self, diff: AchtungDiff) -> None:
+        self.timestep = diff.timestep
+        for id, player_diff in diff.players.items():
+            match (self.players.get(id), player_diff.body):
+                case (None, _) | (_, None):
+                    continue
+                case (player, body_diff):
+                    player.body.extend(body_diff)
+            # TODO: handle other fields
+
+    def game_over_callback(self, winner: PlayerId) -> None:
+        print(f"Game over! {winner} won after {self.timestep} timesteps.")

@@ -1,48 +1,54 @@
 import json
-from typing import Literal
+from typing import Literal, TypeVar, Generic
 
 import attrs
-import achtung
 import strategy
 import websockets
 import cattrs
+import game
+
+
+PlayerIdT = TypeVar("PlayerIdT")
+GameActionT = TypeVar("GameActionT")
+StateDiffT = TypeVar("StateDiffT")
+G = TypeVar("G", bound=game.GameState)
 
 
 @attrs.define
-class GameOver:
+class GameOver(Generic[PlayerIdT]):
     e: Literal["GameOver"]
-    winner: achtung.PlayerId
+    winner: PlayerIdT
 
 
 @attrs.define
-class UpdateState:
+class UpdateState(Generic[StateDiffT]):
     e: Literal["UpdateState"]
-    diff: achtung.GameStateDiff
+    diff: StateDiffT
 
 
 @attrs.define
-class InitialState:
+class InitialState(Generic[G]):
     e: Literal["InitialState"]
-    state: achtung.GameState
+    state: G
 
 
 @attrs.define
-class AssignPlayerId:
+class AssignPlayerId(Generic[PlayerIdT]):
     e: Literal["AssignPlayerId"]
-    player_id: achtung.PlayerId
+    player_id: PlayerIdT
 
 
-GameEventT = GameOver | UpdateState | InitialState | AssignPlayerId
-
-
-@attrs.define
-class GameEvent:
-    event: GameEventT
+GameEventT = InitialState[G] | AssignPlayerId[PlayerIdT] | UpdateState[StateDiffT] | GameOver[PlayerIdT]
 
 
 @attrs.define
-class ActionEvent:
-    action: achtung.GameAction
+class GameEvent(Generic[G, PlayerIdT, StateDiffT]):
+    event: GameEventT[G, PlayerIdT, StateDiffT]
+
+
+@attrs.define
+class ActionEvent(Generic[GameActionT]):
+    action: GameActionT
     e: Literal["Action"] = attrs.field(default="Action")
 
 
@@ -51,41 +57,43 @@ class RequestUpdateEvent:
     e: Literal["RequestUpdate"] = attrs.field(default="RequestUpdate")
 
 
-PlayerEventT = ActionEvent | RequestUpdateEvent
-
-
-def deserialize_game_event(data: bytes) -> GameEvent:
-    return cattrs.structure(json.loads(data), GameEvent)
-
-
-def serialize_player_event(event: PlayerEventT) -> bytes:
-    return json.dumps(cattrs.unstructure(event)).encode("utf-8")
+PlayerEventT = ActionEvent[GameActionT] | RequestUpdateEvent
 
 
 @attrs.define(kw_only=True)
-class GameClient:
+class GameClient(Generic[G, PlayerIdT, GameActionT, StateDiffT]):
     game_strategy: strategy.Strategy = attrs.field()
     request_updates: bool = attrs.field(default=False)
+    game_state_type: type[G] = attrs.field()
 
-    async def connect(self, host: str, port: int) -> "ConnectedGameClient":
+    async def connect(self, host: str, port: int) -> "ConnectedGameClient[G, PlayerIdT, GameActionT, StateDiffT]":
         connection = await websockets.connect(f"ws://{host}:{port}/join/player")
         return ConnectedGameClient(connection=connection, **attrs.asdict(self))  # type: ignore
 
+    def serialize_player_event(self, event: PlayerEventT[GameActionT]) -> bytes:
+        return json.dumps(cattrs.unstructure(event)).encode("utf-8")
+
+    def deserialize_game_event(self, data: bytes) -> "GameEvent[G, PlayerIdT, StateDiffT]":
+        return cattrs.structure(
+            json.loads(data),
+            GameEvent[self.game_state_type, self.game_state_type.player_id_type, self.game_state_type.state_diff_type],
+        )
+
 
 @attrs.define(kw_only=True)
-class ConnectedGameClient(GameClient):
+class ConnectedGameClient(GameClient[G, PlayerIdT, GameActionT, StateDiffT]):
     _connection: websockets.WebSocketClientProtocol = attrs.field()
 
     async def send_event(self, player_event: PlayerEventT) -> None:
         if self._connection.open:
-            await self._connection.send(serialize_player_event(player_event))
+            await self._connection.send(self.serialize_player_event(player_event))
 
-    async def receive_event(self) -> GameEventT:
+    async def receive_event(self) -> GameEventT[G, PlayerIdT, StateDiffT]:
         match await self._connection.recv():
             case str(data):
-                return deserialize_game_event(data.encode("utf-8")).event
+                return self.deserialize_game_event(data.encode("utf-8")).event
             case bytes(data):
-                return deserialize_game_event(data).event
+                return self.deserialize_game_event(data).event
             case data:
                 raise ValueError(f"Unexpected type {type(data)}")
 
@@ -108,6 +116,6 @@ class ConnectedGameClient(GameClient):
                     if action is not None:
                         await self.send_event(ActionEvent(action=action))
                 case GameOver(winner=player_id):
-                    print(f"Game over! {player_id} won after {game_state.timestep} timesteps.")
+                    game_state.game_over_callback(winner=player_id)
                     await self._connection.close()
                     break
