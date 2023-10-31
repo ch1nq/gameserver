@@ -3,14 +3,14 @@ pub enum GameResult<P> {
     NoWinner,
 }
 
-pub trait GameState<const N: usize> {
+pub trait GameState {
     type PlayerId;
     type GameAction;
     type StateDiff;
     type Config;
 
-    fn init_game(config: &Self::Config) -> Self;
-    fn get_player_ids(&self) -> [Self::PlayerId; N];
+    fn init_game(config: &Self::Config, num_players: usize) -> Self;
+    fn get_player_ids(&self) -> Vec<Self::PlayerId>;
     fn update_game_state(&mut self);
     fn handle_player_action(&mut self, player_id: Self::PlayerId, action: Self::GameAction);
     fn handle_player_leave(&mut self, player_id: Self::PlayerId);

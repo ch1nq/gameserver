@@ -36,24 +36,25 @@ impl std::str::FromStr for ClientType {
 }
 
 #[derive(Clone)]
-pub struct GameServer<const N: usize, T: game::GameState<N>> {
+pub struct GameServer<T: game::GameState> {
     tick_interval: Option<tokio::time::Duration>,
     game_config: T::Config,
-    lock: Arc<tokio::sync::RwLock<GameSession<N, T>>>,
+    lock: Arc<tokio::sync::RwLock<GameSession<T>>>,
+    num_players: usize,
 }
 
 #[derive(Deserialize)]
 #[serde(tag = "e")]
-enum PlayerEvent<const N: usize, T: game::GameState<N>> {
+enum PlayerEvent<T: game::GameState> {
     Action { action: T::GameAction },
     RequestUpdate,
 }
 
 #[derive(Serialize)]
 #[serde(tag = "e")]
-enum GameEvent<const N: usize, T>
+enum GameEvent<T>
 where
-    T: game::GameState<N> + Serialize,
+    T: game::GameState + Serialize,
     T::PlayerId: Serialize,
     T::StateDiff: Serialize,
 {
@@ -64,32 +65,32 @@ where
 }
 
 #[derive(Serialize)]
-struct Event<const N: usize, T>
+struct Event<T>
 where
-    T: game::GameState<N> + Serialize,
+    T: game::GameState + Serialize,
     T::GameAction: Serialize,
     T::StateDiff: Serialize,
     T::PlayerId: Serialize,
 {
-    event: GameEvent<N, T>,
+    event: GameEvent<T>,
 }
 
 #[derive(Default, Debug, Eq, PartialEq)]
-enum GameSessionStatus<const N: usize, T: game::GameState<N>> {
+enum GameSessionStatus<T: game::GameState> {
     #[default]
     WaitingForPlayers,
     InProgress(T),
     GameOver,
 }
 
-struct GameSession<const N: usize, T: game::GameState<N>> {
+struct GameSession<T: game::GameState> {
     oberserver_channels: HashMap<ClientId, tokio::sync::mpsc::UnboundedSender<ws::Message>>,
     player_channels: HashMap<ClientId, tokio::sync::mpsc::UnboundedSender<ws::Message>>,
     player_ids: HashMap<ClientId, T::PlayerId>,
-    game_status: GameSessionStatus<N, T>,
+    game_status: GameSessionStatus<T>,
 }
 
-impl<const N: usize, T: game::GameState<N>> Default for GameSession<N, T> {
+impl<T: game::GameState> Default for GameSession<T> {
     fn default() -> Self {
         Self {
             oberserver_channels: HashMap::new(),
@@ -108,10 +109,10 @@ fn decode_message<T: DeserializeOwned>(message: ws::Message) -> serde_json::Resu
     serde_json::from_slice(&message.as_bytes())
 }
 
-impl<const N: usize, T> GameSession<N, T>
+impl<T> GameSession<T>
 where
     T: Serialize + Clone,
-    T: game::GameState<N>,
+    T: game::GameState,
     T::PlayerId: Serialize + std::fmt::Debug + Copy,
     T::StateDiff: Serialize,
     T::GameAction: Serialize,
@@ -127,7 +128,7 @@ where
         self.game_status = GameSessionStatus::WaitingForPlayers;
     }
 
-    fn broadcast_event(&self, event: GameEvent<N, T>) {
+    fn broadcast_event(&self, event: GameEvent<T>) {
         let message = encode_message(&Event { event });
         for channel in self
             .player_channels
@@ -160,16 +161,7 @@ where
 
         // Check if the game is over
         if let Some(result) = game_state.get_game_result() {
-            self.game_status = GameSessionStatus::GameOver;
-            let winner = match &result {
-                game::GameResult::Winner(player_id) => Some(player_id),
-                game::GameResult::NoWinner => None,
-            };
-            log::info!("game over, winner: {:?}", winner);
-            self.broadcast_event(GameEvent::GameOver {
-                winner: winner.copied(),
-            });
-            self.reset();
+            self.handle_game_over(&result);
             Some(result)
         } else {
             // Send the updated game state to all players
@@ -178,28 +170,46 @@ where
             None
         }
     }
+
+    fn handle_game_over(&mut self, result: &game::GameResult<T::PlayerId>) {
+        self.game_status = GameSessionStatus::GameOver;
+        let winner = match &result {
+            game::GameResult::Winner(player_id) => Some(player_id),
+            game::GameResult::NoWinner => None,
+        };
+        log::info!("game over, winner: {:?}", winner);
+        self.broadcast_event(GameEvent::GameOver {
+            winner: winner.copied(),
+        });
+        self.reset();
+    }
 }
 
-impl<const N: usize, T: game::GameState<N>> GameServer<N, T> {
-    pub fn new(tick_interval: Option<tokio::time::Duration>, game_config: T::Config) -> Self {
+impl<T: game::GameState> GameServer<T> {
+    pub fn new(
+        tick_interval: Option<tokio::time::Duration>,
+        game_config: T::Config,
+        num_players: usize,
+    ) -> Self {
         Self {
             tick_interval,
             game_config,
+            num_players,
             lock: Arc::new(tokio::sync::RwLock::new(GameSession::default())),
         }
     }
 }
 
-impl<const N: usize, T> GameServer<N, T>
+impl<T> GameServer<T>
 where
-    T: game::GameState<N> + Serialize + Send + Sync + Clone + 'static,
+    T: game::GameState + Serialize + Send + Sync + Clone + 'static,
     T::PlayerId: std::hash::Hash + std::fmt::Debug + Copy,
     T::PlayerId: Serialize + Send + Sync,
     T::StateDiff: Serialize + Send,
     T::GameAction: Serialize + DeserializeOwned + Send,
     T::Config: Clone + Send + Sync,
 {
-    pub async fn host_game(self) {
+    pub async fn host_game(self, port: u16) {
         pretty_env_logger::init();
 
         let index = warp::path::end().and(warp::fs::file("www/static/index.html"));
@@ -212,7 +222,7 @@ where
             });
 
         warp::serve(index.or(ws_routes))
-            .run(([0, 0, 0, 0], 3030))
+            .run(([0, 0, 0, 0], port))
             .await;
     }
 
@@ -258,7 +268,7 @@ where
 
         match client_type {
             ClientType::Player => {
-                if game_session.player_channels.len() == N {
+                if game_session.player_channels.len() == self.num_players {
                     log::info!("All players connected, starting game");
                     self.start_game(&mut game_session).await;
                 }
@@ -289,15 +299,15 @@ where
         }
     }
 
-    async fn start_game(&self, game_session: &mut GameSession<N, T>) {
-        let game_state = T::init_game(&self.game_config);
+    async fn start_game(&self, game_session: &mut GameSession<T>) {
+        let game_state = T::init_game(&self.game_config, self.num_players);
         game_session.player_ids = game_session
             .player_channels
             .iter()
             .zip(game_state.get_player_ids().into_iter())
             .map(|((&client_id, channel), player_id)| {
                 let message = encode_message(&Event {
-                    event: GameEvent::<N, T>::AssignPlayerId { player_id },
+                    event: GameEvent::<T>::AssignPlayerId { player_id },
                 });
                 channel.send(message).unwrap();
                 (client_id, player_id)
@@ -334,16 +344,19 @@ where
         game_session.player_channels.remove(&client_id);
         match game_session.player_ids.get(&client_id) {
             Some(&player_id) => {
-                game_session
-                    .get_game_state()
-                    .map(|game_state| game_state.handle_player_leave(player_id));
+                if let Some(game_state) = game_session.get_game_state() {
+                    game_state.handle_player_leave(player_id);
+                    if let Some(result) = game_state.get_game_result() {
+                        game_session.handle_game_over(&result);
+                    }
+                }
             }
             None => {}
         };
     }
 
     async fn handle_message(&mut self, client_id: ClientId, msg: Message) {
-        let event: PlayerEvent<N, T> = match decode_message(msg) {
+        let event: PlayerEvent<T> = match decode_message(msg) {
             Ok(event) => event,
             Err(error) => {
                 log::warn!("error in parsing event {} from player {}", client_id, error);
@@ -353,7 +366,7 @@ where
         self.handle_player_event(client_id, event).await;
     }
 
-    async fn handle_player_event(&mut self, client_id: ClientId, player_event: PlayerEvent<N, T>) {
+    async fn handle_player_event(&mut self, client_id: ClientId, player_event: PlayerEvent<T>) {
         let mut game_session = self.lock.write().await;
         let player_id = *game_session
             .player_ids

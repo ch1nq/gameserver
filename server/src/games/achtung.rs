@@ -198,17 +198,17 @@ impl Player {
     }
 }
 
-impl<const N: usize> game::GameState<N> for Achtung {
+impl game::GameState for Achtung {
     type PlayerId = PlayerId;
     type GameAction = GameAction;
     type StateDiff = AchtungDiff;
     type Config = AchtungConfig;
 
-    fn init_game(config: &AchtungConfig) -> Self {
+    fn init_game(config: &AchtungConfig, num_players: usize) -> Self {
         let mut rng = rand::thread_rng();
         Self {
             timestep: 0,
-            players: (0..N)
+            players: (0..num_players)
                 .into_iter()
                 .map(|id| (id, Player::new(&mut rng, &config)))
                 .collect(),
@@ -216,13 +216,8 @@ impl<const N: usize> game::GameState<N> for Achtung {
         }
     }
 
-    fn get_player_ids(&self) -> [Self::PlayerId; N] {
-        self.players
-            .keys()
-            .copied()
-            .collect::<Vec<_>>()
-            .try_into()
-            .expect("should have N players")
+    fn get_player_ids(&self) -> Vec<Self::PlayerId> {
+        self.players.keys().copied().collect()
     }
 
     fn diff(&self, other: &Achtung) -> AchtungDiff {

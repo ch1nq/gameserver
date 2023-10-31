@@ -26,7 +26,7 @@ async def run_clients() -> None:
     # run multiple clients concurrently
     tasks = []
     for i in range(8):
-        tasks.append(asyncio.create_task(create_client(request_updates=False)))  # i == 0)))
+        tasks.append(asyncio.create_task(create_client(request_updates=i == 0)))
 
     await asyncio.gather(*tasks)
 
