@@ -1,0 +1,4 @@
+# flyctl launch added from server/.gitignore
+server/target
+server/src/www
+fly.toml
