@@ -121,10 +121,10 @@ where
         log::info!("resetting game");
         self.player_channels
             .values()
-            .chain(self.oberserver_channels.values())
+            // .chain(self.oberserver_channels.values())
             .for_each(|channel| channel.send(ws::Message::close()).unwrap());
         self.player_channels.clear();
-        self.oberserver_channels.clear();
+        // self.oberserver_channels.clear();
         self.game_status = GameSessionStatus::WaitingForPlayers;
     }
 
@@ -231,12 +231,12 @@ where
 
         match (&game_session.game_status, &client_type) {
             (GameSessionStatus::InProgress(_), ClientType::Player) => {
-                log::warn!("client tried to join a game that is in progress");
+                log::warn!("player tried to join a game that is in progress. closing connection");
                 ws.close().await.unwrap();
                 return;
             }
             (GameSessionStatus::GameOver, _) => {
-                log::warn!("client tried to connect to a game that is over");
+                log::warn!("client tried to connect to a game that is over. closing connection");
                 ws.close().await.unwrap();
                 return;
             }
@@ -260,20 +260,30 @@ where
             }
         });
 
+        // Send the current state to any observers joining while the game is in progress
+        match (client_type, game_session.get_game_state()) {
+            (ClientType::Observer, Some(game_state)) => {
+                let event = Event {
+                    event: GameEvent::<T>::InitialState {
+                        state: game_state.clone(),
+                    },
+                };
+                internal_tx.send(encode_message(&event)).unwrap();
+            }
+            _ => {}
+        }
+
         let channel = match client_type {
             ClientType::Player => &mut game_session.player_channels,
             ClientType::Observer => &mut game_session.oberserver_channels,
         };
         channel.insert(client_id, internal_tx);
 
-        match client_type {
-            ClientType::Player => {
-                if game_session.player_channels.len() == self.num_players {
-                    log::info!("All players connected, starting game");
-                    self.start_game(&mut game_session).await;
-                }
-            }
-            ClientType::Observer => {}
+        if matches!(client_type, ClientType::Player)
+            && game_session.player_channels.len() == self.num_players
+        {
+            log::info!("All players connected, starting game");
+            self.start_game(&mut game_session).await;
         }
 
         let _ = game_session.downgrade();
@@ -325,9 +335,17 @@ where
 
     async fn game_loop(self, tick_interval: tokio::time::Duration) {
         loop {
-            match self.lock.write().await.update_game_state() {
-                Some(_) => break,
-                None => tokio::time::sleep(tick_interval).await,
+            let mut game_session = self.lock.write().await;
+            match game_session.game_status {
+                GameSessionStatus::InProgress(_) => {
+                    game_session.update_game_state();
+                    drop(game_session);
+                    tokio::time::sleep(tick_interval).await;
+                }
+                GameSessionStatus::GameOver | GameSessionStatus::WaitingForPlayers => {
+                    log::info!("Game over, stopping tick requests");
+                    break;
+                }
             }
         }
     }

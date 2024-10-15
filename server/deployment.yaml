@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gameserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gameserver
+  template:
+    metadata:
+      labels:
+        app: gameserver
+    spec:
+      containers:
+      - name: gameserver-app
+        # Replace $LOCATION with your Artifact Registry location (e.g., us-west1).
+        # Replace $GCLOUD_PROJECT with your project ID.
+        image: europe-west1-docker.pkg.dev/tactiqal/hello-repo/gameserver:latest
+        # This app listens on port 8080 for web traffic by default.
+        ports:
+        - containerPort: 8080
+        env:
+          - name: PORT
+            value: "8080"
+          - name: GAME
+            value: "achtung"
+          - name: NUM_PLAYERS
+            value: "8"
+          - name: TICK_RATE_MS
+            value: "50"
+          - name: RUST_LOG
+            value: "info"
+        resources:
+          requests:
+            memory: "10Mi"
+            cpu: "10m"
+            ephemeral-storage: "10Mi"
+          limits:
+            memory: "10Mi"
+            cpu: "100m"
+            ephemeral-storage: "10Mi"
+

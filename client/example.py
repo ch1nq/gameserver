@@ -17,7 +17,8 @@ async def create_client(request_updates: bool):
         game_state_type=achtung.Achtung,
         game_strategy=strat,
         request_updates=request_updates,
-    ).connect("achtung.fly.dev", 443)
+    # ).connect("achtung.fly.dev", 443)
+    ).connect("35.205.162.96", 80)
     # ).connect("0.0.0.0", 3030)
     await client.run()
 

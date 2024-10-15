@@ -5,16 +5,16 @@ use gameserver::server;
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    #[arg(short, long, default_value = "3030")]
+    #[arg(short, long, env, default_value = "3030")]
     port: u16,
 
-    #[arg(short, long)]
+    #[arg(short, long, env)]
     tick_rate_ms: Option<u64>,
 
-    #[arg(short, long)]
+    #[arg(short, long, env)]
     game: Game,
 
-    #[arg(short, long)]
+    #[arg(short, long, env)]
     num_players: usize,
 }
 

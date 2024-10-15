@@ -1,23 +1,26 @@
 import json
-from typing import Literal, TypeVar, Generic
+import logging
+from typing import Generic, Literal, TypeVar
 
 import attrs
-import strategy
-import websockets
 import cattrs
-import game
+import websockets
 
+import game
+import strategy
 
 PlayerIdT = TypeVar("PlayerIdT")
 GameActionT = TypeVar("GameActionT")
 StateDiffT = TypeVar("StateDiffT")
 G = TypeVar("G", bound=game.GameState)
 
+LOGGER = logging.getLogger(__name__)
+
 
 @attrs.define
 class GameOver(Generic[PlayerIdT]):
     e: Literal["GameOver"]
-    winner: PlayerIdT
+    winner: PlayerIdT | None
 
 
 @attrs.define
@@ -67,7 +70,7 @@ class GameClient(Generic[G, PlayerIdT, GameActionT, StateDiffT]):
     game_state_type: type[G] = attrs.field()
 
     async def connect(self, host: str, port: int) -> "ConnectedGameClient[G, PlayerIdT, GameActionT, StateDiffT]":
-        connection = await websockets.connect(f"wss://{host}:{port}/join/player")
+        connection = await websockets.connect(f"ws://{host}:{port}/join/player")
         return ConnectedGameClient(connection=connection, **attrs.asdict(self))  # type: ignore
 
     def serialize_player_event(self, event: PlayerEventT[GameActionT]) -> bytes:
@@ -98,9 +101,17 @@ class ConnectedGameClient(GameClient[G, PlayerIdT, GameActionT, StateDiffT]):
                 raise ValueError(f"Unexpected type {type(data)}")
 
     async def run(self) -> None:
+        LOGGER.info("Starting client")
+        try:
+            await self._run()
+        except websockets.exceptions.ConnectionClosed:
+            LOGGER.info("Connection was closed. Stopping client.")
+
+    async def _run(self) -> None:
         # Expect server to assign us a player id before the game starts
         match (await self.receive_event(), await self.receive_event()):
             case (AssignPlayerId(player_id=id), InitialState(state=initial_state)):
+                LOGGER.debug("Assigned player id %s", id)
                 player_id = id
                 game_state = initial_state
             case (event1, event2):
@@ -118,4 +129,7 @@ class ConnectedGameClient(GameClient[G, PlayerIdT, GameActionT, StateDiffT]):
                 case GameOver(winner=player_id):
                     game_state.game_over_callback(winner=player_id)
                     await self._connection.close()
+                    LOGGER.info("Stopping client")
                     break
+                case event:
+                    raise ValueError(f"Unexpected event '{event}'")
