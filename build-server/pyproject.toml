@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "build-server"
+version = "0.1.0"
+description = ""
+authors = ["Aske Ching"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+Flask = "^3.0.3"
+kubernetes = "^31.0.0"
+docker = "^7.1.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

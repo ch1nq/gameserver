@@ -1,206 +1,252 @@
-# app.py
-from kubernetes import client, config
-from flask import Flask, request, jsonify
-import os
-import docker
 import logging
-from datetime import datetime
+
+from flask import Flask, jsonify, request
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
 
 app = Flask(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
-# Load kubernetes configuration - works both in and out of cluster
-try:
-    config.load_incluster_config()
-except config.ConfigException:
-    config.load_kube_config()
+# Load kubernetes configuration
+config.load_incluster_config()
 
-k8s_apps_v1 = client.AppsV1Api()
-k8s_core_v1 = client.CoreV1Api()
-docker_client = docker.from_env()
+# Create kubernetes API clients
+v1 = client.CoreV1Api()
+apps_v1 = client.AppsV1Api()
+batch_v1 = client.BatchV1Api()
 
-def validate_deployment_request(data):
-    """Validate incoming deployment request data"""
-    required_fields = ['name', 'image']
-    
-    if not all(field in data for field in required_fields):
-        raise ValueError(f"Missing required fields. Required: {required_fields}")
-    
-    # Validate name format (lowercase, alphanumeric with dashes)
-    if not data['name'].replace('-', '').isalnum():
-        raise ValueError("Name must be alphanumeric with optional dashes")
-    
-    # Basic image name validation
-    if ':' not in data['image']:
-        raise ValueError("Image must include a tag (e.g., nginx:latest)")
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({"status": "healthy", "timestamp": datetime.utcnow().isoformat()})
-
-@app.route('/deploy', methods=['POST'])
-def deploy_container():
-    """Handle container deployment requests"""
+def get_docker_registry_port() -> int:
+    """Get the port of the local docker registry"""
     try:
-        data = request.get_json()
-        if not data:
-            raise ValueError("No JSON data received")
+        # Get the registry service
+        service = v1.read_namespaced_service(
+            name="docker-registry", namespace="registry-system", async_req=False
+        )
+        logging.info(f"Got registry service: {service}")
+        return service.spec.ports[0].node_port
+    except ApiException as e:
+        logging.error(f"Failed to get registry service: {e}")
+        raise
 
-        logger.info(f"Received deployment request for: {data.get('name', 'unknown')}")
-        
-        # Validate request data
-        validate_deployment_request(data)
-        
-        image_name = data['image']
-        app_name = data['name']
-        
-        # Check if deployment already exists
+
+def create_kaniko_build_job(
+    name: str,
+    git_repo: str,
+    dockerfile_path: str,
+    context_sub_path: str,
+) -> tuple[str, str]:
+    """
+    Create a Kaniko build job to build and push the image to our local registry
+    Returns the job name and the local image reference
+    """
+    local_image = (
+        f"docker-registry.registry-system.svc.cluster.local:5000/{name}:latest"
+    )
+
+    job = {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {"name": f"build-{name}", "namespace": "registry-system"},
+        "spec": {
+            "backoffLimit": 0,  # Don't retry on failure
+            "ttlSecondsAfterFinished": 3600,  # Clean up after 1 hour
+            "template": {
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "kaniko",
+                            "image": "gcr.io/kaniko-project/executor:latest",
+                            "args": [
+                                f"--dockerfile={dockerfile_path}",
+                                f"--context=git://{git_repo}",
+                                f"--context-sub-path={context_sub_path}",
+                                f"--destination={local_image}",
+                                "--insecure",
+                                "--skip-tls-verify",
+                            ],
+                        }
+                    ],
+                    "restartPolicy": "Never",
+                    "serviceAccountName": "kaniko-builder",
+                }
+            },
+        },
+    }
+
+    try:
+        # Delete any existing job with the same name
         try:
-            existing_deployment = k8s_apps_v1.read_namespaced_deployment(
-                name=app_name,
-                namespace="auto-deploy"
+            batch_v1.delete_namespaced_job(
+                name=f"build-{name}",
+                namespace="registry-system",
+                body=client.V1DeleteOptions(propagation_policy="Background"),
             )
-            logger.info(f"Deployment {app_name} already exists, updating...")
-            
-            # Update existing deployment
-            deployment = create_deployment_object(app_name, image_name)
-            k8s_apps_v1.patch_namespaced_deployment(
-                name=app_name,
-                namespace="auto-deploy",
-                body=deployment
-            )
-        except client.exceptions.ApiException as e:
-            if e.status == 404:
-                logger.info(f"Creating new deployment for {app_name}")
-                # Create new deployment
-                deployment = create_deployment_object(app_name, image_name)
-                k8s_apps_v1.create_namespaced_deployment(
-                    body=deployment,
-                    namespace="auto-deploy"
-                )
-                
-                # Create service for new deployment
-                service = create_service_object(app_name)
-                k8s_core_v1.create_namespaced_service(
-                    body=service,
-                    namespace="auto-deploy"
-                )
-            else:
+        except ApiException as e:
+            if e.status != 404:  # Ignore if job doesn't exist
                 raise
 
-        return jsonify({
-            "status": "success",
-            "message": f"Deployed {app_name}",
-            "deployment": {
-                "name": app_name,
-                "image": image_name,
-                "namespace": "auto-deploy"
-            }
-        }), 200
-    
-    except ValueError as e:
-        logger.error(f"Validation error: {str(e)}")
-        return jsonify({
-            "status": "error",
-            "message": str(e),
-            "error_type": "validation_error"
-        }), 400
-    
-    except Exception as e:
-        logger.error(f"Deployment failed: {str(e)}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": "Internal deployment error",
-            "error_type": "internal_error"
-        }), 500
+        # Create the new build job
+        batch_v1.create_namespaced_job(body=job, namespace="registry-system")
+        logging.info(f"Created build job for {name}")
 
-def create_deployment_object(app_name, image_name):
-    """Create a Kubernetes deployment object"""
-    return {
+        return f"build-{name}", local_image
+
+    except ApiException as e:
+        logging.error(f"Failed to create build job: {e}")
+        raise
+
+
+def wait_for_job_completion(job_name: str, timeout_seconds: int = 300) -> bool:
+    """Wait for the build job to complete"""
+    import time
+
+    start_time = time.time()
+
+    while time.time() - start_time < timeout_seconds:
+        try:
+            job = batch_v1.read_namespaced_job_status(
+                name=job_name, namespace="registry-system"
+            )
+            if job.status.succeeded:
+                return True
+            if job.status.failed:
+                raise Exception(f"Build job {job_name} failed")
+
+            time.sleep(5)
+        except ApiException as e:
+            logging.error(f"Error checking job status: {e}")
+            raise
+
+    raise Exception(f"Build job {job_name} timed out after {timeout_seconds} seconds")
+
+
+def create_or_update_deployment(name: str, image: str, port: int = 80):
+    """Create or update a kubernetes deployment and service"""
+    # Deployment template
+    deployment = {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
-        "metadata": {
-            "name": app_name,
-            "namespace": "auto-deploy",
-            "labels": {
-                "app": app_name,
-                "managed-by": "deploy-controller"
-            }
-        },
+        "metadata": {"name": name},
         "spec": {
             "replicas": 1,
-            "selector": {
-                "matchLabels": {
-                    "app": app_name
-                }
-            },
+            "selector": {"matchLabels": {"app": name}},
             "template": {
-                "metadata": {
-                    "labels": {
-                        "app": app_name
-                    }
-                },
+                "metadata": {"labels": {"app": name}},
                 "spec": {
-                    "containers": [{
-                        "name": app_name,
-                        "image": image_name,
-                        "ports": [{
-                            "containerPort": 80
-                        }],
-                        "resources": {
-                            "limits": {
-                                "cpu": "500m",
-                                "memory": "512Mi"
-                            },
-                            "requests": {
-                                "cpu": "100m",
-                                "memory": "128Mi"
-                            }
-                        },
-                        "livenessProbe": {
-                            "httpGet": {
-                                "path": "/",
-                                "port": 80
-                            },
-                            "initialDelaySeconds": 30,
-                            "periodSeconds": 10
+                    "containers": [
+                        {
+                            "name": name,
+                            "image": image,
+                            "ports": [{"containerPort": port}],
+                            "imagePullPolicy": "Always",  # Important for local registry
                         }
-                    }]
-                }
-            }
-        }
+                    ]
+                },
+            },
+        },
     }
 
-def create_service_object(app_name):
-    """Create a Kubernetes service object"""
-    return {
+    # Service template
+    service = {
         "apiVersion": "v1",
         "kind": "Service",
-        "metadata": {
-            "name": f"{app_name}-service",
-            "namespace": "auto-deploy",
-            "labels": {
-                "app": app_name,
-                "managed-by": "deploy-controller"
-            }
-        },
+        "metadata": {"name": f"{name}-service"},
         "spec": {
-            "selector": {
-                "app": app_name
-            },
-            "ports": [{
-                "protocol": "TCP",
-                "port": 80,
-                "targetPort": 80
-            }],
-            "type": "ClusterIP"
-        }
+            "selector": {"app": name},
+            "ports": [{"port": port, "targetPort": port}],
+            "type": "ClusterIP",
+        },
     }
 
+    try:
+        # Try to create deployment
+        apps_v1.create_namespaced_deployment(body=deployment, namespace="default")
+        logging.info(f"Created deployment {name}")
+    except ApiException as e:
+        if e.status == 409:  # Already exists
+            # Update the existing deployment
+            logging.info(f"Deployment {name} exists, updating...")
+            apps_v1.patch_namespaced_deployment(
+                name=name, namespace="default", body=deployment
+            )
+            logging.info(f"Updated deployment {name}")
+        else:
+            raise
+
+    try:
+        # Try to create service
+        v1.create_namespaced_service(body=service, namespace="default")
+        logging.info(f"Created service {name}-service")
+    except ApiException as e:
+        if e.status == 409:  # Already exists
+            # Update the existing service
+            logging.info(f"Service {name}-service exists, updating...")
+            v1.patch_namespaced_service(
+                name=f"{name}-service", namespace="default", body=service
+            )
+            logging.info(f"Updated service {name}-service")
+        else:
+            raise
+
+
+@app.route("/deploy", methods=["POST"])
+def deploy():
+    """
+    Endpoint to handle deployment requests
+    Expected JSON payload:
+    {
+        "name": "app-name",
+        "git_repo": "https://github.com/user/repo.git",
+        "dockerfile_path": "Dockerfile",  # Optional
+        "context_sub_path": ".", # Optional
+        "port": 80  # Optional
+    }
+    """
+    try:
+        data = request.json
+        name = data["name"]
+        git_repo = data["git_repo"]
+        dockerfile_path = data.get("dockerfile_path", "Dockerfile")
+        context_sub_path = data.get("context_sub_path", ".")
+        port = data.get("port", 80)
+
+        # Create and start the build job
+        job_name, _ = create_kaniko_build_job(
+            name=name,
+            git_repo=git_repo,
+            dockerfile_path=dockerfile_path,
+            context_sub_path=context_sub_path,
+        )
+
+        registry_port = get_docker_registry_port()
+        image_name = f"localhost:{registry_port}/{name}:latest"
+
+        # Wait for the build to complete
+        wait_for_job_completion(job_name)
+
+        # Create/update the deployment with the new image
+        create_or_update_deployment(name, image_name, port)
+
+        return jsonify(
+            {
+                "status": "success",
+                "message": f"Application {name} built and deployed successfully",
+                "image": image_name,
+            }
+        ), 201
+
+    except ApiException as e:
+        logging.error(f"Kubernetes API error: {str(e)}")
+        return jsonify(
+            {"status": "error", "message": f"Kubernetes API error: {str(e)}"}
+        ), e.status or 500
+    except Exception as e:
+        logging.error(f"Unexpected error: {str(e)}")
+        return jsonify(
+            {"status": "error", "message": f"Unexpected error: {str(e)}"}
+        ), 500
+
+
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8080)
+    logging.basicConfig(level=logging.INFO)
+    app.run(host="0.0.0.0", port=5000)

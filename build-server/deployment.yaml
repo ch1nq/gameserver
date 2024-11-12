@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deploy-controller-sa
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deploy-controller-role
+rules:
+- apiGroups: [""]  # Core API group
+  resources: ["pods", "services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deploy-controller-binding
+subjects:
+- kind: ServiceAccount
+  name: deploy-controller-sa  
+  namespace: default
+roleRef:
+  kind: Role
+  name: deploy-controller-role
+  apiGroup: rbac.authorization.k8s.io
+
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deploy-controller-deployment
+spec:
+  selector:
+    matchLabels:
+      app: deploy-controller
+  template:
+    metadata:
+      labels:
+        app: deploy-controller
+    spec:
+      serviceAccountName: deploy-controller-sa
+      containers:
+      - name: controller
+        image: localhost:5000/deploy-controller:latest
+
+---
+# External service for the deployment controller
+apiVersion: v1
+kind: Service
+metadata:
+  name: deploy-controller-service
+spec:
+  selector:
+    app: deploy-controller
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 5000
+  type: NodePort
+
+# Service account and permissions for Kaniko
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kaniko-builder
+  namespace: registry-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kaniko-builder
+  namespace: registry-system
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kaniko-builder
+  namespace: registry-system
+subjects:
+  - kind: ServiceAccount
+    name: kaniko-builder
+    namespace: registry-system
+roleRef:
+  kind: Role
+  name: kaniko-builder
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deploy-controller-role
+  namespace: registry-system
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs", "jobs/status"]
+  verbs: ["create", "delete", "get", "list", "watch", "patch"]
+- apiGroups: [""]
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deploy-controller-rolebinding
+  namespace: registry-system
+subjects:
+- kind: ServiceAccount
+  name: deploy-controller-sa
+  namespace: default    # Note: this is the namespace where your deploy controller runs
+roleRef:
+  kind: Role
+  name: deploy-controller-role
+  apiGroup: rbac.authorization.k8s.io
