@@ -14,8 +14,7 @@ G = TypeVar("G", bound=game.GameState, contravariant=True)
 
 class Strategy(Protocol[G, PlayerId, GameAction, StateDiff]):
     @abc.abstractmethod
-    def take_action(self, game_state: G, player_id: PlayerId) -> GameAction | None:
-        ...
+    def take_action(self, game_state: G, player_id: PlayerId) -> GameAction | None: ...
 
 
 class SlowStrategy(Strategy[G, PlayerId, GameAction, StateDiff]):

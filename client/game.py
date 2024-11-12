@@ -1,6 +1,7 @@
-from typing import TypeVar, Protocol
-import attrs
 import abc
+from typing import Protocol, TypeVar
+
+import attrs
 
 
 @attrs.define
@@ -20,8 +21,7 @@ class GameState(Protocol[PlayerIdT, GameActionT, StateDiffT]):
     state_diff_type: type[StateDiffT]
 
     @abc.abstractmethod
-    def merge_with_diff(self, diff: StateDiffT) -> None:
-        ...
+    def merge_with_diff(self, diff: StateDiffT) -> None: ...
 
     def game_over_callback(self, winner: PlayerIdT) -> None:
         pass
