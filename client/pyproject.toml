@@ -1,19 +1,19 @@
-[tool.poetry]
-name = "givakt"
+[project]
+name = "client"
 version = "0.1.0"
-description = ""
-authors = ["Aske Ching <aske@daske.dk>"]
+description = "Add your description here"
 readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "attrs>=24.2.0",
+    "cattrs>=24.1.2",
+    "websockets>=14.0",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.10"
-websockets = "^12.0"
-attrs = "^23.1.0"
-cattrs = "^23.1.2"
-
-[tool.poetry.group.dev.dependencies]
-black = "^23.10.0"
-ruff = "^0.1.1"
+[dependency-groups]
+dev = [
+    "ruff>=0.7.3",
+]
 
 [tool.ruff]
 line-length = 120
@@ -21,7 +21,3 @@ line-length = 120
 [tool.ruff.isort]
 # Use a single line after each import block.
 lines-after-imports = 1
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
