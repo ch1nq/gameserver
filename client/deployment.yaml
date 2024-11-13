@@ -14,10 +14,10 @@ spec:
     spec:
       containers:
       - name: gameclient-app
-        image: europe-west1-docker.pkg.dev/tactiqal/hello-repo/gameclient:latest
+        image: localhost:5000/gameclient:latest
         env:
           - name: SERVER_HOST
-            value: "34.118.234.106"
+            value: "gameserver.default.svc.cluster.local"
           - name: SERVER_PORT
             value: "80"
         resources:

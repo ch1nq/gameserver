@@ -14,10 +14,7 @@ spec:
     spec:
       containers:
       - name: gameserver-app
-        # Replace $LOCATION with your Artifact Registry location (e.g., us-west1).
-        # Replace $GCLOUD_PROJECT with your project ID.
-        image: europe-west1-docker.pkg.dev/tactiqal/hello-repo/gameserver:latest
-        # This app listens on port 8080 for web traffic by default.
+        image: localhost:5000/gameserver:latest
         ports:
         - containerPort: 8080
         env:
@@ -41,3 +38,15 @@ spec:
             cpu: "100m"
             ephemeral-storage: "10Mi"
 
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gameserver
+spec:
+  type: ClusterIP
+  selector:
+    app: gameserver
+  ports:
+  - port: 80
+    targetPort: 8080
