@@ -44,9 +44,54 @@ kind: Service
 metadata:
   name: gameserver
 spec:
-  type: ClusterIP
+  type: NodePort
   selector:
     app: gameserver
   ports:
   - port: 80
     targetPort: 8080
+    nodePort: 30000
+
+---
+# External Ingress (exposed to the internet)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gameserver-external
+  annotations:
+    kubernetes.io/ingress.class: "traefik"
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: gameserver
+            port:
+              number: 80
+
+---
+# Internal Ingress (cluster-internal only)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gameserver-internal
+  annotations:
+    # This annotation makes it internal only
+    traefik.ingress.kubernetes.io/router.entrypoints: "web"
+    # Optional: you might want to add IP whitelist for internal access
+    # traefik.ingress.kubernetes.io/router.middlewares: "default-internal-whitelist@kubernetescrd"
+spec:
+  ingressClassName: traefik
+  rules:
+  - http:
+      paths:
+      - path: /ws
+        pathType: Prefix
+        backend:
+          service:
+            name: gameserver
+            port:
+              number: 80

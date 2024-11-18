@@ -2,3 +2,6 @@
 server/target
 server/src/www
 fly.toml
+.venv/
+.ruff_cache/
+*/.ruff_cache/

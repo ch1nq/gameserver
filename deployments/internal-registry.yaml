@@ -70,10 +70,11 @@ metadata:
   name: docker-registry
   namespace: registry-system
 spec:
+  type: NodePort
   selector:
     app: docker-registry
   ports:
     - port: 5000
       targetPort: 5000
-  type: NodePort
+      nodePort: 30400
 

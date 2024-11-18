@@ -1,11 +1,15 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
+WORKDIR /app
+
+# Install dependencies
+ADD pyproject.toml /app/pyproject.toml
+ADD uv.lock /app/uv.lock
+RUN uv sync --frozen
+
 # Copy the project into the image
 ADD . /app
 
-# Sync the project into a new environment, using the frozen lockfile
-WORKDIR /app
-RUN uv sync --frozen
 
 # Run
 ENTRYPOINT ["uv", "run", "python", "app.py"]

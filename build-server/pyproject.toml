@@ -9,3 +9,14 @@ dependencies = [
     "flask>=3.0.3",
     "kubernetes>=31.0.0",
 ]
+
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint.isort]
+# Use a single line after each import block.
+lines-after-imports = 1
