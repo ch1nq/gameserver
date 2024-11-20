@@ -70,7 +70,8 @@ class GameClient(Generic[G, PlayerIdT, GameActionT, StateDiffT]):
     game_state_type: type[G] = attrs.field()
 
     async def connect(self, host: str, port: int) -> "ConnectedGameClient[G, PlayerIdT, GameActionT, StateDiffT]":
-        connection = await websockets.connect(f"ws://{host}:{port}/join/player")
+        protocol = "wss" if port == 443 else "ws"
+        connection = await websockets.connect(f"{protocol}://{host}:{port}/join/player")
         return ConnectedGameClient(connection=connection, **attrs.asdict(self))  # type: ignore
 
     def serialize_player_event(self, event: PlayerEventT[GameActionT]) -> bytes:
