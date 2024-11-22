@@ -37,6 +37,7 @@ kind: Deployment
 metadata:
   name: deploy-controller
 spec:
+  revisionHistoryLimit: 1
   selector:
     matchLabels:
       app: deploy-controller

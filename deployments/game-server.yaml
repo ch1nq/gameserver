@@ -3,6 +3,7 @@ kind: Deployment
 metadata:
   name: gameserver
 spec:
+  revisionHistoryLimit: 1
   replicas: 1
   selector:
     matchLabels:
