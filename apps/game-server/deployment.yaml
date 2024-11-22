@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: gameserver-app
-        image: localhost:5000/gameserver:latest
+        image: localhost:5000/game-server:latest
         ports:
         - containerPort: 80
         env:

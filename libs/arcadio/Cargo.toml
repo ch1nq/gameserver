@@ -1,12 +1,15 @@
 [package]
-name = "gameserver"
+name = "arcadio"
 version = "0.1.0"
 edition = "2021"
+description = "Reinforcement learning framework for flash-like games."
+license = "MIT"
+repository = "https://github.com/ch1nq/gameserver"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.4.7", features = ["derive", "env"] }
 futures-util = "0.3.28"
 log = "0.4"
 pretty_env_logger = "0.5.0"

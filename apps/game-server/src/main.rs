@@ -1,6 +1,6 @@
 use clap::Parser;
-use gameserver::games;
-use gameserver::server;
+use arcadio::games;
+use arcadio::server;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]

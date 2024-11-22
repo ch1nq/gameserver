@@ -30,7 +30,6 @@ async def run_client_indefinitely() -> None:
     while True:
         client = await create_client(request_updates=False)
         await client.run()
-        # await asyncio.sleep(10)
 
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ spec:
       serviceAccountName: deploy-controller
       containers:
       - name: controller
-        image: localhost:5000/deploy-controller:latest
+        image: localhost:5000/build-server:latest
 
 ---
 # External service for the deployment controller

@@ -10,6 +10,5 @@ RUN uv sync --frozen
 # Copy the project into the image
 ADD . /app
 
-
 # Run
 ENTRYPOINT ["uv", "run", "python", "app.py"]
