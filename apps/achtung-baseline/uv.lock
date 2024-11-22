@@ -6,7 +6,7 @@ name = "achtung-baseline"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "game-client" },
+    { name = "arcadio-client" },
 ]
 
 [package.dev-dependencies]
@@ -15,7 +15,27 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "game-client", virtual = "../../libs/game-client" }]
+requires-dist = [{ name = "arcadio-client", virtual = "../../libs/arcadio-client" }]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ruff", specifier = ">=0.7.3" }]
+
+[[package]]
+name = "arcadio-client"
+version = "0.1.0"
+source = { virtual = "../../libs/arcadio-client" }
+dependencies = [
+    { name = "attrs" },
+    { name = "cattrs" },
+    { name = "websockets" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "attrs", specifier = ">=24.2.0" },
+    { name = "cattrs", specifier = ">=24.1.2" },
+    { name = "websockets", specifier = "==12.0" },
+]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff", specifier = ">=0.7.3" }]
@@ -51,26 +71,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/09/35/2495c4ac46b980e4c
 wheels = [
     { url = "https://files.pythonhosted.org/packages/02/cc/b7e31358aac6ed1ef2bb790a9746ac2c69bcb3c8588b41616914eb106eaf/exceptiongroup-1.2.2-py3-none-any.whl", hash = "sha256:3111b9d131c238bec2f8f516e123e14ba243563fb135d3fe885990585aa7795b", size = 16453 },
 ]
-
-[[package]]
-name = "game-client"
-version = "0.1.0"
-source = { virtual = "../../libs/game-client" }
-dependencies = [
-    { name = "attrs" },
-    { name = "cattrs" },
-    { name = "websockets" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "attrs", specifier = ">=24.2.0" },
-    { name = "cattrs", specifier = ">=24.1.2" },
-    { name = "websockets", specifier = "==12.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.7.3" }]
 
 [[package]]
 name = "ruff"

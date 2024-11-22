@@ -1,7 +1,7 @@
 [project]
-name = "game-client"
+name = "arcadio-client"
 version = "0.1.0"
-description = "Add your description here"
+description = "Reinformcement learning client for the flash-like games."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

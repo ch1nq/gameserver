@@ -1,11 +1,11 @@
 [project]
 name = "achtung-baseline"
 version = "0.1.0"
-description = "Add your description here"
+description = "Reinforcement learning baseline for the Achtung! game."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "game-client",
+    "arcadio-client",
 ]
 
 [dependency-groups]
@@ -14,7 +14,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-game-client = { path = "../../libs/game-client" }
+arcadio-client = { git = "https://github.com/ch1nq/gameserver.git", branch = "main", subdirectory = "libs/arcadio-client" }
 
 [tool.ruff]
 line-length = 120
