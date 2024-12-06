@@ -1,6 +1,7 @@
 use leptos::*;
 use leptos_meta::*;
 use leptos_router::*;
+use pages::get_page_meta;
 
 // Modules
 mod components;
@@ -28,8 +29,18 @@ pub fn App() -> impl IntoView {
 
         <Router>
             <Routes>
-                <Route path="/" view=Home />
-                <Route path="/*" view=NotFound />
+                <Route path=get_page_meta(pages::Page::Home).path view=Home />
+                <Route
+                    path=get_page_meta(pages::Page::LiveBattle).path
+                    view=pages::live_battle::LiveBattle
+                />
+                <Route path=get_page_meta(pages::Page::Stats).path view=pages::stats::Stats />
+                <Route path=get_page_meta(pages::Page::Agents).path view=pages::agents::Agents />
+                <Route
+                    path=get_page_meta(pages::Page::Settings).path
+                    view=pages::settings::Settings
+                />
+                <Route path=get_page_meta(pages::Page::NotFound).path view=NotFound />
             </Routes>
         </Router>
     }
