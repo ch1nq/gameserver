@@ -10,16 +10,16 @@ struct SidebarEntry {
 impl IntoView for SidebarEntry {
     fn into_view(self) -> View {
         let active = false;
-        let base_class = "block py-2 px-4 text-gray-200 hover:bg-primary hover:text-white";
+        let base_class =
+            "text-center rounded mx-2 pt-1 pb-2 px-3 text-gray-200 hover:bg-gray-800 hover:text-white";
         let active_class = if active { "font-semibold" } else { "" };
         view! {
             <a href=self.page_meta.path class=format!("{} {}", base_class, active_class)>
                 <i class=format!(
-                    "text-xl mr-3 bi {}{}",
+                    "text-xl bi {}{}",
                     self.icon,
                     if active { "-fill" } else { "" },
                 )></i>
-                {self.page_meta.title}
             </a>
         }
         .into_view()
@@ -53,9 +53,10 @@ pub fn Sidebar() -> impl IntoView {
         },
     ];
     view! {
-        <aside>
-            <nav class="bg-gray-900 w-64 h-full">
-                <div class=" flex flex-col justify-between py-2 h-full">
+        <div class="w-12"></div>
+        <aside class="absolute top-0 left-0">
+            <nav class="bg-gray-900 w-16">
+                <div class=" flex flex-col justify-between py-2 h-screen">
                     <div class="flex flex-col">{top_entries.collect_view()}</div>
                     <div class="flex flex-col">{bottom_entries.collect_view()}</div>
                 </div>
