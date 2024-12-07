@@ -1,3 +1,4 @@
+use components::sidebar::Sidebar;
 use leptos::*;
 use leptos_meta::*;
 use leptos_router::*;
@@ -7,11 +8,6 @@ use pages::get_page_meta;
 mod components;
 mod pages;
 
-// Top-Level pages
-use crate::pages::home::Home;
-use crate::pages::not_found::NotFound;
-
-/// An app router which renders the homepage and handles 404's
 #[component]
 pub fn App() -> impl IntoView {
     // Provides context that manages stylesheets, titles, meta tags, etc.
@@ -29,19 +25,40 @@ pub fn App() -> impl IntoView {
 
         <Router>
             <Routes>
-                <Route path=get_page_meta(pages::Page::Home).path view=Home />
                 <Route
                     path=get_page_meta(pages::Page::LiveBattle).path
-                    view=pages::live_battle::LiveBattle
+                    view=|| page_wrapper(pages::live_battle::LiveBattle, pages::Page::LiveBattle)
                 />
-                <Route path=get_page_meta(pages::Page::Stats).path view=pages::stats::Stats />
-                <Route path=get_page_meta(pages::Page::Agents).path view=pages::agents::Agents />
+                <Route
+                    path=get_page_meta(pages::Page::Stats).path
+                    view=|| page_wrapper(pages::stats::Stats, pages::Page::Stats)
+                />
+                <Route
+                    path=get_page_meta(pages::Page::Agents).path
+                    view=|| page_wrapper(pages::agents::Agents, pages::Page::Agents)
+                />
                 <Route
                     path=get_page_meta(pages::Page::Settings).path
-                    view=pages::settings::Settings
+                    view=|| page_wrapper(pages::settings::Settings, pages::Page::Settings)
                 />
-                <Route path=get_page_meta(pages::Page::NotFound).path view=NotFound />
+                <Route
+                    path=get_page_meta(pages::Page::NotFound).path
+                    view=pages::not_found::NotFound
+                />
             </Routes>
         </Router>
+    }
+}
+
+fn page_wrapper(content: impl IntoView, current_page: pages::Page) -> impl IntoView {
+    view! {
+        <div class="h-screen">
+            <div class="flex flex-row-reverse h-full">
+                <main class="flex flex-col w-full px-5 pt-4 bg-gray-200 overflow-y-scroll">
+                    {content}
+                </main>
+                <Sidebar current_page=current_page />
+            </div>
+        </div>
     }
 }

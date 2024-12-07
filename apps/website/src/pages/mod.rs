@@ -10,8 +10,8 @@ pub struct PageMeta {
     pub path: &'static str,
 }
 
+#[derive(PartialEq)]
 pub enum Page {
-    Home,
     LiveBattle,
     Stats,
     Agents,
@@ -22,13 +22,9 @@ pub enum Page {
 
 pub fn get_page_meta(page: Page) -> PageMeta {
     match page {
-        Page::Home => PageMeta {
-            title: "Home",
-            path: "/",
-        },
         Page::LiveBattle => PageMeta {
             title: "Live battle",
-            path: "/live",
+            path: "/",
         },
         Page::Stats => PageMeta {
             title: "Stats",
