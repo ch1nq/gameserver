@@ -1,5 +1,4 @@
-use leptos::*;
-use rand;
+use leptos::prelude::*;
 
 /// Canvas that displays the live game
 #[component]
@@ -14,6 +13,7 @@ pub fn AchtungLive() -> impl IntoView {
                     class="max-h-full h-full max-w-full w-full"
                 ></canvas>
                 <script src="achtung-observer.js"></script>
+                <script>{r#"init_game('game')"#}</script>
             </div>
             <div class="border rounded-lg col-span-full border-gray-300 bg-gray-100 w-full flex-grow h-fit">
                 <table class="w-full text-left">
@@ -29,8 +29,7 @@ pub fn AchtungLive() -> impl IntoView {
                     <tbody>
                         {(0..8)
                             .map(|i| {
-                                let hue = rand::random::<u16>() % 360;
-                                let color = format!("background: hsl({}, 70%, 50%)", hue);
+                                let color = "background: hsl(200, 70%, 50%)";
                                 view! {
                                         <tr class="border-b">
                                             <th class="px-4 py-3">
@@ -41,8 +40,8 @@ pub fn AchtungLive() -> impl IntoView {
                                             </th>
                                             <th class="whitespace-nowrap font-normal">agent-{i}</th>
                                             <th class="whitespace-nowrap font-normal">user-{i}</th>
-                                            <th class="whitespace-nowrap font-normal">#{rand::random::<u16>() % 50}</th>
-                                            <th class="whitespace-nowrap font-normal">{rand::random::<u16>() % 100}%</th>
+                                            // <th class="whitespace-nowrap font-normal">#{rand::random::<u16>() % 50}</th>
+                                            // <th class="whitespace-nowrap font-normal">{rand::random::<u16>() % 100}%</th>
                                         </tr>
                                 }
                             })

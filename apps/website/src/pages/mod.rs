@@ -1,3 +1,5 @@
+use leptos_router::StaticSegment;
+
 pub mod agents;
 pub mod home;
 pub mod live_battle;
@@ -7,7 +9,7 @@ pub mod stats;
 
 pub struct PageMeta {
     pub title: &'static str,
-    pub path: &'static str,
+    pub path: StaticSegment<&'static str>,
 }
 
 #[derive(PartialEq)]
@@ -17,34 +19,29 @@ pub enum Page {
     Agents,
     Settings,
     Logout,
-    NotFound,
 }
 
 pub fn get_page_meta(page: Page) -> PageMeta {
     match page {
         Page::LiveBattle => PageMeta {
             title: "Live battle",
-            path: "/",
+            path: StaticSegment("/"),
         },
         Page::Stats => PageMeta {
             title: "Stats",
-            path: "/stats",
+            path: StaticSegment("/stats"),
         },
         Page::Agents => PageMeta {
             title: "Manage agents",
-            path: "/agents",
+            path: StaticSegment("/agents"),
         },
         Page::Settings => PageMeta {
             title: "Settings",
-            path: "/settings",
+            path: StaticSegment("/settings"),
         },
         Page::Logout => PageMeta {
             title: "Logout",
-            path: "/logout",
-        },
-        Page::NotFound => PageMeta {
-            title: "Not found",
-            path: "/*",
+            path: StaticSegment("/logout"),
         },
     }
 }
