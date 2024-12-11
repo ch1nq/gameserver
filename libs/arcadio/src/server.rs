@@ -212,7 +212,6 @@ where
     pub async fn host_game(self, port: u16) {
         pretty_env_logger::init();
 
-        let index = warp::path::end().and(warp::fs::file("www/static/index.html"));
         let ws_routes = warp::path!("join" / ClientType)
             .and(warp::path::end())
             .and(warp::ws())
@@ -221,9 +220,7 @@ where
                 ws.on_upgrade(move |socket| server.client_connected(client_type, socket))
             });
 
-        warp::serve(index.or(ws_routes))
-            .run(([0, 0, 0, 0], port))
-            .await;
+        warp::serve(ws_routes).run(([0, 0, 0, 0], port)).await;
     }
 
     async fn client_connected(mut self, client_type: ClientType, ws: ws::WebSocket) {
