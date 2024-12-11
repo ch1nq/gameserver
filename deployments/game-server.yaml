@@ -79,13 +79,6 @@ spec:
   - host: achtung.daske.dk
     http:
       paths:
-      - path: /
-        pathType: Exact
-        backend:
-          service:
-            name: gameserver
-            port:
-              number: 80
       - path: /join/observer
         pathType: Exact
         backend:
