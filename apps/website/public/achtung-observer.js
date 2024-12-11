@@ -143,4 +143,4 @@ function init_game(canvas_id) {
     });
 }
 
-init_game('game');
+// init_game("game");

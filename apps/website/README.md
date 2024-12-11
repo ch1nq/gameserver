@@ -3,77 +3,88 @@
     <img src="https://raw.githubusercontent.com/leptos-rs/leptos/main/docs/logos/Leptos_logo_RGB.svg" alt="Leptos Logo">
 </picture>
 
-# Leptos Client-Side Rendered (CSR) App Starter Template
+# Leptos Axum Starter Template
 
-This is a template for use with the [Leptos][Leptos] web framework using the [Trunk][Trunk] tool to compile and serve your app in development.
+This is a template for use with the [Leptos](https://github.com/leptos-rs/leptos) web framework and the [cargo-leptos](https://github.com/akesson/cargo-leptos) tool using [Axum](https://github.com/tokio-rs/axum).
 
-## Creating your repo from the template
+## Creating your template repo
 
-This template requires you to have `cargo-generate` installed. You can install it with
+If you don't have `cargo-leptos` installed you can install it with
 
-```sh
-cargo install cargo-generate
+```bash
+cargo install cargo-leptos --locked
 ```
 
-
-To set up your project with this template, run
-
-```sh
-cargo generate --git https://github.com/leptos-community/start-csr
+Then run
+```bash
+cargo leptos new --git https://github.com/leptos-rs/start-axum-0.7
 ```
 
-to generate your new project, then
+to generate a new project template.
 
-```sh
-cd website
+```bash
+cd website-2
 ```
 
-to go to your newly created project.
+to go to your newly created project.  
+Feel free to explore the project structure, but the best place to start with your application code is in `src/app.rs`.  
+Addtionally, Cargo.toml may need updating as new versions of the dependencies are released, especially if things are not working after a `cargo update`.
 
-By default, this template uses Rust `nightly` and requires that you've installed the `wasm` compilation target for your toolchain.
+## Running your project
 
-
-Sass and Tailwind are also supported by the Trunk build tool, but are optional additions: [see here for more info on how to set those up with Trunk][Trunk-instructions].
-
-
-If you don't have Rust nightly, you can install it with
-```sh
-rustup toolchain install nightly --allow-downgrade
+```bash
+cargo leptos watch
 ```
 
-You can add the `wasm` compilation target to rust using
-```sh
-rustup target add wasm32-unknown-unknown
+## Installing Additional Tools
+
+By default, `cargo-leptos` uses `nightly` Rust, `cargo-generate`, and `sass`. If you run into any trouble, you may need to install one or more of these tools.
+
+1. `rustup toolchain install nightly --allow-downgrade` - make sure you have Rust nightly
+2. `rustup target add wasm32-unknown-unknown` - add the ability to compile Rust to WebAssembly
+3. `cargo install cargo-generate` - install `cargo-generate` binary (should be installed automatically in future)
+4. `npm install -g sass` - install `dart-sass` (should be optional in future
+
+## Compiling for Release
+```bash
+cargo leptos build --release
 ```
 
+Will generate your server binary in target/server/release and your site package in target/site
 
-## Developing your Leptos CSR project
-
-To develop your Leptos CSR project, running
-
-```sh
-trunk serve --port 3000 --open
+## Testing Your Project
+```bash
+cargo leptos end-to-end
 ```
 
-will open your app in your default browser at `http://localhost:3000`.
-
-
-## Deploying your Leptos CSR project
-
-To build a Leptos CSR app for release, use the command
-
-```sh
-trunk build --release
+```bash
+cargo leptos end-to-end --release
 ```
 
-This will output the files necessary to run your app into the `dist` folder; you can then use any static site host to serve these files.
+Cargo-leptos uses Playwright as the end-to-end test tool.  
+Tests are located in end2end/tests directory.
 
-For further information about hosting Leptos CSR apps, please refer to [the Leptos Book chapter on deployment available here][deploy-csr].
+## Executing a Server on a Remote Machine Without the Toolchain
+After running a `cargo leptos build --release` the minimum files needed are:
 
+1. The server binary located in `target/server/release`
+2. The `site` directory and all files within located in `target/site`
 
-[Leptos]: https://github.com/leptos-rs/leptos
+Copy these files to your remote server. The directory structure should be:
+```text
+website-2
+site/
+```
+Set the following environment variables (updating for your project as needed):
+```text
+LEPTOS_OUTPUT_NAME="website-2"
+LEPTOS_SITE_ROOT="site"
+LEPTOS_SITE_PKG_DIR="pkg"
+LEPTOS_SITE_ADDR="127.0.0.1:3000"
+LEPTOS_RELOAD_PORT="3001"
+```
+Finally, run the server binary.
 
-[Trunk]: https://github.com/trunk-rs/trunk
-[Trunk-instructions]: https://trunkrs.dev/assets/
+## Licensing
 
-[deploy-csr]: https://book.leptos.dev/deployment/csr.html
+This template itself is released under the Unlicense. You should replace the LICENSE for your own application with an appropriate license if you plan to release it publicly.
