@@ -86,3 +86,10 @@ spec:
             name: gameserver
             port:
               number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: website
+            port:
+              number: 80

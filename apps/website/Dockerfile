@@ -20,7 +20,7 @@ FROM rustlang/rust:nightly-alpine as runner
 
 WORKDIR /app
 
-COPY --from=builder /work/target/release/leptos_start /app/
+COPY --from=builder /work/target/release/website-2 /app/
 COPY --from=builder /work/target/site /app/site
 COPY --from=builder /work/Cargo.toml /app/
 
@@ -29,4 +29,4 @@ ENV LEPTOS_SITE_ADDR="0.0.0.0:8080"
 ENV LEPTOS_SITE_ROOT=./site
 EXPOSE 8080
 
-CMD ["/app/leptos_start"]
+CMD ["/app/website-2"]
