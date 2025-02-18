@@ -1,8 +1,9 @@
 FROM rust:1.81 as builder
 WORKDIR /usr/src/game-server
-COPY /Cargo.toml .
-COPY /Cargo.lock .
-COPY /src ./src
+COPY apps/game-server/Cargo.toml .
+COPY apps/game-server/Cargo.lock .
+COPY libs/arcadio /usr/libs/arcadio
+COPY apps/game-server/src ./src
 RUN cargo install --path .
 
 FROM debian:bookworm-slim

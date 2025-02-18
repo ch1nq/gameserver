@@ -14,7 +14,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-arcadio-client = { git = "https://github.com/ch1nq/gameserver.git", branch = "main", subdirectory = "libs/arcadio-client" }
+arcadio-client = { path = "../../libs/arcadio-client" }
 
 [tool.ruff]
 line-length = 120
@@ -25,3 +25,4 @@ docstring-code-format = true
 [tool.ruff.lint.isort]
 # Use a single line after each import block.
 lines-after-imports = 1
+

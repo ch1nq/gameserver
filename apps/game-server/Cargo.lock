@@ -78,8 +78,6 @@ dependencies = [
 [[package]]
 name = "arcadio"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85cd61557f360df1ade72d7ab1ee6d83ac15b1524390418ff6a5151264291348"
 dependencies = [
  "futures-util",
  "log",

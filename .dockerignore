@@ -1,0 +1,15 @@
+**/Dockerfile
+.dockerignore
+.git/
+.gitignore
+.venv/
+**/target/
+.ruff_cache/
+*/.ruff_cache/
+README.md
+**/README.md
+*.pyc
+*.pyo
+*.pyd
+__pycache__
+**/__pycache__

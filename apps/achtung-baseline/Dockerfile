@@ -1,11 +1,20 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+
+WORKDIR /app/achtung-baseline
 
 # Copy the project into the image
-ADD . /app
+ADD apps/achtung-baseline/pyproject.toml /app/achtung-baseline/pyproject.toml
+ADD apps/achtung-baseline/uv.lock /app/achtung-baseline/uv.lock
+ADD libs/arcadio-client /libs/arcadio-client
 
-# Sync the project into a new environment, using the frozen lockfile
-WORKDIR /app
 RUN uv sync --frozen
 
-# Run
+
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runner
+
+WORKDIR /app/achtung-baseline
+
+ADD apps/achtung-baseline /app/achtung-baseline
+COPY --from=builder /app /app
+
 ENTRYPOINT ["uv", "run", "python", "client.py"]
