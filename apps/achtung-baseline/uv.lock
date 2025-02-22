@@ -16,7 +16,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "arcadio-client", editable = "../../libs/arcadio_client" }]
+requires-dist = [{ name = "arcadio-client", editable = "../../libs/arcadio-client" }]
 
 [package.metadata.requires-dev]
 dev = [{ name = "ruff", specifier = ">=0.7.3" }]
@@ -24,7 +24,7 @@ dev = [{ name = "ruff", specifier = ">=0.7.3" }]
 [[package]]
 name = "arcadio-client"
 version = "0.1.0"
-source = { editable = "../../libs/arcadio_client" }
+source = { editable = "../../libs/arcadio-client" }
 dependencies = [
     { name = "attrs" },
     { name = "cattrs" },

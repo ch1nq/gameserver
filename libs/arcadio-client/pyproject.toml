@@ -15,10 +15,6 @@ dev = [
     "ruff>=0.7.3",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [tool.ruff]
 line-length = 120
 
@@ -28,3 +24,8 @@ docstring-code-format = true
 [tool.ruff.lint.isort]
 # Use a single line after each import block.
 lines-after-imports = 1
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
