@@ -49,7 +49,7 @@ spec:
       serviceAccountName: deploy-controller
       containers:
       - name: controller
-        image: localhost:5000/build-server:latest
+        image: k3d-achtung:43365/build-server:latest
 
 ---
 # External service for the deployment controller
@@ -61,10 +61,10 @@ spec:
   selector:
     app: deploy-controller
   ports:
-  - protocol: TCP
-    port: 80
-    targetPort: 5000
-    nodePort: 30109
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+      nodePort: 30109
   type: NodePort
 
 # Service account and permissions for Kaniko

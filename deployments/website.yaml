@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: website
-        image: localhost:5000/website:latest
+        image: k3d-achtung:43365/website:latest
         ports:
         - containerPort: 8080
 

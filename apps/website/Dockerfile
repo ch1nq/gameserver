@@ -1,28 +1,34 @@
 FROM lukemathwalker/cargo-chef:latest-rust-1.84.1 AS chef
 WORKDIR /app
 
+
 FROM chef AS planner
-COPY . .
+COPY apps/website /app
 RUN cargo chef prepare --recipe-path recipe.json
+
 
 FROM chef AS builder 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl npm libc6-dev clang
 RUN npm install -g sass
-RUN curl --proto '=https' --tlsv1.2 -LsSf https://github.com/leptos-rs/cargo-leptos/releases/latest/download/cargo-leptos-installer.sh | sh
+RUN cargo install --locked cargo-leptos --version=0.2.26
 RUN rustup target add wasm32-unknown-unknown
+
 COPY --from=planner /app/recipe.json recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo chef cook --release --recipe-path recipe.json --target wasm32-unknown-unknown
-# RUN --mount=type=cache,target=/usr/local/cargo/registry \
+
+    # RUN --mount=type=cache,target=/usr/local/cargo/registry \
 #     --mount=type=cache,target=/usr/local/cargo/git \
 #     cargo chef cook --release --recipe-path recipe.json --target x86_64-unknown-linux-gnu
-COPY . .
+# RUN cargo build --release --bin app
+
+COPY apps/website /app
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo leptos build --release -vv
-# RUN cargo build --release --bin app
+
 
 FROM debian:bookworm-slim AS runner
 WORKDIR /app

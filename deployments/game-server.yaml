@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: gameserver-app
-        image: localhost:5000/game-server:latest
+        image: k3d-achtung:43365/game-server:latest
         ports:
         - containerPort: 80
         env:
@@ -44,52 +44,33 @@ spec:
     targetPort: 80
 
 ---
-apiVersion: traefik.containo.us/v1alpha1
-kind: Middleware
-metadata:
-  name: oauth2-proxy
-spec:
-  forwardAuth:
-    address: http://oauth2-proxy.default.svc.cluster.local:4180/oauth2/auth
-    trustForwardHeader: true
-    authResponseHeaders:
-      - X-Auth-Request-User
-      - X-Auth-Request-Email
-      - Authorization
-      - X-Auth-Request-Access-Token
-
----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: gameserver-external
   annotations:
-    kubernetes.io/ingress.class: "traefik"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-    traefik.ingress.kubernetes.io/redirect-entry-point: https
-    traefik.ingress.kubernetes.io/router.middlewares: default-oauth2-proxy@kubernetescrd
-    traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
-    traefik.ingress.kubernetes.io/router.tls: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
 spec:
+  ingressClassName: traefik
   tls:
     - hosts:
-      - achtung.daske.dk
+        - achtung.daske.dk
       secretName: achtung-daske-dk-tls
   rules:
-  - host: achtung.daske.dk
-    http:
-      paths:
-      - path: /join/observer
-        pathType: Exact
-        backend:
-          service:
-            name: gameserver
-            port:
-              number: 80
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: website
-            port:
-              number: 80
+    - host: achtung.daske.dk
+      http:
+        paths:
+          - path: /join/observer
+            pathType: Exact
+            backend:
+              service:
+                name: gameserver
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: website
+                port:
+                  number: 80

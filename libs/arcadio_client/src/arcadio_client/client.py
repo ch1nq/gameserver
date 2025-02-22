@@ -6,8 +6,8 @@ import attrs
 import cattrs
 import websockets
 
-import game
-import strategy
+from arcadio_client import game
+from arcadio_client import strategy
 
 PlayerIdT = TypeVar("PlayerIdT")
 GameActionT = TypeVar("GameActionT")

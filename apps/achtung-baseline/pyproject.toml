@@ -13,9 +13,6 @@ dev = [
     "ruff>=0.7.3",
 ]
 
-[tool.uv.sources]
-arcadio-client = { path = "../../libs/arcadio-client" }
-
 [tool.ruff]
 line-length = 120
 
@@ -25,4 +22,7 @@ docstring-code-format = true
 [tool.ruff.lint.isort]
 # Use a single line after each import block.
 lines-after-imports = 1
+
+[tool.uv.sources]
+arcadio-client = { path = "../../libs/arcadio_client", editable = true }
 

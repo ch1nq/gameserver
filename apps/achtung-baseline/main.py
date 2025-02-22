@@ -3,9 +3,9 @@ import logging
 import os
 import random
 
-import achtung
-import game_client
-import strategy
+from arcadio_client import achtung
+from arcadio_client import client
+from arcadio_client import strategy
 
 
 class RandomStrategy(strategy.Strategy):
@@ -14,16 +14,15 @@ class RandomStrategy(strategy.Strategy):
         return action
 
 
-async def create_client(request_updates: bool) -> game_client.ConnectedGameClient:
+async def create_client(request_updates: bool) -> client.ConnectedGameClient:
     strat = RandomStrategy()
     host = os.environ.get("SERVER_HOST", default="localhost")
     port = int(os.environ.get("SERVER_PORT", default=3030))
-    client = await game_client.GameClient(
+    return await client.GameClient(
         game_state_type=achtung.Achtung,
         game_strategy=strat,
         request_updates=request_updates,
     ).connect(host, port)
-    return client
 
 
 async def run_client_indefinitely() -> None:

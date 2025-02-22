@@ -1,7 +1,7 @@
 import abc
 from typing import Protocol, TypeVar
 from concurrent.futures import Future, ThreadPoolExecutor
-import game
+from arcadio_client import game
 
 
 PlayerId = TypeVar("PlayerId", contravariant=True)

@@ -14,7 +14,8 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runner
 
 WORKDIR /app/achtung-baseline
 
+ADD libs/arcadio-client /libs/arcadio-client
 ADD apps/achtung-baseline /app/achtung-baseline
 COPY --from=builder /app /app
 
-ENTRYPOINT ["uv", "run", "python", "client.py"]
+ENTRYPOINT ["uv", "run", "python", "main.py"]

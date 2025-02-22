@@ -1,7 +1,7 @@
 import attrs
 import enum
 from typing import NewType
-import game
+from arcadio_client import game
 
 PlayerId = NewType("PlayerId", int)
 BlobId = NewType("BlobId", int)
