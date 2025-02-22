@@ -8,6 +8,11 @@ from arcadio_client import client
 from arcadio_client import strategy
 
 
+def main():
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(run_client_indefinitely())
+
+
 class RandomStrategy(strategy.Strategy):
     def take_action(self, _game_state: achtung.Achtung, player_id: achtung.PlayerId) -> achtung.GameAction | None:
         action = random.choice(list(achtung.GameAction))
@@ -32,5 +37,4 @@ async def run_client_indefinitely() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(run_client_indefinitely())
+    main()

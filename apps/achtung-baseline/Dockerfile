@@ -1,21 +1,17 @@
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app/achtung-baseline
+
+# Install dependencies
+ADD libs/arcadio-client /libs/arcadio-client
+COPY apps/achtung-baseline/uv.lock apps/achtung-baseline/pyproject.toml /app/achtung-baseline/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project --no-editable
 
 # Copy the project into the image
-ADD apps/achtung-baseline/pyproject.toml /app/achtung-baseline/pyproject.toml
-ADD apps/achtung-baseline/uv.lock /app/achtung-baseline/uv.lock
-ADD libs/arcadio-client /libs/arcadio-client
+ADD apps/achtung-baseline/ /app/achtung-baseline
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
 
-RUN uv sync --frozen
-
-
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS runner
-
-WORKDIR /app/achtung-baseline
-
-ADD libs/arcadio-client /libs/arcadio-client
-ADD apps/achtung-baseline /app/achtung-baseline
-COPY --from=builder /app /app
-
-ENTRYPOINT ["uv", "run", "python", "main.py"]
+ENTRYPOINT ["/app/achtung-baseline/.venv/bin/python", "main.py"]

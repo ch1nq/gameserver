@@ -6,8 +6,6 @@
 **/target/
 .ruff_cache/
 */.ruff_cache/
-README.md
-**/README.md
 *.pyc
 *.pyo
 *.pyd
