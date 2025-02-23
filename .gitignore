@@ -6,3 +6,4 @@
 **/.ruff_cache/
 **/target/
 **/dist/
+.DS_Store

@@ -4,6 +4,7 @@ metadata:
   name: website
 spec:
   replicas: 1
+  revisionHistoryLimit: 1
   selector:
     matchLabels:
       app: website
@@ -14,9 +15,25 @@ spec:
     spec:
       containers:
       - name: website
-        image: k3d-achtung:43365/website:latest
+        image: k3d-achtung:43365/website3:latest
         ports:
         - containerPort: 8080
+        env:
+        - name: PORT
+          value: "8080"
+        - name: RUST_LOG
+          value: "debug"
+        - name: GITHUB_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: github-oauth-app
+              key: CLIENT_ID
+        - name: GITHUB_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: github-oauth-app
+              key: CLIENT_SECRET
+
 
 ---
 apiVersion: v1
