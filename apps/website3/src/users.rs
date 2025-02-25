@@ -9,8 +9,6 @@ use oauth2::{
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 use async_trait::async_trait;
-use tracing;
-use std::error::Error;
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub struct User {

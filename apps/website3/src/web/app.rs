@@ -11,7 +11,7 @@ use time::Duration;
 
 use crate::{
     users::Backend,
-    web::{auth, oauth, protected},
+    web::{auth, oauth, protected, frontpage},
 };
 
 pub struct App {
@@ -56,11 +56,15 @@ impl App {
         let backend = Backend::new(self.db, self.client);
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
-        let app = protected::router()
-            .route_layer(login_required!(Backend, login_url = "/login"))
-            .merge(auth::router())
-            .merge(oauth::router())
-            .layer(auth_layer);
+        let app = frontpage::router()
+            .merge(
+                protected::router()
+                .route_layer(login_required!(Backend, login_url = "/login"))
+                .merge(auth::router())
+                .merge(oauth::router())
+                .layer(auth_layer)
+            );
+
         
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         axum::serve(listener, app.into_make_service()).await?;
