@@ -18,10 +18,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )))
         .with(tracing_subscriber::fmt::layer())
         .try_init()?;
-    
+
     // Fetch address and port from environment variables.
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
-    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port.parse().unwrap()));
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port.parse().unwrap()));
 
     App::new().await?.serve(addr).await
 }

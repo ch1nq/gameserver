@@ -1,9 +1,10 @@
 default: build-all
 
+registry_host := "localhost"
 registry_port := "43365"
 build_version := `git rev-parse --short HEAD`
 
-build app:
+build app registry_host=registry_host registry_port=registry_port:
     # Build and push the images to the local registry
     @echo "Building and pushing {{app}}:{{build_version}}"
     docker build . -f apps/{{app}}/Dockerfile \
@@ -11,9 +12,9 @@ build app:
         -t {{app}}:latest \
         -t k3d-achtung:{{registry_port}}/{{app}}:{{build_version}} \
         -t k3d-achtung:{{registry_port}}/{{app}}:latest \
-        -t localhost:{{registry_port}}/{{app}}:{{build_version}} \
-        -t localhost:{{registry_port}}/{{app}}:latest
-    docker push localhost:{{registry_port}}/{{app}}
+        -t {{registry_host}}:{{registry_port}}/{{app}}:{{build_version}} \
+        -t {{registry_host}}:{{registry_port}}/{{app}}:latest
+    docker push {{registry_host}}:{{registry_port}}/{{app}}
 
 build-all:
     for app in $(ls apps | tr '\n' ' '); do \

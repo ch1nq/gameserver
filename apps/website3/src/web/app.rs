@@ -1,5 +1,9 @@
 use std::env;
 
+use crate::{
+    users::Backend,
+    web::{auth, frontpage, oauth, protected},
+};
 use axum_login::{
     login_required,
     tower_sessions::{cookie::SameSite, Expiry, MemoryStore, SessionManagerLayer},
@@ -8,11 +12,7 @@ use axum_login::{
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
 use sqlx::SqlitePool;
 use time::Duration;
-
-use crate::{
-    users::Backend,
-    web::{auth, oauth, protected, frontpage},
-};
+use tower_http::services::ServeDir;
 
 pub struct App {
     db: SqlitePool,
@@ -40,32 +40,30 @@ impl App {
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         // Session layer.
-        //
-        // This uses `tower-sessions` to establish a layer that will provide the session
-        // as a request extension.
         let session_store = MemoryStore::default();
         let session_layer = SessionManagerLayer::new(session_store)
             .with_secure(false)
-            .with_same_site(SameSite::Lax) // Ensure we send the cookie from the OAuth redirect.
+            .with_same_site(SameSite::Lax)
             .with_expiry(Expiry::OnInactivity(Duration::days(1)));
 
         // Auth service.
-        //
-        // This combines the session layer with our backend to establish the auth
-        // service which will provide the auth session as a request extension.
         let backend = Backend::new(self.db, self.client);
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
-        let app = frontpage::router()
+        // Static files service
+        let static_service = ServeDir::new("static");
+
+        let app = axum::Router::new()
+            .merge(frontpage::router())
             .merge(
                 protected::router()
-                .route_layer(login_required!(Backend, login_url = "/login"))
-                .merge(auth::router())
-                .merge(oauth::router())
-                .layer(auth_layer)
-            );
+                    .route_layer(login_required!(Backend, login_url = "/login"))
+                    .merge(auth::router())
+                    .merge(oauth::router())
+                    .layer(auth_layer),
+            )
+            .nest_service("/static", static_service);
 
-        
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         axum::serve(listener, app.into_make_service()).await?;
 

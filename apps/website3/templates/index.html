@@ -1,12 +1,17 @@
-<html>
+{% extends "base.html" %}
 
-<head>
-    <title>Tihi</title>
-</head>
+{% block title %}Index{% endblock %}
 
-<body>
-    <span><strong>Hehe</strong></span>
-    <p>{{ foo }}</p>
-</body>
+{% block content %}
 
-</html>
+<div class="h-screen">
+    <div class="flex flex-row-reverse h-full">
+        <main class="flex flex-col w-full px-5 pt-4 bg-gray-200 overflow-y-scroll">
+            {% include "achtung_live.html" %}
+        </main>
+        {% include "sidebar.html" %}
+    </div>
+</div>
+
+
+{% endblock %}
