@@ -18,5 +18,6 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y openssl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
+COPY apps/website3/static /app/static
 COPY --from=builder /app/target/release/website /usr/local/bin/
 ENTRYPOINT ["/usr/local/bin/website"]
