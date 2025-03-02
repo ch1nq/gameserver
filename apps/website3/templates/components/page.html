@@ -6,10 +6,10 @@
 
 <div class="h-screen">
     <div class="flex flex-row-reverse h-full">
-        <main class="flex flex-col w-full px-5 pt-4 bg-gray-200 overflow-y-scroll">
-            {% include "achtung_live.html" %}
+        <main class="flex flex-col w-full px-5 pt-4 overflow-y-scroll">
+            {% block page_content %}<p>Placeholder content</p>{% endblock %}
         </main>
-        {% include "sidebar.html" %}
+        {% include "components/sidebar.html" %}
     </div>
 </div>
 

@@ -14,7 +14,7 @@ use crate::{users::AuthSession, web::oauth::CSRF_STATE_KEY};
 pub const NEXT_URL_KEY: &str = "auth.next-url";
 
 #[derive(Template)]
-#[template(path = "login.html")]
+#[template(path = "pages/login.html")]
 pub struct LoginTemplate {
     pub message: Option<String>,
     pub next: Option<String>,

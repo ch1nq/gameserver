@@ -2,7 +2,7 @@ use std::env;
 
 use crate::{
     users::Backend,
-    web::{auth, frontpage, oauth, protected},
+    web::{auth, oauth, protected, public},
 };
 use axum_login::{
     login_required,
@@ -39,6 +39,9 @@ impl App {
     }
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+        // Static files service
+        let static_service = ServeDir::new("static");
+
         // Session layer.
         let session_store = MemoryStore::default();
         let session_layer = SessionManagerLayer::new(session_store)
@@ -50,19 +53,16 @@ impl App {
         let backend = Backend::new(self.db, self.client);
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
-        // Static files service
-        let static_service = ServeDir::new("static");
+        let protected_service = protected::router()
+            .route_layer(login_required!(Backend, login_url = "/login"))
+            .merge(auth::router())
+            .merge(oauth::router())
+            .layer(auth_layer);
 
         let app = axum::Router::new()
-            .merge(frontpage::router())
-            .merge(
-                protected::router()
-                    .route_layer(login_required!(Backend, login_url = "/login"))
-                    .merge(auth::router())
-                    .merge(oauth::router())
-                    .layer(auth_layer),
-            )
-            .nest_service("/static", static_service);
+            .nest_service("/static", static_service)
+            .merge(public::router())
+            .merge(protected_service);
 
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         axum::serve(listener, app.into_make_service()).await?;

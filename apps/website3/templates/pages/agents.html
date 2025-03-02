@@ -1,0 +1,37 @@
+{% extends "components/page.html" %}
+
+{% block title %}Achtung battle{% endblock %}
+
+{% block page_content %}
+
+<h1 class="text-2xl font-semibold mt-4">Manage agents</h1>
+
+<div class="flex flex-col">
+    <a href="/agents/new" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded mt-4">New
+        agent</a>
+</div>
+
+<table class="table-auto mt-4">
+    <thead>
+        <tr>
+            <th class="px-4 py-2">Name</th>
+            <th class="px-4 py-2">Status</th>
+            <th class="px-4 py-2">Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for agent in agents %}
+        <tr>
+            <td class="border px-4 py-2">{{ agent.name }}</td>
+            <td class="border px-4 py-2">{{ agent.status }}</td>
+            <td class="border px-4 py-2">
+                <a href="/agents/" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Edit</a>
+                <a href="/agents/" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">Delete</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+
+{% endblock %}

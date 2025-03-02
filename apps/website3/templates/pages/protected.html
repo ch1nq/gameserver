@@ -1,0 +1,13 @@
+{% extends "components/page.html" %}
+
+{% block title %}Protected{% endblock %}
+
+{% block page_content %}
+
+{% if let Some(user) = user %}
+<p>Logged in as {{user.username}}</p>
+{% else %}
+<p>Not logged in</p>
+{% endif %}
+
+{% endblock %}

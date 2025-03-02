@@ -4,4 +4,4 @@ mod app;
 mod auth;
 mod oauth;
 mod protected;
-mod frontpage;
+mod public;
