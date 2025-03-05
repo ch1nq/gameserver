@@ -1,18 +1,18 @@
-use askama::Template;
 use axum::{
     extract::Query,
     http::StatusCode,
-    response::{Html, IntoResponse, Redirect},
+    response::{IntoResponse, Redirect},
     routing::get,
     Router,
 };
 use axum_login::tower_sessions::Session;
+use maud::html;
 use oauth2::CsrfToken;
 use serde::Deserialize;
 
 use crate::{
     users::{AuthSession, Credentials},
-    web::auth::{LoginTemplate, NEXT_URL_KEY},
+    web::auth::NEXT_URL_KEY,
 };
 
 pub const CSRF_STATE_KEY: &str = "oauth.csrf-state";
@@ -53,16 +53,11 @@ mod get {
             Ok(None) => {
                 return (
                     StatusCode::UNAUTHORIZED,
-                    Html(
-                        LoginTemplate {
-                            message: Some("Invalid CSRF state.".to_string()),
-                            next: None,
-                        }
-                        .render()
-                        .unwrap(),
-                    ),
+                    html! {
+                        p {"Invalid CSRF state."}
+                    },
                 )
-                    .into_response()
+                    .into_response();
             }
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         };

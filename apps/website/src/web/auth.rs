@@ -1,8 +1,8 @@
-use askama::Template;
+use crate::web::layouts::pages;
 use axum::{
     extract::Query,
     http::StatusCode,
-    response::{Html, IntoResponse, Redirect},
+    response::{IntoResponse, Redirect},
     routing::{get, post},
     Form, Router,
 };
@@ -12,13 +12,6 @@ use serde::Deserialize;
 use crate::{users::AuthSession, web::oauth::CSRF_STATE_KEY};
 
 pub const NEXT_URL_KEY: &str = "auth.next-url";
-
-#[derive(Template)]
-#[template(path = "pages/login.html")]
-pub struct LoginTemplate {
-    pub message: Option<String>,
-    pub next: Option<String>,
-}
 
 // This allows us to extract the "next" field from the query string. We use this
 // to redirect after log in.
@@ -61,15 +54,8 @@ mod post {
 mod get {
     use super::*;
 
-    pub async fn login(Query(NextUrl { next }): Query<NextUrl>) -> Html<String> {
-        Html(
-            LoginTemplate {
-                message: None,
-                next,
-            }
-            .render()
-            .unwrap(),
-        )
+    pub async fn login(Query(NextUrl { next }): Query<NextUrl>) -> impl IntoResponse {
+        pages::login(next, None)
     }
 
     pub async fn logout(mut auth_session: AuthSession) -> impl IntoResponse {

@@ -2,8 +2,9 @@ use std::env;
 
 use crate::{
     users::Backend,
-    web::{auth, oauth, protected, public},
+    web::{auth, layouts::pages, oauth, protected, public},
 };
+use axum::{handler::HandlerWithoutStateExt, http::StatusCode, response::IntoResponse};
 use axum_login::{
     login_required,
     tower_sessions::{cookie::SameSite, Expiry, MemoryStore, SessionManagerLayer},
@@ -42,6 +43,9 @@ impl App {
         // Static files service
         let static_service = ServeDir::new("static");
 
+        // Fallback service
+        let fallback_service = (StatusCode::NOT_FOUND, pages::not_found()).into_service();
+
         // Session layer.
         let session_store = MemoryStore::default();
         let session_layer = SessionManagerLayer::new(session_store)
@@ -53,16 +57,17 @@ impl App {
         let backend = Backend::new(self.db, self.client);
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
-        let protected_service = protected::router()
+        let services = protected::router()
             .route_layer(login_required!(Backend, login_url = "/login"))
             .merge(auth::router())
             .merge(oauth::router())
+            .merge(public::router())
             .layer(auth_layer);
 
         let app = axum::Router::new()
             .nest_service("/static", static_service)
-            .merge(public::router())
-            .merge(protected_service);
+            .fallback_service(fallback_service)
+            .merge(services);
 
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         axum::serve(listener, app.into_make_service()).await?;

@@ -5,13 +5,12 @@ edition = "2021"
 publish = false
 
 [dependencies]
-askama = { version = "0.12.1", features = ["with-axum"] }
-askama_axum = "0.4.0"
 async-trait = "0.1.86"
 axum = "0.8.1"
 axum-login = "0.17.0"
 http = "1.0.0"
 hyper = "1.0.1"
+maud = { version = "0.27.0", features = ["axum"] }
 oauth2 = "4.4.2"
 reqwest = { version = "0.12.12", features = ["json"] }
 serde = "1"
