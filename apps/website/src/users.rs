@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use axum::http::header::{AUTHORIZATION, USER_AGENT};
 use axum_login::{AuthUser, AuthnBackend, UserId};
 use oauth2::{
@@ -7,8 +8,7 @@ use oauth2::{
     AuthorizationCode, CsrfToken, TokenResponse,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
-use async_trait::async_trait;
+use sqlx::{FromRow, PgPool};
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
@@ -67,12 +67,12 @@ pub enum BackendError {
 
 #[derive(Debug, Clone)]
 pub struct Backend {
-    db: SqlitePool,
+    db: PgPool,
     client: BasicClient,
 }
 
 impl Backend {
-    pub fn new(db: SqlitePool, client: BasicClient) -> Self {
+    pub fn new(db: PgPool, client: BasicClient) -> Self {
         Self { db, client }
     }
 
@@ -123,7 +123,7 @@ impl AuthnBackend for Backend {
         let user = sqlx::query_as(
             r#"
             insert into users (username, access_token)
-            values (?, ?)
+            values ($1, $2)
             on conflict(username) do update
             set access_token = excluded.access_token
             returning *
@@ -139,7 +139,7 @@ impl AuthnBackend for Backend {
     }
 
     async fn get_user(&self, user_id: &UserId<Self>) -> Result<Option<Self::User>, Self::Error> {
-        sqlx::query_as("select * from users where id = ?")
+        sqlx::query_as("select * from users where id = $1")
             .bind(user_id)
             .fetch_optional(&self.db)
             .await

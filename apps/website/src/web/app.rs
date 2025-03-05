@@ -11,12 +11,15 @@ use axum_login::{
     AuthManagerLayerBuilder,
 };
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
-use sqlx::SqlitePool;
 use time::Duration;
 use tower_http::services::ServeDir;
 
+use sqlx::PgPool;
+
+use tower_sessions_sqlx_store::PostgresStore;
+
 pub struct App {
-    db: SqlitePool,
+    db: PgPool,
     client: BasicClient,
 }
 
@@ -33,7 +36,8 @@ impl App {
         let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())?;
         let client = BasicClient::new(client_id, Some(client_secret), auth_url, Some(token_url));
 
-        let db = SqlitePool::connect(":memory:").await?;
+        let db_connection_str = std::env::var("DATABASE_URL").expect("Database url not defined");
+        let db = PgPool::connect(&db_connection_str).await?;
         sqlx::migrate!().run(&db).await?;
 
         Ok(Self { db, client })
@@ -47,7 +51,12 @@ impl App {
         let fallback_service = (StatusCode::NOT_FOUND, pages::not_found()).into_service();
 
         // Session layer.
-        let session_store = MemoryStore::default();
+        //
+        // This uses `tower-sessions` to establish a layer that will provide the session
+        // as a request extension.
+        let session_store = PostgresStore::new(self.db.clone());
+        session_store.migrate().await?;
+
         let session_layer = SessionManagerLayer::new(session_store)
             .with_secure(false)
             .with_same_site(SameSite::Lax)

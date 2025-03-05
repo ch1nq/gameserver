@@ -52,13 +52,31 @@ configure-gh-oauth gh_oauth_id gh_oauth_secret:
         --from-literal=CLIENT_SECRET={{gh_oauth_secret}}
     kubectl apply -f deployments/website.yaml
 
+postgres_user := "website_user"
+postgres_db := "website_db"
+
+configure-postgres password:
+    kubectl create secret generic postgres-credentials \
+        --from-literal=POSTGRES_PASSWORD="{{password}}" \
+        --from-literal=DATABASE_URL="postgres://{{postgres_user}}:{{password}}@postgres:5432/{{postgres_db}}"
+    kubectl apply -f deployments/website.yaml
+
+deploy-local-postgres password:
+    docker run --name postgres-achtung \
+        -e POSTGRES_PASSWORD="{{password}}" \
+        -e POSTGRES_USER="{{postgres_user}}" \
+        -e POSTGRES_DB="{{postgres_db}}" \
+        -p 5432:5432 \
+        -d postgres:15
+
 bootstrap-cluster:
     # Bootstrap the k3d cluster
     k3d registry create achtung --port {{registry_port}}
     k3d cluster create --registry-use k3d-achtung:{{registry_port}} \
         -p "80:80@loadbalancer" -p "443:443@loadbalancer" -p "30109:30109@loadbalancer"
 
-    # Install cert-manager
+    # Install postgres and cert-manager helm repos
+    helm repo add bitnami https://charts.bitnami.com/bitnami
     helm repo add jetstack https://charts.jetstack.io
     helm repo update
     helm install cert-manager jetstack/cert-manager \
