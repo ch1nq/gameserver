@@ -10,7 +10,6 @@ use crate::users::AuthSession;
 pub fn router() -> Router<()> {
     Router::new()
         .route("/agents", get(self::get::agents))
-        .route("/agents/new", get(self::get::new_agent))
         .route("/agents/new", post(self::post::new_agent))
         .route("/settings", get(self::get::settings))
 }
@@ -22,10 +21,6 @@ mod get {
 
     pub async fn agents(auth_session: AuthSession) -> impl IntoResponse {
         pages::agents(&auth_session, get_agents())
-    }
-
-    pub async fn new_agent(auth_session: AuthSession) -> impl IntoResponse {
-        pages::new_agent(&auth_session)
     }
 
     pub async fn settings(auth_session: AuthSession) -> impl IntoResponse {
