@@ -52,6 +52,20 @@ spec:
         image: k3d-achtung:43365/build-server:latest
 
 ---
+# Internal service for the deployment controller
+apiVersion: v1
+kind: Service
+metadata:
+  name: deploy-controller-internal
+spec:
+  selector:
+    app: deploy-controller
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+
+---
 # External service for the deployment controller
 apiVersion: v1
 kind: Service
