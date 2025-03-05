@@ -33,7 +33,8 @@ spec:
             secretKeyRef:
               name: github-oauth-app
               key: CLIENT_SECRET
-        # Add DATABASE_URL environment variable to connect to PostgreSQL
+        - name: AGENT_MANAGER_URL
+          value: "http://deploy-controller:80"
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
@@ -86,8 +87,6 @@ spec:
         volumeMounts:
         - name: postgres-data
           mountPath: /var/lib/postgresql/data
-        - name: AGENT_MANAGER_URL
-          value: "http://deploy-controller:80"
       volumes:
       - name: postgres-data
         persistentVolumeClaim:
