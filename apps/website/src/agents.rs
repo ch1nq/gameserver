@@ -46,7 +46,7 @@ impl AgentManager {
         match req {
             BuildServerRequest::CreateAgent(create_agent) => {
                 self.client
-                    .post(&format!("{}/agents", self.base_url))
+                    .post(&format!("{}/build-and-deploy", self.base_url))
                     .json(&create_agent)
                     .send()
                     .await?
