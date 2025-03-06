@@ -60,7 +60,7 @@ mod post {
         tracing::info!("Got create agent request: {:?}", form);
 
         let req = CreateAgentRequest {
-            name: user.username + "/" + form.name.as_str(),
+            name: user.username + "-" + form.name.as_str(),
             git_repo: form.source_code_url,
             dockerfile_path: form.dockerfile_path,
             context_sub_path: form.context_sub_path,

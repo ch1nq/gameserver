@@ -68,6 +68,7 @@ deploy-local-postgres password:
         -e POSTGRES_DB="{{postgres_db}}" \
         -p 5432:5432 \
         -d postgres:15
+    set -x DATABASE_URL "postgres://{{postgres_user}}:{{password}}@localhost:5432/{{postgres_db}}"
 
 bootstrap-cluster:
     # Bootstrap the k3d cluster
