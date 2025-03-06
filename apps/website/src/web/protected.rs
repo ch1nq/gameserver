@@ -5,7 +5,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Redirect},
     routing::{get, post},
-    Extension, Router,
+    Extension, Form, Router,
 };
 use std::sync::Arc;
 
@@ -35,22 +35,37 @@ mod get {
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct CreateAgentForm {
+    name: String,
+    source_code_url: String,
+    dockerfile_path: Option<String>,
+    context_sub_path: Option<String>,
+}
+
 mod post {
     use super::*;
 
     pub async fn new_agent(
         auth_session: AuthSession,
         agent_manager: Extension<Arc<AgentManager>>,
+        Form(form): Form<CreateAgentForm>,
     ) -> impl IntoResponse {
+        let user = if let Some(user) = auth_session.user {
+            user
+        } else {
+            return StatusCode::UNAUTHORIZED.into_response();
+        };
         // TODO: Validate input
-        // TODO: put user_id in the agent name
+        tracing::info!("Got create agent request: {:?}", form);
 
         let req = CreateAgentRequest {
-            name: "ageeeeent".to_string(),
-            git_repo: "asdfsadf".to_string(),
-            dockerfile_path: None,
-            context_sub_path: None,
+            name: user.username + "/" + form.name.as_str(),
+            git_repo: form.source_code_url,
+            dockerfile_path: form.dockerfile_path,
+            context_sub_path: form.context_sub_path,
         };
+
         if let Err(err) = agent_manager.create_agent(req).await {
             eprintln!("Failed to create agent: {:?}", err);
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();

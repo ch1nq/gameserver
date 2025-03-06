@@ -20,7 +20,7 @@ pub struct Agent {
     pub stats: AgentStats,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct CreateAgentRequest {
     pub name: String,
     pub git_repo: String,
