@@ -202,6 +202,8 @@ def build_and_deploy():
         dockerfile_path = data.get("dockerfile_path", "Dockerfile")
         context_sub_path = data.get("context_sub_path", ".")
 
+        logging.info(f"Building and deploying {name} from {git_repo}")
+
         # Create and start the build job
         job_name = create_kaniko_build_job(
             name=name,
@@ -209,15 +211,19 @@ def build_and_deploy():
             dockerfile_path=dockerfile_path,
             context_sub_path=context_sub_path,
         )
+        logging.info(f"Build job {job_name} started. Waiting for completion...")
 
         # Wait for the build to complete
         wait_for_job_completion(job_name)
+        logging.info(f"Build job {job_name} completed")
 
         # Create/update the deployment with the new image
         image_name = f"localhost:{_DOCKER_REGISTRY_NODE_PORT}/{name}:latest"
+        logging.info(f"Deploying image {image_name}")
         create_or_update_deployment(name, image_name)
+        logging.info(f"Deployment for {name} updated")
 
-        return jsonify(
+        return jsonify( 
             {
                 "status": "success",
                 "message": f"Application {name} built and deployed successfully",
