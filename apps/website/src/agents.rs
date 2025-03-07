@@ -2,6 +2,8 @@ use reqwest::Client;
 
 #[derive(Debug, Clone)]
 pub enum AgentStatus {
+    Created,
+    Building,
     Active,
     Inactive,
 }
@@ -78,7 +80,7 @@ impl AgentManager {
             },
             Agent {
                 name: "Bob".to_string(),
-                status: AgentStatus::Inactive,
+                status: AgentStatus::Created,
                 stats: AgentStats {
                     wins: 5,
                     losses: 10,
@@ -87,7 +89,7 @@ impl AgentManager {
             },
             Agent {
                 name: "Charlie".to_string(),
-                status: AgentStatus::Active,
+                status: AgentStatus::Building,
                 stats: AgentStats {
                     wins: 7,
                     losses: 7,
@@ -96,7 +98,7 @@ impl AgentManager {
             },
             Agent {
                 name: "David".to_string(),
-                status: AgentStatus::Active,
+                status: AgentStatus::Building,
                 stats: AgentStats {
                     wins: 6,
                     losses: 8,
