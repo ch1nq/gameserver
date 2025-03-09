@@ -1,9 +1,11 @@
-use reqwest::Client;
+use crate::build_service::build_service_client::BuildServiceClient;
+use crate::build_service::{BuildRequest, BuildResponse, PollBuildRequest, PollBuildResponse};
 
 #[derive(Debug, Clone)]
 pub enum AgentStatus {
     Created,
-    Building,
+    Building { build_id: String },
+    BuildFailed,
     Active,
     Inactive,
 }
@@ -22,52 +24,30 @@ pub struct Agent {
     pub stats: AgentStats,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct CreateAgentRequest {
-    pub name: String,
-    pub git_repo: String,
-    pub dockerfile_path: Option<String>,
-    pub context_sub_path: Option<String>,
+impl Agent {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            status: AgentStatus::Created,
+            stats: AgentStats {
+                wins: 0,
+                losses: 0,
+                rank: 0,
+            },
+        }
+    }
 }
 
-pub enum BuildServerRequest {
-    CreateAgent(CreateAgentRequest),
-}
-
+#[derive(Debug, Clone)]
 pub struct AgentManager {
-    client: Client,
-    base_url: String,
+    client: BuildServiceClient<tonic::transport::Channel>,
+    agents: Vec<Agent>,
 }
+
+type AgentManagerError = Box<dyn std::error::Error>;
 
 impl AgentManager {
-    pub fn new(client: Client, base_url: String) -> Self {
-        Self { client, base_url }
-    }
-
-    async fn request(&self, req: BuildServerRequest) -> Result<(), reqwest::Error> {
-        match req {
-            BuildServerRequest::CreateAgent(create_agent) => {
-                self.client
-                    .post(&format!("{}/build-and-deploy", self.base_url))
-                    .json(&create_agent)
-                    .send()
-                    .await?
-                    .error_for_status()?;
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn create_agent(
-        &self,
-        create_agent: CreateAgentRequest,
-    ) -> Result<(), reqwest::Error> {
-        self.request(BuildServerRequest::CreateAgent(create_agent))
-            .await
-    }
-
-    pub async fn get_agents(&self) -> Result<Vec<Agent>, reqwest::Error> {
+    pub fn new(client: BuildServiceClient<tonic::transport::Channel>) -> Self {
         let agents = vec![
             Agent {
                 name: "Alice".to_string(),
@@ -87,53 +67,32 @@ impl AgentManager {
                     rank: 2,
                 },
             },
-            Agent {
-                name: "Charlie".to_string(),
-                status: AgentStatus::Building,
-                stats: AgentStats {
-                    wins: 7,
-                    losses: 7,
-                    rank: 3,
-                },
-            },
-            Agent {
-                name: "David".to_string(),
-                status: AgentStatus::Building,
-                stats: AgentStats {
-                    wins: 6,
-                    losses: 8,
-                    rank: 4,
-                },
-            },
-            Agent {
-                name: "Eve".to_string(),
-                status: AgentStatus::Inactive,
-                stats: AgentStats {
-                    wins: 4,
-                    losses: 11,
-                    rank: 5,
-                },
-            },
-            Agent {
-                name: "Frank".to_string(),
-                status: AgentStatus::Active,
-                stats: AgentStats {
-                    wins: 8,
-                    losses: 6,
-                    rank: 6,
-                },
-            },
-            Agent {
-                name: "Grace".to_string(),
-                status: AgentStatus::Active,
-                stats: AgentStats {
-                    wins: 9,
-                    losses: 5,
-                    rank: 7,
-                },
-            },
         ];
+        Self { client, agents }
+    }
+    pub async fn create_agent(
+        &mut self,
+        name: String,
+        git_repo: &str,
+        dockerfile_path: Option<&str>,
+        context_sub_path: Option<&str>,
+    ) -> Result<(), AgentManagerError> {
+        let mut agent = Agent::new(name);
 
+        let build_id = "123".to_string();
+
+        agent.status = AgentStatus::Building { build_id };
+        self.agents.push(agent);
+
+        Ok(())
+    }
+
+    pub async fn poll_build_status(&mut self) -> Result<(), AgentManagerError> {
+        Ok(())
+    }
+
+    pub async fn get_agents(&self) -> Result<Vec<Agent>, reqwest::Error> {
+        let agents = self.agents.clone();
         Ok(agents)
     }
 }

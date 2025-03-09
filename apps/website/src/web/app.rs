@@ -1,4 +1,5 @@
 use crate::agents::AgentManager;
+use crate::build_service::build_service_client::BuildServiceClient;
 use crate::{
     users::Backend,
     web::{auth, layouts::pages, oauth, protected, public},
@@ -20,7 +21,7 @@ use tower_sessions_sqlx_store::PostgresStore;
 pub struct App {
     db: PgPool,
     client: BasicClient,
-    agent_manager: Arc<AgentManager>,
+    agent_manager: AgentManager,
 }
 
 impl App {
@@ -40,10 +41,12 @@ impl App {
         let db = PgPool::connect(&db_connection_str).await?;
         sqlx::migrate!().run(&db).await?;
 
-        let reqwest_client = reqwest::Client::new();
-        let agent_manager_url =
-            env::var("AGENT_MANAGER_URL").expect("AGENT_MANAGER_URL not defined");
-        let agent_manager = Arc::new(AgentManager::new(reqwest_client, agent_manager_url));
+        let build_service_url = env::var("BUILD_SERIVCE_URL")
+            .unwrap_or("http://build-service.default.svc:50051".into());
+        let build_service_client = BuildServiceClient::connect(build_service_url)
+            .await
+            .expect("Failed to connect to build service");
+        let agent_manager = AgentManager::new(build_service_client);
 
         Ok(Self {
             db,
@@ -72,15 +75,11 @@ impl App {
         let backend = Backend::new(self.db, self.client);
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
-        // Agent manager service
-        let agent_manager_layer = Extension(self.agent_manager);
-
-        let services = protected::router()
+        let services = protected::router(self.agent_manager)
             .route_layer(login_required!(Backend, login_url = "/login"))
             .merge(auth::router())
             .merge(oauth::router())
             .merge(public::router())
-            .layer(agent_manager_layer)
             .layer(auth_layer);
 
         let app = axum::Router::new()

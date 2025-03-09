@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package buildservice;
+
+// Build and deploys containers from inside a Kubernetes cluster
+service BuildService {
+  // Start a build job for a container from a git repository
+  rpc Build(BuildRequest) returns (BuildResponse) {}
+  
+  // Poll the status of a running build job
+  rpc PollBuild(PollBuildRequest) returns (PollBuildResponse) {}
+  
+  // Deploy a built container to the Kubernetes cluster
+  rpc Deploy(DeployRequest) returns (DeployResponse) {}
+}
+
+// Request to build a container from a git repository
+message BuildRequest {
+  string name = 1;                // Application name
+  string git_repo = 2;            // Git repository URL
+  string dockerfile_path = 3;     // Path to Dockerfile, defaults to "Dockerfile"
+  string context_sub_path = 4;    // Git context sub-path, defaults to "."
+}
+
+// Response from a build request
+message BuildResponse {
+  enum Status {
+    SUCCESS = 0;
+    ERROR = 1;
+  }
+  
+  Status status = 1;         // Status of the request
+  string message = 2;        // Human-readable message
+  string build_id = 3;       // Unique identifier for the build job
+}
+
+// Request to poll the status of a build job
+message PollBuildRequest {
+  string build_id = 1;       // Build job identifier
+}
+
+// Response from a poll build request
+message PollBuildResponse {
+  enum Status {
+    SUCCESS = 0;
+    ERROR = 1;
+  }
+  
+  enum BuildStatus {
+    UNKNOWN = 0;
+    RUNNING = 1;
+    SUCCEEDED = 2;
+    FAILED = 3;
+  }
+  
+  Status status = 1;           // Status of the request
+  string message = 2;          // Human-readable message
+  BuildStatus build_status = 3; // Status of the build job
+}
+
+// Request to deploy a built container
+message DeployRequest {
+  string name = 1;             // Application name
+}
+
+// Response from a deploy request
+message DeployResponse {
+  enum Status {
+    SUCCESS = 0;
+    ERROR = 1;
+  }
+  
+  Status status = 1;           // Status of the request
+  string message = 2;          // Human-readable message
+}

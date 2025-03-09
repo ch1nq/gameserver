@@ -93,3 +93,12 @@ bootstrap-cluster:
 destroy-cluster:
     k3d cluster delete achtung
     k3d registry delete achtung
+
+compile-protos:
+    # Compile build-service proto files 
+    uv run --no-project --with "grpcio-tools>=1.70,<1.71" -- python -m grpc_tools.protoc -Iprotos \
+        --python_out=apps/build-service/protos \
+        --pyi_out=apps/build-service/protos \
+        --grpc_python_out=apps/build-service/protos \
+        protos/build_service.proto
+    

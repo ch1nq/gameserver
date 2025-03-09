@@ -1,19 +1,20 @@
-use crate::agents::{AgentManager, CreateAgentRequest};
+use crate::agents::AgentManager;
 use crate::users::AuthSession;
 use crate::web::layouts::pages;
 use axum::{
+    extract::State,
     http::StatusCode,
     response::{IntoResponse, Redirect},
     routing::{get, post},
-    Extension, Form, Router,
+    Form, Router,
 };
-use std::sync::Arc;
 
-pub fn router() -> Router<()> {
+pub fn router(agent_manager: AgentManager) -> Router<()> {
     Router::new()
         .route("/agents", get(self::get::agents))
         .route("/agents/new", post(self::post::new_agent))
         .route("/settings", get(self::get::settings))
+        .with_state(agent_manager)
 }
 
 mod get {
@@ -21,7 +22,7 @@ mod get {
 
     pub async fn agents(
         auth_session: AuthSession,
-        agent_manager: Extension<Arc<AgentManager>>,
+        agent_manager: State<AgentManager>,
     ) -> impl IntoResponse {
         let agents = match agent_manager.get_agents().await {
             Ok(agents) => agents,
@@ -48,7 +49,7 @@ mod post {
 
     pub async fn new_agent(
         auth_session: AuthSession,
-        agent_manager: Extension<Arc<AgentManager>>,
+        State(mut agent_manager): State<AgentManager>,
         Form(form): Form<CreateAgentForm>,
     ) -> impl IntoResponse {
         let user = if let Some(user) = auth_session.user {
@@ -59,14 +60,22 @@ mod post {
         // TODO: Validate input
         tracing::info!("Got create agent request: {:?}", form);
 
-        let req = CreateAgentRequest {
-            name: user.username + "-" + form.name.as_str(),
-            git_repo: form.source_code_url,
-            dockerfile_path: form.dockerfile_path,
-            context_sub_path: form.context_sub_path,
-        };
+        // Treat empty strings as None
+        let dockerfile_path = form.dockerfile_path.as_deref().filter(|s| !s.is_empty());
+        let context_sub_path = form.context_sub_path.as_deref().filter(|s| !s.is_empty());
 
-        if let Err(err) = agent_manager.create_agent(req).await {
+        let agent_name = format!("{}-{}", user.username, form.name);
+        let source_code_url = form.source_code_url.as_str();
+
+        if let Err(err) = agent_manager
+            .create_agent(
+                agent_name,
+                source_code_url,
+                dockerfile_path,
+                context_sub_path,
+            )
+            .await
+        {
             eprintln!("Failed to create agent: {:?}", err);
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }

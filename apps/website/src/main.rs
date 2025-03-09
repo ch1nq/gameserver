@@ -10,6 +10,9 @@ use crate::web::App;
 mod agents;
 mod users;
 mod web;
+mod build_service {
+    tonic::include_proto!("buildservice");
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
