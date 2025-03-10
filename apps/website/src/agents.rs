@@ -103,7 +103,6 @@ impl AgentManager {
                 agent.status = AgentStatus::BuildFailed;
             }
             Err(err) => {
-                agent.status = AgentStatus::BuildFailed;
                 return Err(err.into());
             }
         }
