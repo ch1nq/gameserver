@@ -1,14 +1,14 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
-WORKDIR /app/build-server
+WORKDIR /app/build-service
 
 # Install dependencies
-ADD apps/build-server/pyproject.toml /app/build-server/pyproject.toml
-ADD apps/build-server/uv.lock /app/build-server/uv.lock
+ADD apps/build-service/pyproject.toml /app/build-service/pyproject.toml
+ADD apps/build-service/uv.lock /app/build-service/uv.lock
 RUN uv sync --frozen
 
 # Copy the project into the image
-ADD apps/build-server /app/build-server
+ADD apps/build-service /app/build-service
 
 # Run
 ENTRYPOINT ["uv", "run", "python", "app.py"]

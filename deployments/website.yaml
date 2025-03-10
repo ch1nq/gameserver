@@ -33,8 +33,8 @@ spec:
             secretKeyRef:
               name: github-oauth-app
               key: CLIENT_SECRET
-        - name: AGENT_MANAGER_URL
-          value: "http://deploy-controller:80"
+        - name: BUILD_SERVICE_URL
+          value: "http://build-service-internal.default.svc.cluster.local:50051"
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
