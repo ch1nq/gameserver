@@ -3,9 +3,9 @@
 import grpc
 import warnings
 
-import build_service_pb2 as build__service__pb2
+from protos import build_service_pb2 as protos_dot_build__service__pb2
 
-GRPC_GENERATED_VERSION = '1.70.0'
+GRPC_GENERATED_VERSION = '1.71.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in build_service_pb2_grpc.py depends on'
+        + f' but the generated code in protos/build_service_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -26,7 +26,7 @@ if _version_not_supported:
 
 
 class BuildServiceStub(object):
-    """Service definition for the Kubernetes build and deploy service
+    """Build and deploys containers from inside a Kubernetes cluster
     """
 
     def __init__(self, channel):
@@ -37,23 +37,23 @@ class BuildServiceStub(object):
         """
         self.Build = channel.unary_unary(
                 '/buildservice.BuildService/Build',
-                request_serializer=build__service__pb2.BuildRequest.SerializeToString,
-                response_deserializer=build__service__pb2.BuildResponse.FromString,
+                request_serializer=protos_dot_build__service__pb2.BuildRequest.SerializeToString,
+                response_deserializer=protos_dot_build__service__pb2.BuildResponse.FromString,
                 _registered_method=True)
         self.PollBuild = channel.unary_unary(
                 '/buildservice.BuildService/PollBuild',
-                request_serializer=build__service__pb2.PollBuildRequest.SerializeToString,
-                response_deserializer=build__service__pb2.PollBuildResponse.FromString,
+                request_serializer=protos_dot_build__service__pb2.PollBuildRequest.SerializeToString,
+                response_deserializer=protos_dot_build__service__pb2.PollBuildResponse.FromString,
                 _registered_method=True)
         self.Deploy = channel.unary_unary(
                 '/buildservice.BuildService/Deploy',
-                request_serializer=build__service__pb2.DeployRequest.SerializeToString,
-                response_deserializer=build__service__pb2.DeployResponse.FromString,
+                request_serializer=protos_dot_build__service__pb2.DeployRequest.SerializeToString,
+                response_deserializer=protos_dot_build__service__pb2.DeployResponse.FromString,
                 _registered_method=True)
 
 
 class BuildServiceServicer(object):
-    """Service definition for the Kubernetes build and deploy service
+    """Build and deploys containers from inside a Kubernetes cluster
     """
 
     def Build(self, request, context):
@@ -82,18 +82,18 @@ def add_BuildServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'Build': grpc.unary_unary_rpc_method_handler(
                     servicer.Build,
-                    request_deserializer=build__service__pb2.BuildRequest.FromString,
-                    response_serializer=build__service__pb2.BuildResponse.SerializeToString,
+                    request_deserializer=protos_dot_build__service__pb2.BuildRequest.FromString,
+                    response_serializer=protos_dot_build__service__pb2.BuildResponse.SerializeToString,
             ),
             'PollBuild': grpc.unary_unary_rpc_method_handler(
                     servicer.PollBuild,
-                    request_deserializer=build__service__pb2.PollBuildRequest.FromString,
-                    response_serializer=build__service__pb2.PollBuildResponse.SerializeToString,
+                    request_deserializer=protos_dot_build__service__pb2.PollBuildRequest.FromString,
+                    response_serializer=protos_dot_build__service__pb2.PollBuildResponse.SerializeToString,
             ),
             'Deploy': grpc.unary_unary_rpc_method_handler(
                     servicer.Deploy,
-                    request_deserializer=build__service__pb2.DeployRequest.FromString,
-                    response_serializer=build__service__pb2.DeployResponse.SerializeToString,
+                    request_deserializer=protos_dot_build__service__pb2.DeployRequest.FromString,
+                    response_serializer=protos_dot_build__service__pb2.DeployResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -104,7 +104,7 @@ def add_BuildServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class BuildService(object):
-    """Service definition for the Kubernetes build and deploy service
+    """Build and deploys containers from inside a Kubernetes cluster
     """
 
     @staticmethod
@@ -122,8 +122,8 @@ class BuildService(object):
             request,
             target,
             '/buildservice.BuildService/Build',
-            build__service__pb2.BuildRequest.SerializeToString,
-            build__service__pb2.BuildResponse.FromString,
+            protos_dot_build__service__pb2.BuildRequest.SerializeToString,
+            protos_dot_build__service__pb2.BuildResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -149,8 +149,8 @@ class BuildService(object):
             request,
             target,
             '/buildservice.BuildService/PollBuild',
-            build__service__pb2.PollBuildRequest.SerializeToString,
-            build__service__pb2.PollBuildResponse.FromString,
+            protos_dot_build__service__pb2.PollBuildRequest.SerializeToString,
+            protos_dot_build__service__pb2.PollBuildResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -176,8 +176,8 @@ class BuildService(object):
             request,
             target,
             '/buildservice.BuildService/Deploy',
-            build__service__pb2.DeployRequest.SerializeToString,
-            build__service__pb2.DeployResponse.FromString,
+            protos_dot_build__service__pb2.DeployRequest.SerializeToString,
+            protos_dot_build__service__pb2.DeployResponse.FromString,
             options,
             channel_credentials,
             insecure,

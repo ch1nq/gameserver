@@ -9,7 +9,7 @@ from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 
 # Import generated protobuf code
-from .protos import build_service_pb2, build_service_pb2_grpc
+from protos import build_service_pb2, build_service_pb2_grpc
 
 _DOCKER_REGISTRY_NODE_PORT = os.getenv("DOCKER_REGISTRY_NODE_PORT", "30400")
 _USER_CONTAINER_NAMESPACE = os.getenv("USER_CONTAINER_NAMESPACE", "default")
