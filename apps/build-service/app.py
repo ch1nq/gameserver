@@ -67,7 +67,7 @@ def create_kaniko_build_job(
             batch_v1.delete_namespaced_job(
                 name=build_id,
                 namespace="registry-system",
-                body=core_client.V1DeleteOptions(propagation_policy="Background"),
+                body=client.V1DeleteOptions(propagation_policy="Background"),
             )
         except ApiException as e:
             if e.status != 404:  # Ignore if job doesn't exist
