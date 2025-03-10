@@ -75,11 +75,12 @@ impl App {
         let backend = Backend::new(self.db, self.client);
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
-        let services = protected::router(self.agent_manager)
+        let services = protected::router()
             .route_layer(login_required!(Backend, login_url = "/login"))
+            .merge(public::router())
+            .with_state(self.agent_manager)
             .merge(auth::router())
             .merge(oauth::router())
-            .merge(public::router())
             .layer(auth_layer);
 
         let app = axum::Router::new()

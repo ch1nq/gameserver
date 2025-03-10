@@ -1,4 +1,4 @@
-use crate::agents::AgentManager;
+use crate::agents::{Agent, AgentManager};
 use crate::users::AuthSession;
 use crate::web::layouts::pages;
 use axum::{
@@ -9,12 +9,11 @@ use axum::{
     Form, Router,
 };
 
-pub fn router(agent_manager: AgentManager) -> Router<()> {
+pub fn router() -> Router<AgentManager> {
     Router::new()
         .route("/agents", get(self::get::agents))
         .route("/agents/new", post(self::post::new_agent))
         .route("/settings", get(self::get::settings))
-        .with_state(agent_manager)
 }
 
 mod get {

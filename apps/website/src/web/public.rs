@@ -1,10 +1,9 @@
 use crate::agents::AgentManager;
 use crate::users::AuthSession;
 use crate::web::layouts::pages;
-use axum::{http::StatusCode, response::IntoResponse, routing::get, Extension, Router};
-use std::sync::Arc;
+use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};
 
-pub fn router() -> Router<()> {
+pub fn router() -> Router<AgentManager> {
     Router::new().route("/", get(self::get::index))
 }
 
@@ -13,7 +12,7 @@ mod get {
 
     pub async fn index(
         auth_session: AuthSession,
-        agent_manager: Extension<Arc<AgentManager>>,
+        State(agent_manager): State<AgentManager>,
     ) -> impl IntoResponse {
         let agents = match agent_manager.get_agents().await {
             Ok(agents) => agents,
