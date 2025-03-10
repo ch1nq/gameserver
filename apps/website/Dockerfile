@@ -16,7 +16,7 @@ RUN cargo build --release --bin website
 FROM debian:bookworm-slim AS runner
 WORKDIR /app
 RUN apt-get update && \
-    apt-get install -y openssl ca-certificates && \
+    apt-get install -y openssl ca-certificates protobuf-compiler && \
     rm -rf /var/lib/apt/lists/*
 COPY apps/website/static /app/static
 COPY --from=builder /app/target/release/website /usr/local/bin/
