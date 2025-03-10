@@ -61,11 +61,11 @@ mod post {
         tracing::info!("Got create agent request: {:?}", form);
 
         // Treat empty strings as None
-        let dockerfile_path = form.dockerfile_path.as_deref().filter(|s| !s.is_empty());
-        let context_sub_path = form.context_sub_path.as_deref().filter(|s| !s.is_empty());
+        let dockerfile_path = form.dockerfile_path.filter(|s| !s.is_empty());
+        let context_sub_path = form.context_sub_path.filter(|s| !s.is_empty());
 
         let agent_name = format!("{}-{}", user.username, form.name);
-        let source_code_url = form.source_code_url.as_str();
+        let source_code_url = form.source_code_url;
 
         if let Err(err) = agent_manager
             .create_agent(

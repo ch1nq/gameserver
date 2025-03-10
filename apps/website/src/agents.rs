@@ -1,5 +1,8 @@
 use crate::build_service::build_service_client::BuildServiceClient;
-use crate::build_service::{BuildRequest, BuildResponse, PollBuildRequest, PollBuildResponse};
+use crate::build_service::{
+    build_response, poll_build_response, BuildRequest, BuildResponse, PollBuildRequest,
+    PollBuildResponse,
+};
 
 #[derive(Debug, Clone)]
 pub enum AgentStatus {
@@ -73,15 +76,38 @@ impl AgentManager {
     pub async fn create_agent(
         &mut self,
         name: String,
-        git_repo: &str,
-        dockerfile_path: Option<&str>,
-        context_sub_path: Option<&str>,
+        git_repo: String,
+        dockerfile_path: Option<String>,
+        context_sub_path: Option<String>,
     ) -> Result<(), AgentManagerError> {
-        let mut agent = Agent::new(name);
+        let mut agent = Agent::new(name.clone());
 
-        let build_id = "123".to_string();
+        let response = self
+            .client
+            .build(BuildRequest {
+                name,
+                git_repo,
+                dockerfile_path: dockerfile_path.unwrap_or("Dockerfile".to_string()),
+                context_sub_path: context_sub_path.unwrap_or(".".to_string()),
+            })
+            .await?
+            .into_inner();
 
-        agent.status = AgentStatus::Building { build_id };
+        match build_response::Status::try_from(response.status) {
+            Ok(build_response::Status::Success) => {
+                agent.status = AgentStatus::Building {
+                    build_id: response.build_id,
+                };
+            }
+            Ok(build_response::Status::Error) => {
+                agent.status = AgentStatus::BuildFailed;
+            }
+            Err(err) => {
+                agent.status = AgentStatus::BuildFailed;
+                return Err(err.into());
+            }
+        }
+
         self.agents.push(agent);
 
         Ok(())
