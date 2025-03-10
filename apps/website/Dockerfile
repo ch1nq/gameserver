@@ -12,6 +12,7 @@ COPY --from=planner /app/recipe.json recipe.json
 RUN apt-get update && apt-get install -y protobuf-compiler 
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY apps/website /app
+COPY protos/ /protos
 RUN cargo build --release --bin website
 
 FROM debian:bookworm-slim AS runner
