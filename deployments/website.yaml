@@ -117,3 +117,18 @@ spec:
   resources:
     requests:
       storage: 1Gi
+
+---
+# NodePort postgres service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-nodeport
+spec:
+  selector:
+    app: postgres
+  type: NodePort
+  ports:
+  - port: 5432
+    targetPort: 5432
+    nodePort: 30001
