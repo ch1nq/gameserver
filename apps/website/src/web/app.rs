@@ -13,7 +13,6 @@ use axum_login::{
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
 use sqlx::PgPool;
 use std::env;
-use std::sync::Arc;
 use time::Duration;
 use tower_http::services::ServeDir;
 use tower_sessions_sqlx_store::PostgresStore;
@@ -46,7 +45,7 @@ impl App {
         let build_service_client = BuildServiceClient::connect(build_service_url)
             .await
             .expect("Failed to connect to build service");
-        let agent_manager = AgentManager::new(build_service_client);
+        let agent_manager = AgentManager::new(build_service_client, db.clone());
 
         Ok(Self {
             db,

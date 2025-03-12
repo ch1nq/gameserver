@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use axum::http::header::{AUTHORIZATION, USER_AGENT};
-use axum_login::{AuthUser, AuthnBackend, UserId};
+use axum_login::{AuthUser, AuthnBackend};
 use oauth2::{
     basic::{BasicClient, BasicRequestTokenError},
     reqwest::{async_http_client, AsyncHttpClientError},
@@ -10,9 +10,11 @@ use oauth2::{
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 
+pub type UserId = i64;
+
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
-    id: i64,
+    pub id: UserId,
     pub username: String,
     pub access_token: String,
 }
@@ -30,7 +32,7 @@ impl std::fmt::Debug for User {
 }
 
 impl AuthUser for User {
-    type Id = i64;
+    type Id = UserId;
 
     fn id(&self) -> Self::Id {
         self.id
@@ -138,7 +140,10 @@ impl AuthnBackend for Backend {
         Ok(Some(user))
     }
 
-    async fn get_user(&self, user_id: &UserId<Self>) -> Result<Option<Self::User>, Self::Error> {
+    async fn get_user(
+        &self,
+        user_id: &axum_login::UserId<Self>,
+    ) -> Result<Option<Self::User>, Self::Error> {
         sqlx::query_as("select * from users where id = $1")
             .bind(user_id)
             .fetch_optional(&self.db)

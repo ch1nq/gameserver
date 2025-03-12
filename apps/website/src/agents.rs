@@ -3,89 +3,85 @@ use crate::build_service::{
     build_response, poll_build_response, BuildRequest, BuildResponse, PollBuildRequest,
     PollBuildResponse,
 };
+use sqlx::{encode, postgres, FromRow, PgPool, Row};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::Type, serde::Deserialize, serde::Serialize)]
+#[sqlx(type_name = "agent_status", rename_all = "snake_case")]
 pub enum AgentStatus {
     Created,
-    Building { build_id: String },
+    Building,
     BuildFailed,
     Active,
     Inactive,
 }
 
-#[derive(Debug, Clone)]
-pub struct AgentStats {
-    pub wins: u32,
-    pub losses: u32,
-    pub rank: u32,
+impl From<std::string::String> for AgentStatus {
+    fn from(s: std::string::String) -> Self {
+        match s.as_str() {
+            "created" => AgentStatus::Created,
+            "building" => AgentStatus::Building,
+            "build_failed" => AgentStatus::BuildFailed,
+            "active" => AgentStatus::Active,
+            "inactive" => AgentStatus::Inactive,
+            _ => panic!("Invalid agent status"),
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
+type AgentId = i64;
+
+#[derive(Debug, Clone, FromRow)]
 pub struct Agent {
+    id: AgentId,
     pub name: String,
+    pub user_id: crate::users::UserId,
     pub status: AgentStatus,
-    pub stats: AgentStats,
+    pub build_id: Option<String>,
 }
 
 impl Agent {
-    pub fn new(name: String) -> Self {
+    pub fn new(id: AgentId, user_id: crate::users::UserId, name: String) -> Self {
         Self {
+            id,
             name,
+            user_id,
             status: AgentStatus::Created,
-            stats: AgentStats {
-                wins: 0,
-                losses: 0,
-                rank: 0,
-            },
+            build_id: None,
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct AgentManager {
-    client: BuildServiceClient<tonic::transport::Channel>,
-    agents: Vec<Agent>,
+    build_service_client: BuildServiceClient<tonic::transport::Channel>,
+    db_pool: PgPool,
 }
 
 type AgentManagerError = Box<dyn std::error::Error>;
 
 impl AgentManager {
-    pub fn new(client: BuildServiceClient<tonic::transport::Channel>) -> Self {
-        let agents = vec![
-            Agent {
-                name: "Alice".to_string(),
-                status: AgentStatus::Active,
-                stats: AgentStats {
-                    wins: 10,
-                    losses: 5,
-                    rank: 1,
-                },
-            },
-            Agent {
-                name: "Bob".to_string(),
-                status: AgentStatus::Created,
-                stats: AgentStats {
-                    wins: 5,
-                    losses: 10,
-                    rank: 2,
-                },
-            },
-        ];
-        Self { client, agents }
+    pub fn new(
+        build_service_client: BuildServiceClient<tonic::transport::Channel>,
+        db_pool: PgPool,
+    ) -> Self {
+        Self {
+            build_service_client,
+            db_pool,
+        }
     }
+
     pub async fn create_agent(
         &mut self,
         name: String,
+        user_id: crate::users::UserId,
         git_repo: String,
         dockerfile_path: Option<String>,
         context_sub_path: Option<String>,
-    ) -> Result<(), AgentManagerError> {
-        let mut agent = Agent::new(name.clone());
-
+    ) -> Result<Agent, AgentManagerError> {
         let response = self
-            .client
+            .build_service_client
             .build(BuildRequest {
-                name,
+                name: name.clone(),
                 git_repo,
                 dockerfile_path: dockerfile_path.unwrap_or("Dockerfile".to_string()),
                 context_sub_path: context_sub_path.unwrap_or(".".to_string()),
@@ -93,31 +89,73 @@ impl AgentManager {
             .await?
             .into_inner();
 
-        match build_response::Status::try_from(response.status) {
-            Ok(build_response::Status::Success) => {
-                agent.status = AgentStatus::Building {
-                    build_id: response.build_id,
-                };
-            }
-            Ok(build_response::Status::Error) => {
-                agent.status = AgentStatus::BuildFailed;
-            }
-            Err(err) => {
-                return Err(err.into());
-            }
-        }
+        let status = match build_response::Status::try_from(response.status)? {
+            build_response::Status::Success => AgentStatus::Building,
+            build_response::Status::Error => AgentStatus::BuildFailed,
+        };
 
-        self.agents.push(agent);
+        let mut agent = Agent {
+            id: 0,
+            name,
+            user_id,
+            status,
+            build_id: Some(response.build_id),
+        };
 
-        Ok(())
+        agent.id = self.save_agent(&agent).await?;
+
+        Ok(agent)
+    }
+
+    // Save an agent to the database
+    async fn save_agent(&self, agent: &Agent) -> Result<AgentId, AgentManagerError> {
+        let id = sqlx::query!(
+            r#"
+            INSERT INTO agents (name, status, build_id)
+            VALUES ($1, $2, $3)
+            RETURNING id
+            "#,
+            agent.name,
+            agent.status.clone() as AgentStatus,
+            agent.build_id,
+        )
+        .fetch_one(&self.db_pool)
+        .await?
+        .id;
+        Ok(id)
+    }
+
+    // Get a single agent by name
+    pub async fn get_agent_for_user(
+        &self,
+        user_id: crate::users::UserId,
+    ) -> Result<Option<Agent>, AgentManagerError> {
+        sqlx::query_as!(
+            Agent,
+            r#"
+            SELECT * FROM agents
+            WHERE user_id = $1
+            "#,
+            user_id
+        )
+        .fetch_optional(&self.db_pool)
+        .await?;
+        Ok(None)
     }
 
     pub async fn poll_build_status(&mut self) -> Result<(), AgentManagerError> {
         Ok(())
     }
 
-    pub async fn get_agents(&self) -> Result<Vec<Agent>, reqwest::Error> {
-        let agents = self.agents.clone();
+    pub async fn get_agents(&self) -> Result<Vec<Agent>, AgentManagerError> {
+        let agents = sqlx::query_as!(
+            Agent,
+            r#"
+            SELECT * FROM agents
+            "#,
+        )
+        .fetch_all(&self.db_pool)
+        .await?;
         Ok(agents)
     }
 }

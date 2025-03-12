@@ -69,6 +69,7 @@ mod post {
         if let Err(err) = agent_manager
             .create_agent(
                 agent_name,
+                user.id,
                 source_code_url,
                 dockerfile_path,
                 context_sub_path,
