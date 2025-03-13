@@ -13,7 +13,6 @@ RUN apt-get update && apt-get install -y protobuf-compiler
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY apps/website /app
 COPY protos/ /protos
-COPY apps/website/.sqlx .sqlx
 RUN cargo build --release --bin website
 
 FROM debian:bookworm-slim AS runner
@@ -22,5 +21,6 @@ RUN apt-get update && \
     apt-get install -y openssl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 COPY apps/website/static /app/static
+COPY apps/website/migrations /app/migrations
 COPY --from=builder /app/target/release/website /usr/local/bin/
 ENTRYPOINT ["/usr/local/bin/website"]
