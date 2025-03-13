@@ -111,12 +111,13 @@ impl AgentManager {
     async fn save_agent(&self, agent: &Agent) -> Result<AgentId, AgentManagerError> {
         let id = sqlx::query!(
             r#"
-            INSERT INTO agents (name, status, build_id)
-            VALUES ($1, $2, $3)
+            INSERT INTO agents (name, status, user_id, build_id)
+            VALUES ($1, $2, $3, $4)
             RETURNING id
             "#,
             agent.name,
             agent.status.clone() as AgentStatus,
+            agent.user_id,
             agent.build_id,
         )
         .fetch_one(&self.db_pool)

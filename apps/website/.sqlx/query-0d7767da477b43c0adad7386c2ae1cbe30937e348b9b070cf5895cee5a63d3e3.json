@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO agents (name, status, build_id)\n            VALUES ($1, $2, $3)\n            RETURNING id\n            ",
+  "query": "\n            INSERT INTO agents (name, status, user_id, build_id)\n            VALUES ($1, $2, $3, $4)\n            RETURNING id\n            ",
   "describe": {
     "columns": [
       {
@@ -13,6 +13,7 @@
       "Left": [
         "Text",
         "Text",
+        "Int8",
         "Text"
       ]
     },
@@ -20,5 +21,5 @@
       false
     ]
   },
-  "hash": "a768902440329c7bf35fabe589bcaf7bbccb91d2f5cf3aa0eb56bfa774bd5ba4"
+  "hash": "0d7767da477b43c0adad7386c2ae1cbe30937e348b9b070cf5895cee5a63d3e3"
 }
