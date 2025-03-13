@@ -74,7 +74,7 @@ bootstrap-cluster:
     # Bootstrap the k3d cluster
     k3d registry create achtung --port {{registry_port}}
     k3d cluster create --registry-use k3d-achtung:{{registry_port}} \
-        -p "80:80@loadbalancer" -p "443:443@loadbalancer" -p "30109:30109@loadbalancer"
+        -p "80:80@loadbalancer" -p "443:443@loadbalancer" -p "30109:30109@loadbalancer" -p "30001:30001@loadbalancer" \
 
     # Install postgres and cert-manager helm repos
     helm repo add bitnami https://charts.bitnami.com/bitnami
