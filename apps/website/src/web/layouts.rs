@@ -99,11 +99,11 @@ pub mod pages {
                                         td class="px-6 py-4 font-medium text-gray-900 whitespace-nowrap dark:text-white" { (agent.name) }
                                         td class="px-6 py-4" {
                                             @let status_color = match agent.status {
-                                                crate::agents::AgentStatus::BuildFailed => "bg-red-100",
-                                                crate::agents::AgentStatus::Building => "bg-yellow-100",
-                                                crate::agents::AgentStatus::Created => "bg-blue-100",
-                                                crate::agents::AgentStatus::Active => "bg-green-100",
-                                                crate::agents::AgentStatus::Inactive => "bg-gray-100",
+                                                crate::agents::AgentStatus::BuildFailed => "bg-red-400",
+                                                crate::agents::AgentStatus::Building => "bg-yellow-400",
+                                                crate::agents::AgentStatus::Created => "bg-blue-400",
+                                                crate::agents::AgentStatus::Active => "bg-green-400",
+                                                crate::agents::AgentStatus::Inactive => "bg-gray-400",
                                             };
                                             span class=(format!("h-3 w-3 rounded-full inline-block me-1 {}", status_color)) {}
                                             span class="text-gray-900 dark:text-white" { (format!("{:?}", agent.status)) }
