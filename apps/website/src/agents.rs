@@ -162,7 +162,6 @@ impl AgentManager {
 }
 
 /// Poll the build service for the status of all agents that are currently building
-#[tracing::instrument(skip(build_service_client, db_pool))]
 async fn poll_build_status(
     mut build_service_client: BuildServiceClient<tonic::transport::Channel>,
     db_pool: PgPool,
@@ -186,7 +185,7 @@ async fn poll_build_status(
                 .into_inner();
 
             if let Err(e) = poll_build_response::Status::try_from(poll_response.status) {
-                eprintln!("Error polling build status for agent {}: {}", agent.id, e);
+                tracing::error!("Error polling build status for agent {}: {}", agent.id, e);
                 continue;
             }
 
@@ -196,11 +195,11 @@ async fn poll_build_status(
                     Ok(poll_build_response::BuildStatus::Failed) => AgentStatus::BuildFailed,
                     Ok(poll_build_response::BuildStatus::Succeeded) => AgentStatus::Active,
                     Ok(poll_build_response::BuildStatus::Unknown) => {
-                        eprintln!("Unknown build status for agent {}", agent.id);
+                        tracing::error!("Unknown build status for agent {}", agent.id);
                         continue;
                     }
                     Err(e) => {
-                        eprintln!("Error polling build status for agent {}: {}", agent.id, e);
+                        tracing::error!("Error polling build status for agent {}: {}", agent.id, e);
                         continue;
                     }
                 };
