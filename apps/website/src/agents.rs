@@ -1,9 +1,9 @@
 use crate::build_service::build_service_client::BuildServiceClient;
 use crate::build_service::{
-    build_response, poll_build_response, BuildRequest, BuildResponse, PollBuildRequest,
+    self, build_response, poll_build_response, BuildRequest, BuildResponse, PollBuildRequest,
     PollBuildResponse,
 };
-use sqlx::{encode, postgres, FromRow, PgPool, Row};
+use sqlx::{FromRow, PgPool};
 
 #[derive(Debug, Clone, sqlx::Type, serde::Deserialize, serde::Serialize)]
 #[sqlx(type_name = "agent_status", rename_all = "snake_case")]
@@ -64,6 +64,10 @@ impl AgentManager {
         build_service_client: BuildServiceClient<tonic::transport::Channel>,
         db_pool: PgPool,
     ) -> Self {
+        let build_service_client_2 = build_service_client.clone();
+        let db_pool_2 = db_pool.clone();
+        tokio::spawn(poll_build_status(build_service_client_2, db_pool_2));
+
         Self {
             build_service_client,
             db_pool,
@@ -144,10 +148,6 @@ impl AgentManager {
         Ok(None)
     }
 
-    pub async fn poll_build_status(&mut self) -> Result<(), AgentManagerError> {
-        Ok(())
-    }
-
     pub async fn get_agents(&self) -> Result<Vec<Agent>, AgentManagerError> {
         let agents = sqlx::query_as!(
             Agent,
@@ -158,5 +158,60 @@ impl AgentManager {
         .fetch_all(&self.db_pool)
         .await?;
         Ok(agents)
+    }
+}
+
+/// Poll the build service for the status of all agents that are currently building
+async fn poll_build_status(
+    mut build_service_client: BuildServiceClient<tonic::transport::Channel>,
+    db_pool: PgPool,
+) {
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+        let building_agents =
+            sqlx::query_as!(Agent, r#"SELECT * FROM agents WHERE status = 'building'"#,)
+                .fetch_all(&db_pool)
+                .await
+                .unwrap();
+
+        for agent in building_agents {
+            let poll_response = build_service_client
+                .poll_build(PollBuildRequest {
+                    build_id: agent.build_id.unwrap(),
+                })
+                .await
+                .unwrap()
+                .into_inner();
+
+            if let Err(e) = poll_build_response::Status::try_from(poll_response.status) {
+                eprintln!("Error polling build status for agent {}: {}", agent.id, e);
+                return;
+            }
+
+            let build_status =
+                match poll_build_response::BuildStatus::try_from(poll_response.build_status) {
+                    Ok(poll_build_response::BuildStatus::Running) => AgentStatus::Building,
+                    Ok(poll_build_response::BuildStatus::Failed) => AgentStatus::BuildFailed,
+                    Ok(poll_build_response::BuildStatus::Succeeded) => AgentStatus::Active,
+                    Ok(poll_build_response::BuildStatus::Unknown) => {
+                        eprintln!("Unknown build status for agent {}", agent.id);
+                        return;
+                    }
+                    Err(e) => {
+                        eprintln!("Error polling build status for agent {}: {}", agent.id, e);
+                        return;
+                    }
+                };
+
+            sqlx::query!(
+                r#"UPDATE agents SET status = $1 WHERE id = $2"#,
+                build_status.clone() as AgentStatus,
+                agent.id
+            )
+            .execute(&db_pool)
+            .await
+            .unwrap();
+        }
     }
 }
