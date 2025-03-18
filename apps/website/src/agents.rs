@@ -130,12 +130,12 @@ impl AgentManager {
         Ok(id)
     }
 
-    // Get a single agent by name
-    pub async fn get_agent_for_user(
+    // Get a all agents for owned by a user
+    pub async fn get_agents_for_user(
         &self,
         user_id: crate::users::UserId,
-    ) -> Result<Option<Agent>, AgentManagerError> {
-        sqlx::query_as!(
+    ) -> Result<Vec<Agent>, AgentManagerError> {
+        let agents = sqlx::query_as!(
             Agent,
             r#"
             SELECT * FROM agents
@@ -143,9 +143,9 @@ impl AgentManager {
             "#,
             user_id
         )
-        .fetch_optional(&self.db_pool)
+        .fetch_all(&self.db_pool)
         .await?;
-        Ok(None)
+        Ok(agents)
     }
 
     pub async fn get_agents(&self) -> Result<Vec<Agent>, AgentManagerError> {

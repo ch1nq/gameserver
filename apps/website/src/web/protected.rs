@@ -23,7 +23,11 @@ mod get {
         auth_session: AuthSession,
         agent_manager: State<AgentManager>,
     ) -> impl IntoResponse {
-        let agents = match agent_manager.get_agents().await {
+        let user_id = match &auth_session.user {
+            Some(user) => user.id,
+            None => return StatusCode::UNAUTHORIZED.into_response(),
+        };
+        let agents = match agent_manager.get_agents_for_user(user_id).await {
             Ok(agents) => agents,
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         };
