@@ -105,8 +105,8 @@ pub mod pages {
                                                 crate::agents::AgentStatus::Active => "bg-green-100",
                                                 crate::agents::AgentStatus::Inactive => "bg-gray-100",
                                             };
-                                            span class=(format!("h-3 w-3 rounded-full inline-block me-1 {}", status_color));
-                                            (format!("{:?}", agent.status))
+                                            span class=(format!("h-3 w-3 rounded-full inline-block me-1 {}", status_color)) {}
+                                            span class="text-gray-900 dark:text-white" { (format!("{:?}", agent.status)) }
                                         }
                                         td class="px-6 py-4" {
                                             a href=(format!("/agents/{}/edit", agent.name)) class="text-blue-500 hover:text-blue-700" { "Edit" }
