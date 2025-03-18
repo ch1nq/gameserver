@@ -60,14 +60,19 @@ mod post {
         } else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        // TODO: Validate input
         tracing::info!("Got create agent request: {:?}", form);
+
+        if form.name.is_empty() || form.source_code_url.is_empty() {
+            return StatusCode::BAD_REQUEST.into_response();
+        } else if form.name.len() > 20 || form.source_code_url.len() > 100 {
+            return StatusCode::BAD_REQUEST.into_response();
+        }
 
         // Treat empty strings as None
         let dockerfile_path = form.dockerfile_path.filter(|s| !s.is_empty());
         let context_sub_path = form.context_sub_path.filter(|s| !s.is_empty());
 
-        let agent_name = format!("{}-{}", user.username, form.name);
+        let agent_name = form.name;
         let source_code_url = form.source_code_url;
 
         if let Err(err) = agent_manager
