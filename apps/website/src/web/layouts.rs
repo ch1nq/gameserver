@@ -98,7 +98,14 @@ pub mod pages {
                                     tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 border-gray-200" {
                                         td class="px-6 py-4 font-medium text-gray-900 whitespace-nowrap dark:text-white" { (agent.name) }
                                         td class="px-6 py-4" {
-                                            (format!("{:?}", agent.status))
+                                            @let status_color = match agent.status {
+                                                crate::agents::AgentStatus::BuildFailed => "bg-red-100 text-red-800",
+                                                crate::agents::AgentStatus::Building => "bg-yellow-100 text-yellow-800",
+                                                crate::agents::AgentStatus::Created => "bg-blue-100 text-blue-800",
+                                                crate::agents::AgentStatus::Active => "bg-green-100 text-green-800",
+                                                crate::agents::AgentStatus::Inactive => "bg-gray-100 text-gray-800",
+                                            };
+                                            span class="px-2.5 py-0.5 rounded-full text-xs font-medium" class=(status_color) { (format!("{:?}", agent.status)) }
                                         }
                                         td class="px-6 py-4" {
                                             a href=(format!("/agents/{}/edit", agent.name)) class="text-blue-500 hover:text-blue-700" { "Edit" }
