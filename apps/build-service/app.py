@@ -210,8 +210,6 @@ class BuildServiceServicer(build_service_pb2_grpc.BuildServiceServicer):
 
         except ApiException as e:
             logging.error("Poll build error: %s", str(e))
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(str(e))
             return build_service_pb2.PollBuildResponse(
                 status=build_service_pb2.PollBuildResponse.Status.ERROR,
                 message=f"Failed to poll build: {str(e)}",
@@ -220,8 +218,6 @@ class BuildServiceServicer(build_service_pb2_grpc.BuildServiceServicer):
 
         except Exception as e:
             logging.error("Unexpected poll build error: %s", str(e))
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(str(e))
             return build_service_pb2.PollBuildResponse(
                 status=build_service_pb2.PollBuildResponse.Status.ERROR,
                 message=f"Unexpected error: {str(e)}",
