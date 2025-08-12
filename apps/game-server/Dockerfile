@@ -1,4 +1,4 @@
-FROM rust:1.81 as builder
+FROM rust:1.89 as builder
 WORKDIR /usr/src/game-server
 COPY apps/game-server/Cargo.toml .
 COPY apps/game-server/Cargo.lock .
