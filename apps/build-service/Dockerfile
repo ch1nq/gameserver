@@ -11,4 +11,4 @@ RUN uv sync --frozen
 ADD apps/build-service /app/build-service
 
 # Run
-ENTRYPOINT ["uv", "run", "python", "app.py"]
+ENTRYPOINT ["uv", "run", "python", "main.py"]

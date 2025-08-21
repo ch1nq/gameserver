@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "aiohttp>=3.12.15",
     "docker>=7.1.0",
     "flask>=3.0.3",
     "grpcio>=1.71.0",
@@ -23,3 +24,6 @@ docstring-code-format = true
 [tool.ruff.lint.isort]
 # Use a single line after each import block.
 lines-after-imports = 1
+
+[dependency-groups]
+dev = ["ruff>=0.12.10"]
