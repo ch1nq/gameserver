@@ -1,0 +1,46 @@
+# fly.toml app configuration file generated for achtung-agent-builder on 2025-08-28T21:56:29+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'achtung-agent-builder'
+primary_region = 'waw'
+
+[build]
+dockerfile = '../apps/build-service/Dockerfile'
+
+
+[env]
+FLY_ORG = 'achtung'
+PORT = '50051'
+
+[[services]]
+internal_port = 50051
+processes = ["app"]
+auto_stop_machines = "stop"
+auto_start_machines = true
+min_machines_running = 0
+protocol = "tcp"
+
+[[services.ports]]
+# No handlers specified - this passes raw TCP through without HTTP proxy interference
+port = 50051
+
+# [[services.ports]]
+# handlers = ["http"]
+# port = 443
+# [services.ports.http_options]
+# h2_backend = true
+
+
+# [[services.ports]]
+# port = 443
+# handlers = ['tls']
+# tls_options = { "alpn" = ["h2"] }
+
+# [services.ports.http_options]
+# h2_backend = true
+
+
+[[vm]]
+size = 'shared-cpu-1x'

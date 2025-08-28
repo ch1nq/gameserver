@@ -39,6 +39,7 @@ impl App {
         let db_connection_str = std::env::var("DATABASE_URL").expect("Database url not defined");
         let db = PgPool::connect(&db_connection_str).await?;
         sqlx::migrate!().run(&db).await?;
+        println!("hello");
 
         let build_service_url = env::var("BUILD_SERVICE_URL")
             .unwrap_or("http://build-service.default.svc:50051".into());

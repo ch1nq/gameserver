@@ -3,7 +3,7 @@ function init_game(canvas_id) {
     const ctx = canvas.getContext('2d');
 
     // const uri = 'wss://' + location.host + '/join/observer';
-    const uri = 'wss://achtung.daske.dk/join/observer';
+    const uri = 'wss://game-server-achtung.fly.dev/join/observer';
     const ws = new WebSocket(uri);
     var my_id = null;
     var game_state = null;
@@ -70,7 +70,6 @@ function init_game(canvas_id) {
 
     }
 
-
     ws.onmessage = async function (msg) {
         const data = await msg.data.text();
         const event = JSON.parse(data).event;
@@ -90,58 +89,7 @@ function init_game(canvas_id) {
         }
     };
 
-    function sendAction(ws, action) {
-        ws.send('{"event_type": "Action", "action": "' + action + '"}');
-    }
-
-    const keyLeft = 'a';
-    const keyRight = 'd';
-    var leftDown = false;
-    var rightDown = false;
-    var action = 'Forward';
-
-    function updateAction(ws, leftDown, rightDown) {
-        var oldAction = action;
-
-        if (leftDown && rightDown) action = 'Forward'
-        else if (leftDown) action = 'Left'
-        else if (rightDown) action = 'Right'
-        else action = 'Forward'
-
-        if (oldAction != action) sendAction(ws, action);
-    }
-
     ws.binaryType = "blob";
     ws.onopen = function () { console.log('Connected') };
     ws.onclose = function () { console.log('Disconnected'); };
-
-    document.addEventListener('keydown', function (event) {
-        switch (event.key) {
-            case keyLeft:
-                leftDown = true;
-                break;
-            case keyRight:
-                rightDown = true;
-
-                break;
-            default:
-                return;
-        }
-        updateAction(ws, leftDown, rightDown);
-    });
-    document.addEventListener('keyup', function (event) {
-        switch (event.key) {
-            case keyLeft:
-                leftDown = false;
-                break;
-            case keyRight:
-                rightDown = false;
-                break;
-            default:
-                return;
-        }
-        updateAction(ws, leftDown, rightDown);
-    });
 }
-
-// init_game("game");

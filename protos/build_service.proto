@@ -2,44 +2,37 @@ syntax = "proto3";
 
 package buildservice;
 
-// Build and deploys containers from inside a Kubernetes cluster
 service BuildService {
-  // Start a build job for a container from a git repository
   rpc Build(BuildRequest) returns (BuildResponse) {}
-  
-  // Poll the status of a running build job
   rpc PollBuild(PollBuildRequest) returns (PollBuildResponse) {}
-  
-  // Deploy a built container to the Kubernetes cluster
-  rpc Deploy(DeployRequest) returns (DeployResponse) {}
+  rpc DeployAgent(DeployAgentRequest) returns (DeployAgentResponse) {}
+  rpc DeleteAgent(DeleteAgentRequest) returns (DeleteAgentResponse) {}
 }
 
 // Request to build a container from a git repository
 message BuildRequest {
-  string name = 1;                // Application name
-  string git_repo = 2;            // Git repository URL
-  string dockerfile_path = 3;     // Path to Dockerfile, defaults to "Dockerfile"
-  string context_sub_path = 4;    // Git context sub-path, defaults to "."
+  string name = 1;
+  string git_repo = 2;
+  string dockerfile_path = 3;
+  string context_sub_path = 4;
 }
 
-// Response from a build request
 message BuildResponse {
   enum Status {
     SUCCESS = 0;
     ERROR = 1;
   }
   
-  Status status = 1;         // Status of the request
-  string message = 2;        // Human-readable message
-  string build_id = 3;       // Unique identifier for the build job
+  Status status = 1;
+  string message = 2;
+  string build_id = 3;
 }
 
 // Request to poll the status of a build job
 message PollBuildRequest {
-  string build_id = 1;       // Build job identifier
+  string build_id = 1;
 }
 
-// Response from a poll build request
 message PollBuildResponse {
   enum Status {
     SUCCESS = 0;
@@ -53,23 +46,38 @@ message PollBuildResponse {
     FAILED = 3;
   }
   
-  Status status = 1;           // Status of the request
-  string message = 2;          // Human-readable message
-  BuildStatus build_status = 3; // Status of the build job
+  Status status = 1;
+  string message = 2;
+  BuildStatus build_status = 3;
 }
 
-// Request to deploy a built container
-message DeployRequest {
-  string name = 1;             // Application name
+// Request to deploy an agent
+message DeployAgentRequest {
+  string name = 1;
 }
 
-// Response from a deploy request
-message DeployResponse {
+message DeployAgentResponse {
   enum Status {
     SUCCESS = 0;
     ERROR = 1;
   }
   
-  Status status = 1;           // Status of the request
-  string message = 2;          // Human-readable message
+  Status status = 1;
+  string message = 2;
 }
+
+// Request to delete an agent deployment
+message DeleteAgentRequest {
+  string name = 1;
+}
+
+message DeleteAgentResponse {
+  enum Status {
+    SUCCESS = 0;
+    ERROR = 1;
+  }
+  
+  Status status = 1;
+  string message = 2;
+}
+

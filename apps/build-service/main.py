@@ -251,7 +251,7 @@ class BuildService(build_service_pb2_grpc.BuildServiceServicer):
         try:
             user_id = self._extract_user_id(context)
             if not user_id:
-                await context.set_code(grpc.StatusCode.UNAUTHENTICATED)
+                context.set_code(grpc.StatusCode.UNAUTHENTICATED)
                 return build_service_pb2.BuildResponse(
                     status=build_service_pb2.BuildResponse.Status.ERROR, message="Authentication required"
                 )
@@ -287,12 +287,12 @@ class BuildService(build_service_pb2_grpc.BuildServiceServicer):
             )
 
         except BuildError as e:
-            await context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
             return build_service_pb2.BuildResponse(
                 status=build_service_pb2.BuildResponse.Status.ERROR, message=e.message
             )
         except Exception as e:
-            await context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_code(grpc.StatusCode.INTERNAL)
             return build_service_pb2.BuildResponse(
                 status=build_service_pb2.BuildResponse.Status.ERROR, message="Internal server error"
             )
@@ -320,7 +320,7 @@ class BuildService(build_service_pb2_grpc.BuildServiceServicer):
         try:
             user_id = self._extract_user_id(context)
             if not user_id:
-                await context.set_code(grpc.StatusCode.UNAUTHENTICATED)
+                context.set_code(grpc.StatusCode.UNAUTHENTICATED)
                 return build_service_pb2.DeployResponse(
                     status=build_service_pb2.DeployResponse.Status.ERROR, message="Authentication required"
                 )
@@ -349,7 +349,7 @@ class BuildService(build_service_pb2_grpc.BuildServiceServicer):
             )
 
         except Exception as e:
-            await context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_code(grpc.StatusCode.INTERNAL)
             return build_service_pb2.DeployResponse(
                 status=build_service_pb2.DeployResponse.Status.ERROR, message="Failed to get deployment info"
             )
@@ -365,12 +365,13 @@ class BuildService(build_service_pb2_grpc.BuildServiceServicer):
 
 async def serve():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    port = os.environ.get("PORT", "50051")
 
     server = grpc.aio.server()
     service = BuildService()
 
     build_service_pb2_grpc.add_BuildServiceServicer_to_server(service, server)
-    listen_addr = "[::]:50051"
+    listen_addr = f"[::]:{port}"
     server.add_insecure_port(listen_addr)
 
     # Start background worker

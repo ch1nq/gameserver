@@ -1,26 +1,25 @@
-# fly.toml app configuration file generated for game-server-achtung on 2025-08-24T22:20:15+02:00
+# fly.toml app configuration file generated for achtung on 2025-08-24T21:31:33+02:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'game-server-achtung'
+app = 'achtung'
 primary_region = 'waw'
 
 [build]
-dockerfile = '../apps/game-server/Dockerfile'
+dockerfile = '../apps/website/Dockerfile'
 
 [env]
-GAME = 'achtung'
-NUM_PLAYERS = '8'
 PORT = '80'
-RUST_LOG = 'info'
-TICK_RATE_MS = '50'
+RUST_LOG = 'debug'
+BUILD_SERVICE_URL = 'https://achtung-agent-builder.flycast:50051'
 
 [http_service]
 internal_port = 80
 force_https = true
 auto_stop_machines = 'stop'
 auto_start_machines = true
+max_machines_running = 1
 min_machines_running = 0
 processes = ['app']
 
