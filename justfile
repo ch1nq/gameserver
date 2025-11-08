@@ -96,9 +96,9 @@ destroy-cluster:
 
 compile-protos:
     # Compile build-service proto files 
-    uv run --no-project --with "grpcio-tools>=1.71,<1.72" -- python -m grpc_tools.protoc \
-        -Iprotos=./protos \
-        --python_out=apps/build-service \
-        --pyi_out=apps/build-service \
-        --grpc_python_out=apps/build-service \
-        protos/build_service.proto
+    uvx --from "grpcio-tools>=1.74,<1.75" python -m grpc_tools.protoc \
+        -Ideploy_service/protos=./protos \
+        --python_out=apps/deploy-service/src \
+        --pyi_out=apps/deploy-service/src \
+        --grpc_python_out=apps/deploy-service/src \
+        protos/deploy_service.proto

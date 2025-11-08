@@ -11,8 +11,6 @@ dockerfile = '../apps/website/Dockerfile'
 
 [env]
 PORT = '80'
-RUST_LOG = 'debug'
-BUILD_SERVICE_URL = 'https://achtung-agent-builder.flycast:50051'
 
 [http_service]
 internal_port = 80

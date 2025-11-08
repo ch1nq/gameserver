@@ -1,18 +1,26 @@
-use crate::agents::{Agent, AgentManager};
+use crate::agents::agent::{AgentName, ImageUrl};
+use crate::agents::manager::AgentManager;
 use crate::users::AuthSession;
 use crate::web::layouts::pages;
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Redirect},
     routing::{get, post},
     Form, Router,
 };
+use std::str::FromStr;
 
 pub fn router() -> Router<AgentManager> {
     Router::new()
         .route("/agents", get(self::get::agents))
         .route("/agents/new", post(self::post::new_agent))
+        .route("/agents/{id}/activate", post(self::post::activate_agent))
+        .route(
+            "/agents/{id}/deactivate",
+            post(self::post::deactivate_agent),
+        )
+        .route("/agents/{id}/delete", post(self::post::delete_agent))
         .route("/settings", get(self::get::settings))
 }
 
@@ -42,9 +50,7 @@ mod get {
 #[derive(Debug, serde::Deserialize)]
 struct CreateAgentForm {
     name: String,
-    source_code_url: String,
-    dockerfile_path: Option<String>,
-    context_sub_path: Option<String>,
+    image_url: String,
 }
 
 mod post {
@@ -52,7 +58,7 @@ mod post {
 
     pub async fn new_agent(
         auth_session: AuthSession,
-        State(mut agent_manager): State<AgentManager>,
+        State(agent_manager): State<AgentManager>,
         Form(form): Form<CreateAgentForm>,
     ) -> impl IntoResponse {
         let user = if let Some(user) = auth_session.user {
@@ -60,34 +66,80 @@ mod post {
         } else {
             return StatusCode::UNAUTHORIZED.into_response();
         };
-        tracing::info!("Got create agent request: {:?}", form);
 
-        if form.name.is_empty() || form.source_code_url.is_empty() {
-            return StatusCode::BAD_REQUEST.into_response();
-        } else if form.name.len() > 20 || form.source_code_url.len() > 100 {
-            return StatusCode::BAD_REQUEST.into_response();
+        let name = match AgentName::from_str(&form.name) {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!("Invalid agent name: {}", e);
+                return StatusCode::BAD_REQUEST.into_response();
+            }
+        };
+
+        let image_url = match ImageUrl::new(form.image_url) {
+            Ok(url) => url,
+            Err(e) => {
+                tracing::warn!("Invalid image URL: {}", e);
+                return StatusCode::BAD_REQUEST.into_response();
+            }
+        };
+
+        match agent_manager.create_agent(name, user.id, image_url).await {
+            Ok(_) => Redirect::to("/agents").into_response(),
+            Err(e) => {
+                tracing::error!("Failed to create agent: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
         }
+    }
 
-        // Treat empty strings as None
-        let dockerfile_path = form.dockerfile_path.filter(|s| !s.is_empty());
-        let context_sub_path = form.context_sub_path.filter(|s| !s.is_empty());
+    pub async fn activate_agent(
+        auth_session: AuthSession,
+        State(agent_manager): State<AgentManager>,
+        Path(agent_id): Path<i64>,
+    ) -> impl IntoResponse {
+        let user = if let Some(user) = auth_session.user {
+            user
+        } else {
+            return StatusCode::UNAUTHORIZED.into_response();
+        };
 
-        let agent_name = form.name;
-        let source_code_url = form.source_code_url;
-
-        if let Err(err) = agent_manager
-            .create_agent(
-                agent_name,
-                user.id,
-                source_code_url,
-                dockerfile_path,
-                context_sub_path,
-            )
-            .await
-        {
-            eprintln!("Failed to create agent: {:?}", err);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        match agent_manager.activate_agent(agent_id, user.id).await {
+            Ok(_) => Redirect::to("/agents").into_response(),
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         }
-        Redirect::to("/agents").into_response()
+    }
+
+    pub async fn deactivate_agent(
+        auth_session: AuthSession,
+        State(agent_manager): State<AgentManager>,
+        Path(agent_id): Path<i64>,
+    ) -> impl IntoResponse {
+        let user = if let Some(user) = auth_session.user {
+            user
+        } else {
+            return StatusCode::UNAUTHORIZED.into_response();
+        };
+
+        match agent_manager.deactivate_agent(agent_id, user.id).await {
+            Ok(_) => Redirect::to("/agents").into_response(),
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
+    }
+
+    pub async fn delete_agent(
+        auth_session: AuthSession,
+        State(agent_manager): State<AgentManager>,
+        Path(agent_id): Path<i64>,
+    ) -> impl IntoResponse {
+        let user = if let Some(user) = auth_session.user {
+            user
+        } else {
+            return StatusCode::UNAUTHORIZED.into_response();
+        };
+
+        match agent_manager.delete_agent(agent_id, user.id).await {
+            Ok(_) => Redirect::to("/agents").into_response(),
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
     }
 }

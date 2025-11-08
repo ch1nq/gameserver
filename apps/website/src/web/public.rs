@@ -1,4 +1,4 @@
-use crate::agents::AgentManager;
+use crate::agents::manager::AgentManager;
 use crate::users::AuthSession;
 use crate::web::layouts::pages;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};

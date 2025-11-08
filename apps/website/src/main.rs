@@ -10,15 +10,15 @@ use crate::web::App;
 mod agents;
 mod users;
 mod web;
-mod build_service {
-    tonic::include_proto!("buildservice");
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
         .with(EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(
-            |_| "axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug".into(),
+            |_| {
+                "website=debug,axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug"
+                    .into()
+            },
         )))
         .with(tracing_subscriber::fmt::layer())
         .try_init()?;

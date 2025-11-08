@@ -1,4 +1,4 @@
-use crate::agents::Agent;
+use crate::agents::agent::{Agent, AgentStatus};
 use crate::users::{AuthSession, User};
 use axum::http::StatusCode;
 use maud::{html, Markup, DOCTYPE};
@@ -89,6 +89,7 @@ pub mod pages {
                             thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400" {
                                 tr {
                                     th scope="col" class="px-6 py-3" { "Name" }
+                                    th scope="col" class="px-6 py-3" { "Image" }
                                     th scope="col" class="px-6 py-3" { "Status" }
                                     th scope="col" class="px-6 py-3" { "Actions" }
                                 }
@@ -96,20 +97,36 @@ pub mod pages {
                             tbody {
                                 @for agent in agents {
                                     tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 border-gray-200" {
-                                        td class="px-6 py-4 font-medium text-gray-900 whitespace-nowrap dark:text-white" { (agent.name) }
+                                        td class="px-6 py-4 font-medium text-gray-900 whitespace-nowrap dark:text-white" { (agent.name.as_ref()) }
+                                        td class="px-6 py-4 text-gray-500 dark:text-gray-400 text-xs font-mono truncate max-w-xs" {
+                                            (agent.image_url.as_ref())
+                                        }
                                         td class="px-6 py-4" {
                                             @let status_color = match agent.status {
-                                                crate::agents::AgentStatus::BuildFailed => "bg-red-400",
-                                                crate::agents::AgentStatus::Building => "bg-yellow-400",
-                                                crate::agents::AgentStatus::Created => "bg-blue-400",
-                                                crate::agents::AgentStatus::Active => "bg-green-400",
-                                                crate::agents::AgentStatus::Inactive => "bg-gray-400",
+                                                AgentStatus::Active => "bg-green-400",
+                                                AgentStatus::Inactive => "bg-gray-400",
                                             };
                                             span class=(format!("h-3 w-3 rounded-full inline-block me-1 {}", status_color)) {}
                                             span class="text-gray-900 dark:text-white" { (format!("{:?}", agent.status)) }
                                         }
                                         td class="px-6 py-4" {
-                                            a href=(format!("/agents/{}/edit", agent.name)) class="text-blue-500 hover:text-blue-700" { "Edit" }
+                                            div class="flex gap-2" {
+                                                @match agent.status {
+                                                    AgentStatus::Active => {
+                                                        form method="post" action=(format!("/agents/{}/deactivate", agent.id)) {
+                                                            button type="submit" class="text-yellow-600 hover:text-yellow-800 dark:text-yellow-400" { "Deactivate" }
+                                                        }
+                                                    }
+                                                    AgentStatus::Inactive => {
+                                                        form method="post" action=(format!("/agents/{}/activate", agent.id)) {
+                                                            button type="submit" class="text-green-600 hover:text-green-800 dark:text-green-400" { "Activate" }
+                                                        }
+                                                    }
+                                                }
+                                                form method="post" action=(format!("/agents/{}/delete", agent.id)) onsubmit="return confirm('Are you sure you want to delete this agent?');" {
+                                                    button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" { "Delete" }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -152,9 +169,7 @@ pub mod pages {
                         // Modal body
                         form class="p-4 md:p-5" method="post" action="/agents/new" {
                             p id="helper-text-explanation" class="mb-4 text-sm text-gray-500 dark:text-gray-400" {
-                                "To create a new agent, you need to provide a name and the URL to the source code. The source code must be available in a public Github repository. For more information, check the "
-                                a href="https://github.com/ch1nq/achtung-client-example" class="font-medium text-blue-600 hover:underline dark:text-blue-500" {"Example repository"}
-                                "."
+                                "Create an agent by providing a name and Docker image URL. Build and push your agent to any Docker registry (GitHub Container Registry, Docker Hub, etc.), then register it here."
                             }
 
                             // Name
@@ -163,34 +178,18 @@ pub mod pages {
                                     label for="name" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white" {
                                         "Name *"
                                     }
-                                    input type="text" name="name" id="name" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500" placeholder="Agent name" required="" {}
+                                    input type="text" name="name" id="name" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500" placeholder="my-agent" required="" {}
+                                    p class="mt-1 text-xs text-gray-500 dark:text-gray-400" { "3-50 characters, alphanumeric with hyphens/underscores" }
                                 }
                             }
-                            // Url for source code
+                            // Docker image URL
                             div class="grid gap-4 mb-4 grid-cols-2" {
                                 div class="col-span-2" {
-                                    label for="source_code_url" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white" {
-                                        "Source code URL *"
+                                    label for="image_url" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white" {
+                                        "Docker Image URL *"
                                     }
-                                    input type="text" name="source_code_url" id="source_code_url" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500" placeholder="github.com/user/repo.git" required="" {}
-                                }
-                            }
-                            // Dockerfile path
-                            div class="grid gap-4 mb-4 grid-cols-2" {
-                                div class="col-span-2" {
-                                    label for="dockerfile_path" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white" {
-                                        "Dockerfile path"
-                                    }
-                                    input type="text" name="dockerfile_path" id="dockerfile_path" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500" placeholder="./Dockerfile" {}
-                                }
-                            }
-                            // Context sub path
-                            div class="grid gap-4 mb-4 grid-cols-2" {
-                                div class="col-span-2" {
-                                    label for="context_sub_path" class="block mb-2 text-sm font-medium text-gray-900 dark:text-white" {
-                                        "Context sub path"
-                                    }
-                                    input type="text" name="context_sub_path" id="context_sub_path" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500" placeholder="." {}
+                                    input type="text" name="image_url" id="image_url" class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500" placeholder="ghcr.io/username/agent:latest" required="" {}
+                                    p class="mt-1 text-xs text-gray-500 dark:text-gray-400" { "Full image URL including registry and tag" }
                                 }
                             }
 
@@ -337,7 +336,7 @@ pub mod components {
                     tbody {
                         @for agent in agents {
                             tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 border-gray-200" {
-                                td class="px-6 py-4 font-medium text-gray-900 whitespace-nowrap dark:text-white" { (agent.name) }
+                                td class="px-6 py-4 font-medium text-gray-900 whitespace-nowrap dark:text-white" { (agent.name.as_ref()) }
                             }
                         }
                     }

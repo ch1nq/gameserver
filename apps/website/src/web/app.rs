@@ -1,10 +1,9 @@
-use crate::agents::AgentManager;
-use crate::build_service::build_service_client::BuildServiceClient;
+use crate::agents::manager::AgentManager;
 use crate::{
     users::Backend,
     web::{auth, layouts::pages, oauth, protected, public},
 };
-use axum::{handler::HandlerWithoutStateExt, http::StatusCode, Extension};
+use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
     login_required,
     tower_sessions::{cookie::SameSite, Expiry, SessionManagerLayer},
@@ -39,14 +38,8 @@ impl App {
         let db_connection_str = std::env::var("DATABASE_URL").expect("Database url not defined");
         let db = PgPool::connect(&db_connection_str).await?;
         sqlx::migrate!().run(&db).await?;
-        println!("hello");
 
-        let build_service_url = env::var("BUILD_SERVICE_URL")
-            .unwrap_or("http://build-service.default.svc:50051".into());
-        let build_service_client = BuildServiceClient::connect(build_service_url)
-            .await
-            .expect("Failed to connect to build service");
-        let agent_manager = AgentManager::new(build_service_client, db.clone());
+        let agent_manager = AgentManager::new(db.clone());
 
         Ok(Self {
             db,
@@ -87,6 +80,8 @@ impl App {
             .nest_service("/static", static_service)
             .fallback_service(fallback_service)
             .merge(services);
+
+        println!("Serving on {addr}");
 
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         axum::serve(listener, app.into_make_service()).await?;
