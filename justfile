@@ -4,16 +4,14 @@ registry_host := "localhost"
 registry_port := "43365"
 build_version := `git rev-parse --short HEAD`
 
-build app registry_host=registry_host registry_port=registry_port:
+build app:
     # Build and push the images to the local registry
     @echo "Building and pushing {{app}}:{{build_version}}"
     docker build . -f apps/{{app}}/Dockerfile \
         -t {{app}}:{{build_version}} \
         -t {{app}}:latest \
-        -t k3d-achtung:{{registry_port}}/{{app}}:{{build_version}} \
-        -t k3d-achtung:{{registry_port}}/{{app}}:latest \
-        -t {{registry_host}}:{{registry_port}}/{{app}}:{{build_version}} \
-        -t {{registry_host}}:{{registry_port}}/{{app}}:latest
+
+build-and-push app: (build app)
     docker push {{registry_host}}:{{registry_port}}/{{app}}
 
 build-all:
@@ -97,8 +95,8 @@ destroy-cluster:
 compile-protos:
     # Compile build-service proto files 
     uvx --from "grpcio-tools>=1.74,<1.75" python -m grpc_tools.protoc \
-        -Ideploy_service/protos=./protos \
-        --python_out=apps/deploy-service/src \
-        --pyi_out=apps/deploy-service/src \
-        --grpc_python_out=apps/deploy-service/src \
+        -Iagent_deploy/protos=./protos \
+        --python_out=apps/agent-deploy/src \
+        --pyi_out=apps/agent-deploy/src \
+        --grpc_python_out=apps/agent-deploy/src \
         protos/deploy_service.proto

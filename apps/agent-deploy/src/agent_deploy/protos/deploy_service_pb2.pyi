@@ -1,19 +1,30 @@
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
+from collections.abc import Mapping as _Mapping
 from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class RegistryCredentials(_message.Message):
+    __slots__ = ("username", "password")
+    USERNAME_FIELD_NUMBER: _ClassVar[int]
+    PASSWORD_FIELD_NUMBER: _ClassVar[int]
+    username: str
+    password: str
+    def __init__(self, username: _Optional[str] = ..., password: _Optional[str] = ...) -> None: ...
+
 class DeployAgentRequest(_message.Message):
-    __slots__ = ("name", "image_url", "agent_id")
+    __slots__ = ("name", "image_url", "agent_id", "registry_credentials")
     NAME_FIELD_NUMBER: _ClassVar[int]
     IMAGE_URL_FIELD_NUMBER: _ClassVar[int]
     AGENT_ID_FIELD_NUMBER: _ClassVar[int]
+    REGISTRY_CREDENTIALS_FIELD_NUMBER: _ClassVar[int]
     name: str
     image_url: str
     agent_id: int
-    def __init__(self, name: _Optional[str] = ..., image_url: _Optional[str] = ..., agent_id: _Optional[int] = ...) -> None: ...
+    registry_credentials: RegistryCredentials
+    def __init__(self, name: _Optional[str] = ..., image_url: _Optional[str] = ..., agent_id: _Optional[int] = ..., registry_credentials: _Optional[_Union[RegistryCredentials, _Mapping]] = ...) -> None: ...
 
 class DeployAgentResponse(_message.Message):
     __slots__ = ("status", "message", "app_name", "deployed_image_url")

@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from deploy_service.protos import deploy_service_pb2 as deploy__service_dot_protos_dot_deploy__service__pb2
+from agent_deploy.protos import deploy_service_pb2 as agent__deploy_dot_protos_dot_deploy__service__pb2
 
 GRPC_GENERATED_VERSION = '1.74.0'
 GRPC_VERSION = grpc.__version__
@@ -18,7 +18,7 @@ except ImportError:
 if _version_not_supported:
     raise RuntimeError(
         f'The grpc package installed is at version {GRPC_VERSION},'
-        + f' but the generated code in deploy_service/protos/deploy_service_pb2_grpc.py depends on'
+        + f' but the generated code in agent_deploy/protos/deploy_service_pb2_grpc.py depends on'
         + f' grpcio>={GRPC_GENERATED_VERSION}.'
         + f' Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}'
         + f' or downgrade your generated code using grpcio-tools<={GRPC_VERSION}.'
@@ -36,13 +36,13 @@ class AgentDeployServiceStub(object):
         """
         self.DeployAgent = channel.unary_unary(
                 '/deployagent.AgentDeployService/DeployAgent',
-                request_serializer=deploy__service_dot_protos_dot_deploy__service__pb2.DeployAgentRequest.SerializeToString,
-                response_deserializer=deploy__service_dot_protos_dot_deploy__service__pb2.DeployAgentResponse.FromString,
+                request_serializer=agent__deploy_dot_protos_dot_deploy__service__pb2.DeployAgentRequest.SerializeToString,
+                response_deserializer=agent__deploy_dot_protos_dot_deploy__service__pb2.DeployAgentResponse.FromString,
                 _registered_method=True)
         self.DeleteAgent = channel.unary_unary(
                 '/deployagent.AgentDeployService/DeleteAgent',
-                request_serializer=deploy__service_dot_protos_dot_deploy__service__pb2.DeleteAgentRequest.SerializeToString,
-                response_deserializer=deploy__service_dot_protos_dot_deploy__service__pb2.DeleteAgentResponse.FromString,
+                request_serializer=agent__deploy_dot_protos_dot_deploy__service__pb2.DeleteAgentRequest.SerializeToString,
+                response_deserializer=agent__deploy_dot_protos_dot_deploy__service__pb2.DeleteAgentResponse.FromString,
                 _registered_method=True)
 
 
@@ -66,13 +66,13 @@ def add_AgentDeployServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'DeployAgent': grpc.unary_unary_rpc_method_handler(
                     servicer.DeployAgent,
-                    request_deserializer=deploy__service_dot_protos_dot_deploy__service__pb2.DeployAgentRequest.FromString,
-                    response_serializer=deploy__service_dot_protos_dot_deploy__service__pb2.DeployAgentResponse.SerializeToString,
+                    request_deserializer=agent__deploy_dot_protos_dot_deploy__service__pb2.DeployAgentRequest.FromString,
+                    response_serializer=agent__deploy_dot_protos_dot_deploy__service__pb2.DeployAgentResponse.SerializeToString,
             ),
             'DeleteAgent': grpc.unary_unary_rpc_method_handler(
                     servicer.DeleteAgent,
-                    request_deserializer=deploy__service_dot_protos_dot_deploy__service__pb2.DeleteAgentRequest.FromString,
-                    response_serializer=deploy__service_dot_protos_dot_deploy__service__pb2.DeleteAgentResponse.SerializeToString,
+                    request_deserializer=agent__deploy_dot_protos_dot_deploy__service__pb2.DeleteAgentRequest.FromString,
+                    response_serializer=agent__deploy_dot_protos_dot_deploy__service__pb2.DeleteAgentResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -100,8 +100,8 @@ class AgentDeployService(object):
             request,
             target,
             '/deployagent.AgentDeployService/DeployAgent',
-            deploy__service_dot_protos_dot_deploy__service__pb2.DeployAgentRequest.SerializeToString,
-            deploy__service_dot_protos_dot_deploy__service__pb2.DeployAgentResponse.FromString,
+            agent__deploy_dot_protos_dot_deploy__service__pb2.DeployAgentRequest.SerializeToString,
+            agent__deploy_dot_protos_dot_deploy__service__pb2.DeployAgentResponse.FromString,
             options,
             channel_credentials,
             insecure,
@@ -127,8 +127,8 @@ class AgentDeployService(object):
             request,
             target,
             '/deployagent.AgentDeployService/DeleteAgent',
-            deploy__service_dot_protos_dot_deploy__service__pb2.DeleteAgentRequest.SerializeToString,
-            deploy__service_dot_protos_dot_deploy__service__pb2.DeleteAgentResponse.FromString,
+            agent__deploy_dot_protos_dot_deploy__service__pb2.DeleteAgentRequest.SerializeToString,
+            agent__deploy_dot_protos_dot_deploy__service__pb2.DeleteAgentResponse.FromString,
             options,
             channel_credentials,
             insecure,
