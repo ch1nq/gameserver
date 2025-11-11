@@ -3,12 +3,11 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'achtung-agent-builder'
+app = 'achtung-agent-deploy'
 primary_region = 'waw'
 
 [build]
-dockerfile = '../apps/build-service/Dockerfile'
-
+dockerfile = '../apps/agent-deploy/Dockerfile'
 
 [env]
 FLY_ORG = 'achtung'
