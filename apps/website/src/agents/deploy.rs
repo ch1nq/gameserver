@@ -1,8 +1,8 @@
 use crate::agents::agent;
 
 // Generated proto bindings
-pub mod build_service {
-    tonic::include_proto!("buildservice");
+pub mod agent_deploy_service {
+    tonic::include_proto!("deployagent");
 }
 
 pub trait AgentDeployer {
@@ -17,15 +17,15 @@ pub trait AgentDeployer {
     async fn delete_agent(&self, agent_id: agent::AgentId) -> Result<(), Self::Error>;
 }
 
-pub struct BuildServiceAgentDeployer {
-    build_service_url: String,
+pub struct AgentDeployService {
+    agent_deploy_service_url: String,
     user_id: String,
 }
 
-impl BuildServiceAgentDeployer {
-    pub fn new(build_service_url: String, user_id: String) -> Self {
+impl AgentDeployService {
+    pub fn new(agent_deploy_service_url: String, user_id: String) -> Self {
         Self {
-            build_service_url,
+            agent_deploy_service_url,
             user_id,
         }
     }
@@ -62,7 +62,7 @@ impl From<tonic::Status> for AgentDeployerError {
     }
 }
 
-impl AgentDeployer for BuildServiceAgentDeployer {
+impl AgentDeployer for AgentDeployService {
     type Error = AgentDeployerError;
 
     async fn deploy_agent(
@@ -70,20 +70,22 @@ impl AgentDeployer for BuildServiceAgentDeployer {
         agent_id: agent::AgentId,
         image_url: agent::ImageUrl,
     ) -> Result<(), Self::Error> {
-        use build_service::build_service_client::BuildServiceClient;
+        use agent_deploy_service::agent_deploy_service_client::AgentDeployServiceClient;
 
         tracing::info!(
             agent_id = agent_id,
             image_url = image_url.as_ref(),
-            "Deploying agent via build service"
+            "Deploying agent via AgentDeployService"
         );
 
-        let mut client = BuildServiceClient::connect(self.build_service_url.clone()).await?;
+        let mut client =
+            AgentDeployServiceClient::connect(self.agent_deploy_service_url.clone()).await?;
 
-        let request = tonic::Request::new(build_service::DeployAgentRequest {
+        let request = tonic::Request::new(agent_deploy_service::DeployAgentRequest {
             name: format!("agent-{}", agent_id),
             image_url: image_url.to_string(),
             agent_id,
+            registry_credentials: None,
         });
 
         // Add user-id metadata
@@ -96,7 +98,7 @@ impl AgentDeployer for BuildServiceAgentDeployer {
 
         let response = response.into_inner();
 
-        if response.status() == build_service::deploy_agent_response::Status::Error {
+        if response.status() == agent_deploy_service::deploy_agent_response::Status::Error {
             return Err(AgentDeployerError::DeploymentFailed(response.message));
         }
 
@@ -111,13 +113,14 @@ impl AgentDeployer for BuildServiceAgentDeployer {
     }
 
     async fn delete_agent(&self, agent_id: agent::AgentId) -> Result<(), Self::Error> {
-        use build_service::build_service_client::BuildServiceClient;
+        use agent_deploy_service::agent_deploy_service_client::AgentDeployServiceClient;
 
-        tracing::info!(agent_id = agent_id, "Deleting agent via build service");
+        tracing::info!(agent_id = agent_id, "Deleting agent via AgentDeployService");
 
-        let mut client = BuildServiceClient::connect(self.build_service_url.clone()).await?;
+        let mut client =
+            AgentDeployServiceClient::connect(self.agent_deploy_service_url.clone()).await?;
 
-        let request = tonic::Request::new(build_service::DeleteAgentRequest {
+        let request = tonic::Request::new(agent_deploy_service::DeleteAgentRequest {
             name: format!("agent-{}", agent_id),
             agent_id,
         });
@@ -132,7 +135,7 @@ impl AgentDeployer for BuildServiceAgentDeployer {
 
         let response = response.into_inner();
 
-        if response.status() == build_service::delete_agent_response::Status::Error {
+        if response.status() == agent_deploy_service::delete_agent_response::Status::Error {
             return Err(AgentDeployerError::DeploymentFailed(response.message));
         }
 

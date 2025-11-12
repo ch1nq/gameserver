@@ -2,6 +2,6 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // trigger recompilation when a new migration is added
     println!("cargo:rerun-if-changed=migrations");
-    tonic_build::compile_protos("../../protos/build_service.proto")?;
+    tonic_build::compile_protos("../../protos/deploy_service.proto")?;
     Ok(())
 }

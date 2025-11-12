@@ -65,8 +65,20 @@ impl App {
             .with_expiry(Expiry::OnInactivity(Duration::days(1)));
 
         // Auth service
-        let backend = Backend::new(self.db, self.client);
+        let backend = Backend::new(self.db.clone(), self.client);
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
+
+        // Registry auth router
+        let jwt_secret = env::var("JWT_SECRET")
+            .expect("JWT_SECRET must be set for registry authentication");
+        let registry_service = env::var("REGISTRY_SERVICE")
+            .unwrap_or_else(|_| "achtung-registry.fly.dev".to_string());
+        let registry_auth_config = registry_auth::RegistryAuthConfig {
+            db: self.db.clone(),
+            jwt_secret,
+            registry_service,
+        };
+        let registry_router = registry_auth::router(registry_auth_config);
 
         let services = protected::router()
             .route_layer(login_required!(Backend, login_url = "/login"))
@@ -79,6 +91,7 @@ impl App {
         let app = axum::Router::new()
             .nest_service("/static", static_service)
             .fallback_service(fallback_service)
+            .nest("/registry", registry_router)
             .merge(services);
 
         println!("Serving on {addr}");

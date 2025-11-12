@@ -1,7 +1,7 @@
 [package]
 name = "website"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 [dependencies]
@@ -13,6 +13,7 @@ hyper = "1.0.1"
 maud = { version = "0.27.0", features = ["axum"] }
 oauth2 = "4.4.2"
 prost = "0.13.5"
+registry-auth = { version = "0.1.0", path = "../../libs/registry-auth" }
 reqwest = { version = "0.12.12", features = ["json"] }
 serde = "1"
 sqlx = { version = "0.8.1", features = ["postgres", "time", "runtime-tokio"] }

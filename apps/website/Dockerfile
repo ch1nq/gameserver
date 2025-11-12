@@ -4,12 +4,14 @@ WORKDIR /app
 
 FROM chef AS planner
 COPY apps/website /app
+COPY libs/registry-auth /libs/registry-auth
 RUN cargo chef prepare --recipe-path recipe.json
 
 
-FROM chef AS builder 
+FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
-RUN apt-get update && apt-get install -y protobuf-compiler 
+COPY libs/registry-auth /libs/registry-auth
+RUN apt-get update && apt-get install -y protobuf-compiler
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY apps/website /app
 COPY protos/ /protos
