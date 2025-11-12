@@ -55,7 +55,7 @@ pub mod pages {
         )
     }
 
-    pub fn settings(session: &AuthSession) -> impl IntoResponse {
+    pub fn settings(session: &AuthSession) -> impl IntoResponse + use<> {
         match &session.user {
             Some(user) => components::page(
                 "Settings",
