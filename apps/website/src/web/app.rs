@@ -69,13 +69,13 @@ impl App {
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
         // Registry auth router
-        let jwt_secret = env::var("JWT_SECRET")
-            .expect("JWT_SECRET must be set for registry authentication");
+        let private_key_pem = env::var("REGISTRY_PRIVATE_KEY")
+            .expect("REGISTRY_PRIVATE_KEY must be set for registry authentication (RSA private key in PEM format)");
         let registry_service = env::var("REGISTRY_SERVICE")
             .unwrap_or_else(|_| "achtung-registry.fly.dev".to_string());
         let registry_auth_config = registry_auth::RegistryAuthConfig {
             db: self.db.clone(),
-            jwt_secret,
+            private_key_pem,
             registry_service,
         };
         let registry_router = registry_auth::router(registry_auth_config);

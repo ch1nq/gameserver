@@ -4,15 +4,17 @@
 //! https://docs.docker.com/reference/api/registry/auth/
 
 use axum::{
+    Json, Router,
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
 };
-use base64::{engine::general_purpose::STANDARD, Engine};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use base64::{Engine, engine::general_purpose::STANDARD};
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use rsa::{RsaPublicKey, pkcs8::DecodePrivateKey};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
@@ -49,7 +51,8 @@ impl IntoResponse for Error {
 #[derive(Clone)]
 pub struct RegistryAuthConfig {
     pub db: PgPool,
-    pub jwt_secret: String,
+    /// RSA private key in PEM format for signing JWT tokens
+    pub private_key_pem: String,
     pub registry_service: String,
 }
 
@@ -134,27 +137,40 @@ async fn token_handler(
     Query(params): Query<TokenRequest>,
     headers: HeaderMap,
 ) -> Result<Json<TokenResponse>, Error> {
-    info!("Token request: service={}, scope={:?}", params.service, params.scope);
+    println!(
+        "Token request: service={0}, scope={1:?}",
+        params.service, params.scope
+    );
+    info!(
+        "Token request: service={}, scope={:?}",
+        params.service, params.scope
+    );
 
     // Validate service matches our registry
     if params.service != config.registry_service {
         return Err(Error::InvalidCredentials);
     }
+    info!("Service validated: {}", params.service);
 
     // Extract Basic auth credentials
     let (username, token) = extract_basic_auth(&headers)?;
 
     // Validate token and get user_id
+    info!("Authenticating user: {}", username);
     let user_id = validate_token(&config.db, &username, &token).await?;
 
     // Parse and validate requested scopes against user's namespace
+    info!("Validating scopes for user {}: {:?}", user_id, params.scope);
     let requested_scopes = params.scope.as_deref().unwrap_or("");
     let access_grants = parse_and_validate_scopes(requested_scopes, user_id)?;
+
+    info!("Access grants for user {}: {:?}", user_id, access_grants);
 
     // Generate JWT
     let now = OffsetDateTime::now_utc();
     let exp = now + Duration::minutes(30);
 
+    // https://distribution.github.io/distribution/spec/auth/jwt/
     let claims = Claims {
         iss: "registry-auth".to_string(),
         sub: username,
@@ -166,45 +182,66 @@ async fn token_handler(
         access: access_grants,
     };
 
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(config.jwt_secret.as_bytes()),
-    )?;
+    info!("Generating JWT for user {}", user_id);
+
+    // Use RS256 (RSA with SHA-256) for signing
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = key_id_from_pem(&config.private_key_pem).ok();
+
+    info!("Loading RSA private key for signing");
+
+    let encoding_key =
+        EncodingKey::from_rsa_pem(config.private_key_pem.as_bytes()).map_err(|e| {
+            error!("Failed to load RSA private key: {}", e);
+            Error::TokenGeneration(e)
+        })?;
+
+    info!("Loading token claims: {:?}", claims);
+
+    let token = encode(&header, &claims, &encoding_key)?;
+
+    info!("Generated token for user {}: {}", user_id, token);
 
     Ok(Json(TokenResponse {
         token: token.clone(),
         access_token: Some(token),
         expires_in: Some(1800), // 30 minutes
-        issued_at: Some(now.format(&time::format_description::well_known::Rfc3339).unwrap()),
+        issued_at: Some(
+            now.format(&time::format_description::well_known::Rfc3339)
+                .unwrap(),
+        ),
     }))
 }
 
 /// Extract Basic auth credentials from Authorization header
 fn extract_basic_auth(headers: &HeaderMap) -> Result<(String, String), Error> {
+    info!("all headers: {:?}", headers);
+    info!("Extracting Basic auth credentials");
     let auth_header = headers
         .get("authorization")
         .and_then(|h| h.to_str().ok())
         .ok_or(Error::InvalidCredentials)?;
 
     // Parse "Basic <base64>" format (HTTP Basic Auth standard - RFC 7617)
+    info!("Parsing Authorization header");
     let encoded = auth_header
         .strip_prefix("Basic ")
         .ok_or(Error::InvalidCredentials)?;
 
     // Decode base64
+    info!("Decoding base64 credentials");
     let decoded_bytes = STANDARD
         .decode(encoded)
         .map_err(|_| Error::InvalidCredentials)?;
 
-    let decoded = String::from_utf8(decoded_bytes)
-        .map_err(|_| Error::InvalidCredentials)?;
+    info!("Splitting username and password");
+    let decoded = String::from_utf8(decoded_bytes).map_err(|_| Error::InvalidCredentials)?;
 
     // Split on first ':'
-    let (username, password) = decoded
-        .split_once(':')
-        .ok_or(Error::InvalidCredentials)?;
+    info!("Splitting username and password");
+    let (username, password) = decoded.split_once(':').ok_or(Error::InvalidCredentials)?;
 
+    info!("Extracted username: {} pass: {}", username, password);
     Ok((username.to_string(), password.to_string()))
 }
 
@@ -250,11 +287,7 @@ fn parse_and_validate_scopes(scopes: &str, user_id: i64) -> Result<Vec<Access>, 
 }
 
 /// Validate a registry token from the database
-async fn validate_token(
-    db: &PgPool,
-    username: &str,
-    token: &str,
-) -> Result<i64, Error> {
+async fn validate_token(db: &PgPool, username: &str, token: &str) -> Result<i64, Error> {
     // Extract user_id from username (format: "user-{id}")
     let user_id = username
         .strip_prefix("user-")
@@ -266,7 +299,7 @@ async fn validate_token(
         "SELECT user_id, token_hash, revoked_at
          FROM registry_tokens
          WHERE user_id = $1 AND revoked_at IS NULL
-         LIMIT 1"
+         LIMIT 1",
     )
     .bind(user_id)
     .fetch_optional(db)
@@ -284,16 +317,74 @@ async fn validate_token(
     Ok(user_id)
 }
 
-/// Create a router for Docker registry token authentication
+/// Generate a Docker registry key ID from a PEM-encoded RSA private key.
 ///
-/// Mount this router at `/registry` in your application:
+/// This follows the libtrust specification used by Docker Registry:
+/// https://github.com/jlhawn/libtrust/blob/master/util.go#L192
 ///
-/// ```rust,ignore
-/// let app = Router::new()
-///     .nest("/registry", registry_auth::router(config));
-/// ```
+/// The key ID is generated by:
+/// 1. Extracting the public key from the private key
+/// 2. DER encoding the public key (PKIX format)
+/// 3. Computing SHA256 hash
+/// 4. Truncating to 240 bits (30 bytes)
+/// 5. Base32 encoding and formatting as colon-separated 4-character groups
 ///
-/// This will expose the token endpoint at `/registry/token`.
+/// Returns a key ID in the format: ABCD:EFGH:IJKL:MNOP:QRST:UVWX:YZ23:4567:ABCD:EFGH:IJKL:MNOP
+pub fn key_id_from_pem(pem: &str) -> Result<String, Box<dyn std::error::Error>> {
+    // Parse the PEM to extract the private key, then get the public key
+    let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(pem)?;
+    let public_key = RsaPublicKey::from(&private_key);
+
+    // Encode the public key in DER format (PKIX/SPKI)
+    use rsa::pkcs8::EncodePublicKey;
+    let der_bytes = public_key.to_public_key_der()?;
+
+    // Compute SHA256 hash
+    let mut hasher = Sha256::new();
+    hasher.update(der_bytes.as_bytes());
+    let hash = hasher.finalize();
+
+    // Truncate to 240 bits (30 bytes)
+    let truncated = &hash[..30];
+
+    // Base32 encode and format
+    Ok(key_id_encode(truncated))
+}
+
+/// Encode bytes as base32 and format into colon-separated 4-character groups.
+///
+/// This matches the keyIDEncode function from libtrust:
+/// https://github.com/jlhawn/libtrust/blob/master/util.go#L177
+fn key_id_encode(bytes: &[u8]) -> String {
+    // Base32 encode and remove padding
+    let encoded = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, bytes);
+
+    // Split into 4-character groups separated by colons
+    let mut result = String::new();
+    let chars: Vec<char> = encoded.chars().collect();
+    let num_groups = chars.len() / 4;
+
+    for i in 0..num_groups {
+        if i > 0 {
+            result.push(':');
+        }
+        let start = i * 4;
+        let end = start + 4;
+        result.extend(&chars[start..end]);
+    }
+
+    // Add any remaining characters (if not evenly divisible by 4)
+    let remainder_start = num_groups * 4;
+    if remainder_start < chars.len() {
+        if num_groups > 0 {
+            result.push(':');
+        }
+        result.extend(&chars[remainder_start..]);
+    }
+
+    result
+}
+
 pub fn router(config: RegistryAuthConfig) -> Router {
     Router::new()
         .route("/token", get(token_handler))

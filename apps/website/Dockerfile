@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef:latest-rust-1.84.1 AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.89.0 AS chef
 WORKDIR /app
 
 
@@ -10,12 +10,13 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
-COPY libs/registry-auth /libs/registry-auth
 RUN apt-get update && apt-get install -y protobuf-compiler
+COPY libs/registry-auth /libs/registry-auth
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY apps/website /app
 COPY protos/ /protos
 RUN cargo build --release --bin website
+
 
 FROM debian:bookworm-slim AS runner
 WORKDIR /app

@@ -1,14 +1,17 @@
 [package]
 name = "registry-auth"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 axum = "0.8.6"
+base32 = "0.5.1"
 base64 = "0.22.1"
 bcrypt = "0.17.1"
 jsonwebtoken = { version = "10.2.0", features = ["hmac", "rust_crypto"] }
+rsa = { version = "0.9.7", features = ["pem"] }
 serde = { version = "1.0.228", features = ["derive"] }
+sha2 = "0.10.8"
 sqlx = { version = "0.8.6", features = ["postgres", "time", "runtime-tokio"] }
 thiserror = "2.0.17"
 time = "0.3.44"
