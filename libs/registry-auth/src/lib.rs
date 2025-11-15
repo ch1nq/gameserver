@@ -355,34 +355,14 @@ pub fn key_id_from_pem(pem: &str) -> Result<String, Box<dyn std::error::Error>> 
 ///
 /// This matches the keyIDEncode function from libtrust:
 /// https://github.com/jlhawn/libtrust/blob/master/util.go#L177
-fn key_id_encode(bytes: &[u8]) -> String {
-    // Base32 encode and remove padding
-    let encoded = base32::encode(base32::Alphabet::Rfc4648 { padding: false }, bytes);
-
-    // Split into 4-character groups separated by colons
-    let mut result = String::new();
-    let chars: Vec<char> = encoded.chars().collect();
-    let num_groups = chars.len() / 4;
-
-    for i in 0..num_groups {
-        if i > 0 {
-            result.push(':');
-        }
-        let start = i * 4;
-        let end = start + 4;
-        result.extend(&chars[start..end]);
-    }
-
-    // Add any remaining characters (if not evenly divisible by 4)
-    let remainder_start = num_groups * 4;
-    if remainder_start < chars.len() {
-        if num_groups > 0 {
-            result.push(':');
-        }
-        result.extend(&chars[remainder_start..]);
-    }
-
-    result
+pub(crate) fn key_id_encode(bytes: &[u8]) -> String {
+    base32::encode(base32::Alphabet::Rfc4648 { padding: false }, bytes)
+        .as_bytes()
+        .chunks(4)
+        .map(std::str::from_utf8)
+        .collect::<Result<Vec<&str>, _>>()
+        .unwrap()
+        .join(":")
 }
 
 pub fn router(config: RegistryAuthConfig) -> Router {
