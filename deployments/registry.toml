@@ -7,36 +7,42 @@ app = 'achtung-registry'
 primary_region = 'arn'
 
 [build]
-image = 'registry:2'
+dockerfile = '../apps/registry/Dockerfile'
 
 [env]
-REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY = '/var/lib/registry'
-REGISTRY_AUTH_TOKEN_REALM = 'https://achtung.fly.dev/registry/token'
-REGISTRY_AUTH_TOKEN_SERVICE = 'achtung-registry.fly.dev'
-REGISTRY_AUTH_TOKEN_ISSUER = 'registry-auth'
-REGISTRY_STORAGE_DELETE_ENABLED = 'true'
-REGISTRY_HTTP_ADDR = '0.0.0.0:5000'
+# Registry storage configuration
+REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY = "/var/lib/registry"
+
+# Token authentication configuration
+REGISTRY_AUTH = "token"
+REGISTRY_AUTH_TOKEN_REALM = "https://achtung.fly.dev/registry/token"
+REGISTRY_AUTH_TOKEN_SERVICE = "achtung-registry.fly.dev"
+REGISTRY_AUTH_TOKEN_ISSUER = "registry-auth"
+
+# HTTP configuration
+# REGISTRY_HTTP_ADDR = "0.0.0.0:5000"
+# REGISTRY_HTTP_SECRET = "replace-with-random-secret-string"
 
 [[mounts]]
 source = 'registry_data'
 destination = '/var/lib/registry'
 initial_size = '10gb'
 
-[[services]]
+[http_service]
 internal_port = 5000
-processes = ["app"]
-auto_stop_machines = "stop"
+force_https = true
+auto_stop_machines = 'stop'
 auto_start_machines = true
+max_machines_running = 1
 min_machines_running = 0
-protocol = "tcp"
+processes = ['app']
 
-[[services.ports]]
-handlers = ["http"]
-port = 80
-
-[[services.ports]]
-handlers = ["http", "tls"]
-port = 443
+[[http_service.checks]]
+grace_period = "10s"
+interval = "30s"
+method = "GET"
+timeout = "5s"
+path = "/"
 
 [[vm]]
 size = 'shared-cpu-1x'
