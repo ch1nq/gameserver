@@ -5,11 +5,10 @@ use crate::{
 };
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
-    login_required,
-    tower_sessions::{cookie::SameSite, Expiry, SessionManagerLayer},
-    AuthManagerLayerBuilder,
+    AuthManagerLayerBuilder, login_required,
+    tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite},
 };
-use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
+use oauth2::{AuthUrl, ClientId, ClientSecret, TokenUrl, basic::BasicClient};
 use sqlx::PgPool;
 use std::env;
 use time::Duration;
@@ -71,13 +70,14 @@ impl App {
         // Registry auth router
         let private_key_pem = env::var("REGISTRY_PRIVATE_KEY")
             .expect("REGISTRY_PRIVATE_KEY must be set for registry authentication (RSA private key in PEM format)");
-        let registry_service = env::var("REGISTRY_SERVICE")
-            .unwrap_or_else(|_| "achtung-registry.fly.dev".to_string());
-        let registry_auth_config = registry_auth::RegistryAuthConfig {
-            db: self.db.clone(),
+        let registry_service =
+            env::var("REGISTRY_SERVICE").unwrap_or_else(|_| "achtung-registry.fly.dev".to_string());
+        let registry_auth_config = registry_auth::RegistryAuthConfig::new(
+            self.db.clone(),
             private_key_pem,
             registry_service,
-        };
+        )
+        .expect("Failed to create registry auth config");
         let registry_router = registry_auth::router(registry_auth_config);
 
         let services = protected::router()

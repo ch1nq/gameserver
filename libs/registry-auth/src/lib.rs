@@ -50,10 +50,27 @@ impl IntoResponse for Error {
 
 #[derive(Clone)]
 pub struct RegistryAuthConfig {
-    pub db: PgPool,
+    db: PgPool,
     /// RSA private key in PEM format for signing JWT tokens
-    pub private_key_pem: String,
-    pub registry_service: String,
+    private_key_pem: String,
+    registry_service: String,
+    signing_key: String,
+}
+
+impl RegistryAuthConfig {
+    pub fn new(
+        db: PgPool,
+        private_key_pem: String,
+        registry_service: String,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let signing_key = key_id_from_pem(&private_key_pem)?;
+        Ok(Self {
+            db,
+            private_key_pem,
+            registry_service,
+            signing_key,
+        })
+    }
 }
 
 /// Docker registry token auth request parameters
@@ -186,7 +203,7 @@ async fn token_handler(
 
     // Use RS256 (RSA with SHA-256) for signing
     let mut header = Header::new(Algorithm::RS256);
-    header.kid = key_id_from_pem(&config.private_key_pem).ok();
+    header.kid = Some(config.signing_key.clone());
 
     info!("Loading RSA private key for signing");
 
@@ -215,33 +232,26 @@ async fn token_handler(
 
 /// Extract Basic auth credentials from Authorization header
 fn extract_basic_auth(headers: &HeaderMap) -> Result<(String, String), Error> {
-    info!("all headers: {:?}", headers);
-    info!("Extracting Basic auth credentials");
     let auth_header = headers
         .get("authorization")
         .and_then(|h| h.to_str().ok())
         .ok_or(Error::InvalidCredentials)?;
 
     // Parse "Basic <base64>" format (HTTP Basic Auth standard - RFC 7617)
-    info!("Parsing Authorization header");
     let encoded = auth_header
         .strip_prefix("Basic ")
         .ok_or(Error::InvalidCredentials)?;
 
     // Decode base64
-    info!("Decoding base64 credentials");
     let decoded_bytes = STANDARD
         .decode(encoded)
         .map_err(|_| Error::InvalidCredentials)?;
 
-    info!("Splitting username and password");
     let decoded = String::from_utf8(decoded_bytes).map_err(|_| Error::InvalidCredentials)?;
 
     // Split on first ':'
-    info!("Splitting username and password");
     let (username, password) = decoded.split_once(':').ok_or(Error::InvalidCredentials)?;
 
-    info!("Extracted username: {} pass: {}", username, password);
     Ok((username.to_string(), password.to_string()))
 }
 
