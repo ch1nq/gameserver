@@ -1,4 +1,4 @@
-FROM registry:2
+FROM registry:3
 
 # Save original entrypoint
 # Copy custom entrypoint script that wraps the original
@@ -7,4 +7,4 @@ RUN chmod +x /custom-entrypoint.sh
 
 # Use our custom entrypoint
 ENTRYPOINT ["/custom-entrypoint.sh"]
-CMD ["serve", "/etc/docker/registry/config.yml"]
+CMD ["serve", "/etc/distribution/config.yml"]
