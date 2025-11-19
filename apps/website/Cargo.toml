@@ -8,11 +8,13 @@ publish = false
 async-trait = "0.1.86"
 axum = "0.8.1"
 axum-login = "0.17.0"
+bcrypt = "0.17.1"
 http = "1.0.0"
 hyper = "1.0.1"
 maud = { version = "0.27.0", features = ["axum"] }
 oauth2 = "4.4.2"
 prost = "0.13.5"
+rand = "0.9.2"
 registry-auth = { version = "0.1.0", path = "../../libs/registry-auth" }
 reqwest = { version = "0.12.12", features = ["json"] }
 serde = "1"

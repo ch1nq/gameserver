@@ -1,4 +1,5 @@
 use crate::agents::manager::AgentManager;
+use crate::tokens::TokenManager;
 use crate::{
     users::Backend,
     web::{auth, layouts::pages, oauth, protected, public},
@@ -15,10 +16,16 @@ use time::Duration;
 use tower_http::services::ServeDir;
 use tower_sessions_sqlx_store::PostgresStore;
 
+#[derive(Clone)]
+pub struct AppState {
+    pub agent_manager: AgentManager,
+    pub token_manager: TokenManager,
+}
+
 pub struct App {
     db: PgPool,
     client: BasicClient,
-    agent_manager: AgentManager,
+    state: AppState,
 }
 
 impl App {
@@ -39,11 +46,17 @@ impl App {
         sqlx::migrate!().run(&db).await?;
 
         let agent_manager = AgentManager::new(db.clone());
+        let token_manager = TokenManager::new(db.clone());
+
+        let state = AppState {
+            agent_manager,
+            token_manager,
+        };
 
         Ok(Self {
             db,
             client,
-            agent_manager,
+            state,
         })
     }
 
@@ -83,7 +96,7 @@ impl App {
         let services = protected::router()
             .route_layer(login_required!(Backend, login_url = "/login"))
             .merge(public::router())
-            .with_state(self.agent_manager)
+            .with_state(self.state)
             .merge(auth::router())
             .merge(oauth::router())
             .layer(auth_layer);

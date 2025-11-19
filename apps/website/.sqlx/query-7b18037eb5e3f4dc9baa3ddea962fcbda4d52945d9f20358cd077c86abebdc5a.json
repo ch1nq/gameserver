@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE registry_tokens\n            SET revoked_at = NOW()\n            WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b18037eb5e3f4dc9baa3ddea962fcbda4d52945d9f20358cd077c86abebdc5a"
+}
