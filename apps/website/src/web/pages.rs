@@ -36,7 +36,7 @@ pub fn login(next: Option<String>, message: Option<String>) -> Markup {
 
                     form method="post" {
                         button type="submit" class="text-white bg-[#24292F] hover:bg-[#24292F]/90 focus:ring-4 focus:outline-none focus:ring-[#24292F]/50 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center dark:focus:ring-gray-500 dark:hover:bg-[#050708]/30 me-2 mb-2" {
-                            (components::icons::github_logo())
+                            (components::icon::github_logo())
                             "Sign in with Github"
                         }
 
@@ -179,10 +179,10 @@ pub fn token_created(_token_id: i64, user_id: i64, plaintext_token: &str) -> Mar
                                 input type="text" id="token-value" readonly="" value=(plaintext_token) class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-20 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white font-mono" {}
                                 button onclick="copyToken()" class="absolute end-2 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg p-2 inline-flex items-center justify-center" {
                                     span id="default-icon" {
-                                        (components::icons::copy_icon())
+                                        (components::icon::copy())
                                     }
                                     span id="success-icon" class="hidden" {
-                                        (components::icons::checkmark_icon())
+                                        (components::icon::checkmark())
                                     }
                                 }
                             }
@@ -224,7 +224,7 @@ fn new_token_modal() -> Markup {
                             "Create Deploy Token"
                         }
                         button type="button" class="text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm w-8 h-8 ms-auto inline-flex justify-center items-center dark:hover:bg-gray-600 dark:hover:text-white" data-modal-toggle="new-token-modal" {
-                            (components::icons::close_icon())
+                            (components::icon::close())
                             span class="sr-only" { "Close modal" }
                         }
                     }
@@ -249,7 +249,7 @@ fn new_token_modal() -> Markup {
                         // Submit button
                         div class="flex justify-end" {
                             button type="submit" class="text-white inline-flex items-center bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800" {
-                                (components::icons::plus_icon())
+                                (components::icon::plus())
                                 "Generate Token"
                             }
                         }
@@ -344,7 +344,7 @@ fn new_agent_modal() -> Markup {
                             "Create new agent"
                         }
                         button type="button" class="text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm w-8 h-8 ms-auto inline-flex justify-center items-center dark:hover:bg-gray-600 dark:hover:text-white" data-modal-toggle="new-agent-modal" {
-                            (components::icons::close_icon())
+                            (components::icon::close())
                             span class="sr-only" { "Close modal" }
                         }
                     }
@@ -378,7 +378,7 @@ fn new_agent_modal() -> Markup {
                         // Submit button
                         div class="flex justify-end" {
                             button type="submit" class="text-white inline-flex items-center bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800" {
-                                (components::icons::plus_icon())
+                                (components::icon::plus())
                                 "Add new agent"
                             }
                         }
