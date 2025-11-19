@@ -20,12 +20,6 @@ pub fn router() -> Router<AppState> {
         .route("/agents/{id}/delete", post(delete_agent))
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct CreateAgentForm {
-    name: String,
-    image_url: String,
-}
-
 async fn agents(auth_session: AuthSession, State(state): State<AppState>) -> impl IntoResponse {
     let user_id = match &auth_session.user {
         Some(user) => user.id,
@@ -36,6 +30,12 @@ async fn agents(auth_session: AuthSession, State(state): State<AppState>) -> imp
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
     pages::agents(&auth_session, agents).into_response()
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CreateAgentForm {
+    name: String,
+    image_url: String,
 }
 
 async fn new_agent(
