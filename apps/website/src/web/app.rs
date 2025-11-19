@@ -2,7 +2,7 @@ use crate::agents::manager::AgentManager;
 use crate::tokens::TokenManager;
 use crate::{
     users::Backend,
-    web::{auth, layouts::pages, oauth, protected, public},
+    web::{auth, oauth, pages, protected, public},
 };
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
@@ -53,11 +53,7 @@ impl App {
             token_manager,
         };
 
-        Ok(Self {
-            db,
-            client,
-            state,
-        })
+        Ok(Self { db, client, state })
     }
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {

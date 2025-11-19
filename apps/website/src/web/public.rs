@@ -1,7 +1,7 @@
 use crate::users::AuthSession;
 use crate::web::app::AppState;
-use crate::web::layouts::pages;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Router};
+use crate::web::pages;
+use axum::{Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/", get(self::get::index))

@@ -1,10 +1,10 @@
-use crate::web::layouts::pages;
+use crate::web::pages;
 use axum::{
+    Form, Router,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Redirect},
     routing::{get, post},
-    Form, Router,
 };
 use axum_login::tower_sessions::Session;
 use serde::Deserialize;

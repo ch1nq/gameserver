@@ -1,7 +1,7 @@
 use crate::tokens::TokenName;
 use crate::users::AuthSession;
 use crate::web::app::AppState;
-use crate::web::layouts::pages;
+use crate::web::pages;
 use axum::{
     Form, Router,
     extract::{Path, State},
