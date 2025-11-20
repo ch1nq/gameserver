@@ -50,12 +50,15 @@ impl fmt::Display for TokenName {
     }
 }
 
+type RegistryTokenHash = String;
+
 /// Registry token record from database
 #[derive(Debug, Clone)]
 pub struct RegistryToken {
     pub id: i64,
     pub user_id: i64,
     pub name: String,
+    pub token_hash: RegistryTokenHash,
     pub created_at: time::PrimitiveDateTime,
     pub revoked_at: Option<time::PrimitiveDateTime>,
 }

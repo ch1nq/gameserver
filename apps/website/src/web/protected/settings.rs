@@ -1,4 +1,4 @@
-use crate::tokens::TokenName;
+use crate::registry::TokenName;
 use crate::users::AuthSession;
 use crate::web::app::AppState;
 use crate::web::pages;
@@ -24,7 +24,7 @@ async fn settings(auth_session: AuthSession, State(state): State<AppState>) -> i
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
 
-    let tokens = match state.token_manager.list_tokens(user_id).await {
+    let tokens = match state.token_manager.list_tokens(&user_id).await {
         Ok(tokens) => tokens,
         Err(e) => {
             tracing::error!("Failed to list tokens: {}", e);
@@ -59,7 +59,11 @@ async fn create_token(
         }
     };
 
-    match state.token_manager.create_token(user.id, token_name).await {
+    match state
+        .token_manager
+        .create_token(&user.id, &token_name)
+        .await
+    {
         Ok((token_id, plaintext_token)) => {
             // Return HTML response with modal showing the token
             pages::token_created(token_id, user.id, &plaintext_token).into_response()
@@ -82,7 +86,7 @@ async fn revoke_token(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    match state.token_manager.revoke_token(user.id, token_id).await {
+    match state.token_manager.revoke_token(&user.id, token_id).await {
         Ok(_) => Redirect::to("/settings").into_response(),
         Err(e) => {
             tracing::error!("Failed to revoke token: {}", e);

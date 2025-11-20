@@ -1,5 +1,6 @@
 use crate::agents::manager::AgentManager;
-use crate::tokens::TokenManager;
+use crate::registry;
+use crate::registry::TokenManager;
 use crate::{
     users::Backend,
     web::{auth, oauth, pages, protected, public},
@@ -76,18 +77,16 @@ impl App {
         let backend = Backend::new(self.db.clone(), self.client);
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
-        // Registry auth router
+        // Registry auth router - reuses the token_manager from AppState
         let private_key_pem = env::var("REGISTRY_PRIVATE_KEY")
             .expect("REGISTRY_PRIVATE_KEY must be set for registry authentication (RSA private key in PEM format)");
         let registry_service =
             env::var("REGISTRY_SERVICE").unwrap_or_else(|_| "achtung-registry.fly.dev".to_string());
-        let registry_auth_config = registry_auth::RegistryAuthConfig::new(
-            self.db.clone(),
-            private_key_pem,
-            registry_service,
-        )
-        .expect("Failed to create registry auth config");
-        let registry_router = registry_auth::router(registry_auth_config);
+        let registry_auth_config =
+            registry::auth::RegistryAuthConfig::new(private_key_pem, registry_service)
+                .expect("Failed to create registry auth config");
+        let registry_router =
+            registry::auth::router(self.state.token_manager.clone(), registry_auth_config);
 
         let services = protected::router()
             .route_layer(login_required!(Backend, login_url = "/login"))
@@ -95,12 +94,12 @@ impl App {
             .with_state(self.state)
             .merge(auth::router())
             .merge(oauth::router())
+            .merge(registry_router)
             .layer(auth_layer);
 
         let app = axum::Router::new()
             .nest_service("/static", static_service)
             .fallback_service(fallback_service)
-            .nest("/registry", registry_router)
             .merge(services);
 
         println!("Serving on {addr}");

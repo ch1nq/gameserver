@@ -33,7 +33,8 @@ Ub7SGmN8Bo8nweJQwVN++HkuJgA1qeFSAmHkTb5SWvlLo5SGnCggJOBHS2YdsWBI
 hgvjlUMEsLIcj8xxegi/k4iQ
 -----END PRIVATE KEY-----"#;
 
-        let key_id = registry_auth::key_id_from_pem(test_pem).expect("Failed to generate key ID");
+        let key_id =
+            website::registry::auth::key_id_from_pem(test_pem).expect("Failed to generate key ID");
 
         // Verify the format: 12 groups of 4 characters separated by colons
         let parts: Vec<&str> = key_id.split(':').collect();

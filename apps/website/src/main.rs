@@ -1,16 +1,6 @@
-//! Run with
-//!
-//! ```not_rust
-//! cargo run -p example-oauth2
-//! ```
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-use crate::web::App;
-
-mod agents;
-mod tokens;
-mod users;
-mod web;
+use website::web::App;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

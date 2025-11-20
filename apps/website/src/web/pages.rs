@@ -1,5 +1,5 @@
 use crate::agents::agent::{Agent, AgentStatus};
-use crate::tokens::RegistryToken;
+use crate::registry::RegistryToken;
 use crate::users::AuthSession;
 use axum::http::StatusCode;
 use maud::{Markup, PreEscaped, html};

@@ -4,22 +4,21 @@
 //! https://docs.docker.com/reference/api/registry/auth/
 
 use axum::{
-    Json, Router,
+    Json,
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use rsa::{RsaPublicKey, pkcs8::DecodePrivateKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
-use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+use crate::registry::TokenManager;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -50,7 +49,6 @@ impl IntoResponse for Error {
 
 #[derive(Clone)]
 pub struct RegistryAuthConfig {
-    db: PgPool,
     /// RSA private key in PEM format for signing JWT tokens
     private_key_pem: String,
     registry_service: String,
@@ -59,13 +57,11 @@ pub struct RegistryAuthConfig {
 
 impl RegistryAuthConfig {
     pub fn new(
-        db: PgPool,
         private_key_pem: String,
         registry_service: String,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let signing_key = key_id_from_pem(&private_key_pem)?;
         Ok(Self {
-            db,
             private_key_pem,
             registry_service,
             signing_key,
@@ -73,10 +69,22 @@ impl RegistryAuthConfig {
     }
 }
 
+/// Create the registry authentication router
+///
+/// This is the public Docker Registry v2 token endpoint that doesn't require login.
+/// Docker clients call this endpoint to get JWT tokens for registry access.
+pub fn router(token_manager: TokenManager, config: RegistryAuthConfig) -> axum::Router {
+    use axum::{Router, routing::get};
+
+    Router::new()
+        .route("/token", get(token_handler))
+        .with_state((token_manager, config))
+}
+
 /// Docker registry token auth request parameters
 /// https://docs.docker.com/reference/api/registry/auth/
 #[derive(Debug, Deserialize)]
-struct TokenRequest {
+pub struct TokenRequest {
     /// The service that hosts the resource (e.g., "achtung-registry.fly.dev")
     service: String,
     /// Space-delimited scope(s) (e.g., "repository:user-123/myimage:push,pull repository:user-123/other:pull")
@@ -90,7 +98,7 @@ struct TokenRequest {
 /// Docker registry token response
 /// https://docs.docker.com/registry/spec/auth/token/
 #[derive(Debug, Serialize)]
-struct TokenResponse {
+pub struct TokenResponse {
     /// The JWT token
     token: String,
     /// Access token (same as token for compatibility)
@@ -137,20 +145,12 @@ struct Access {
     actions: Vec<String>,
 }
 
-/// Database record for registry token
-#[derive(Debug, sqlx::FromRow)]
-struct RegistryToken {
-    user_id: i64,
-    token_hash: String,
-    revoked_at: Option<time::OffsetDateTime>,
-}
-
 /// Token auth endpoint
 ///
 /// Docker clients call this with Basic auth (username=user-{id}, password=token)
 /// Returns a JWT that grants access to the user's namespace
-async fn token_handler(
-    State(config): State<Arc<RegistryAuthConfig>>,
+pub async fn token_handler(
+    State((token_manager, config)): State<(TokenManager, RegistryAuthConfig)>,
     Query(params): Query<TokenRequest>,
     headers: HeaderMap,
 ) -> Result<Json<TokenResponse>, Error> {
@@ -172,9 +172,22 @@ async fn token_handler(
     // Extract Basic auth credentials
     let (username, token) = extract_basic_auth(&headers)?;
 
+    // Extract user_id from username (format: "user-{id}")
+    // TODO: create a type for user id and validate in ::new()
+    let user_id = username
+        .strip_prefix("user-")
+        .and_then(|s| s.parse::<i64>().ok())
+        .ok_or(Error::InvalidCredentials)?;
+
     // Validate token and get user_id
     info!("Authenticating user: {}", username);
-    let user_id = validate_token(&config.db, &username, &token).await?;
+    token_manager
+        .validate_token(&user_id, &token)
+        .await
+        .map_err(|e| {
+            warn!("Token validation failed for user {}: {}", username, e);
+            Error::InvalidCredentials
+        })?;
 
     // Parse and validate requested scopes against user's namespace
     info!("Validating scopes for user {}: {:?}", user_id, params.scope);
@@ -296,37 +309,6 @@ fn parse_and_validate_scopes(scopes: &str, user_id: i64) -> Result<Vec<Access>, 
     Ok(access_grants)
 }
 
-/// Validate a registry token from the database
-async fn validate_token(db: &PgPool, username: &str, token: &str) -> Result<i64, Error> {
-    // Extract user_id from username (format: "user-{id}")
-    let user_id = username
-        .strip_prefix("user-")
-        .and_then(|s| s.parse::<i64>().ok())
-        .ok_or(Error::InvalidCredentials)?;
-
-    // Query for non-revoked token
-    let record: Option<RegistryToken> = sqlx::query_as(
-        "SELECT user_id, token_hash, revoked_at
-         FROM registry_tokens
-         WHERE user_id = $1 AND revoked_at IS NULL
-         LIMIT 1",
-    )
-    .bind(user_id)
-    .fetch_optional(db)
-    .await?;
-
-    let Some(db_token) = record else {
-        return Err(Error::InvalidCredentials);
-    };
-
-    // Verify token hash
-    if !bcrypt::verify(token, &db_token.token_hash).unwrap_or(false) {
-        return Err(Error::InvalidCredentials);
-    }
-
-    Ok(user_id)
-}
-
 /// Generate a Docker registry key ID from a PEM-encoded RSA private key.
 ///
 /// This follows the libtrust specification used by Docker Registry:
@@ -373,10 +355,4 @@ pub(crate) fn key_id_encode(bytes: &[u8]) -> String {
         .collect::<Result<Vec<&str>, _>>()
         .unwrap()
         .join(":")
-}
-
-pub fn router(config: RegistryAuthConfig) -> Router {
-    Router::new()
-        .route("/token", get(token_handler))
-        .with_state(Arc::new(config))
 }

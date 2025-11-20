@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, user_id, name, created_at, revoked_at\n            FROM registry_tokens\n            WHERE user_id = $1 AND revoked_at IS NULL\n            ORDER BY created_at DESC\n            ",
+  "query": "\n            SELECT id, user_id, name, token_hash, created_at, revoked_at\n            FROM registry_tokens\n            WHERE user_id = $1 AND revoked_at IS NULL\n            ORDER BY created_at DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -20,11 +20,16 @@
       },
       {
         "ordinal": 3,
+        "name": "token_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamp"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "revoked_at",
         "type_info": "Timestamp"
       }
@@ -39,8 +44,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "fbe58bc603c38d0fb02c2177fec21666eea9369ccdf849695d667d785547b6d6"
+  "hash": "0c6649d53a289dcf62bc689fa58a8a7503da05f496f35bedfc0f40264e62bff5"
 }
