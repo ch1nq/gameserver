@@ -1,3 +1,5 @@
+use crate::users::UserId;
+
 use super::token::{RegistryToken, TokenName, generate_token};
 use sqlx::PgPool;
 
@@ -41,7 +43,7 @@ impl TokenManager {
     /// Returns the token ID and the plaintext token (only time it's visible)
     pub async fn create_token(
         &self,
-        user_id: &i64,
+        user_id: &UserId,
         name: &TokenName,
     ) -> Result<(i64, String), TokenManagerError> {
         // Check token limit
@@ -79,7 +81,7 @@ impl TokenManager {
     /// List all active (non-revoked) tokens for a user
     pub async fn list_tokens(
         &self,
-        user_id: &i64,
+        user_id: &UserId,
     ) -> Result<Vec<RegistryToken>, TokenManagerError> {
         let tokens = sqlx::query_as!(
             RegistryToken,
@@ -101,7 +103,7 @@ impl TokenManager {
     /// Revoke a token (soft delete by setting revoked_at)
     pub async fn revoke_token(
         &self,
-        user_id: &i64,
+        user_id: &UserId,
         token_id: i64,
     ) -> Result<(), TokenManagerError> {
         let result = sqlx::query!(
@@ -125,7 +127,7 @@ impl TokenManager {
     }
 
     /// Count active tokens for a user
-    pub async fn count_active_tokens(&self, user_id: &i64) -> Result<i64, TokenManagerError> {
+    pub async fn count_active_tokens(&self, user_id: &UserId) -> Result<i64, TokenManagerError> {
         let count = sqlx::query!(
             r#"
             SELECT COUNT(*) as "count!"
@@ -144,7 +146,7 @@ impl TokenManager {
 
     pub async fn get_active_tokens(
         &self,
-        user_id: &i64,
+        user_id: &UserId,
     ) -> Result<Vec<RegistryToken>, TokenManagerError> {
         sqlx::query_as!(
             RegistryToken,
@@ -163,7 +165,7 @@ impl TokenManager {
     /// Validate a registry token for a user
     pub async fn validate_token(
         &self,
-        user_id: &i64,
+        user_id: &UserId,
         token: &str,
     ) -> Result<(), TokenManagerError> {
         for db_token in self.get_active_tokens(user_id).await? {

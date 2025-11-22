@@ -18,7 +18,7 @@ use time::{Duration, OffsetDateTime};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::registry::TokenManager;
+use crate::{registry::TokenManager, users::UserId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -176,7 +176,7 @@ pub async fn token_handler(
     // TODO: create a type for user id and validate in ::new()
     let user_id = username
         .strip_prefix("user-")
-        .and_then(|s| s.parse::<i64>().ok())
+        .and_then(|s| s.parse::<UserId>().ok())
         .ok_or(Error::InvalidCredentials)?;
 
     // Validate token and get user_id
@@ -269,7 +269,7 @@ fn extract_basic_auth(headers: &HeaderMap) -> Result<(String, String), Error> {
 }
 
 /// Parse space-delimited scopes and validate against user namespace
-fn parse_and_validate_scopes(scopes: &str, user_id: i64) -> Result<Vec<Access>, Error> {
+fn parse_and_validate_scopes(scopes: &str, user_id: UserId) -> Result<Vec<Access>, Error> {
     let user_namespace = format!("user-{}", user_id);
     let mut access_grants = Vec::new();
 

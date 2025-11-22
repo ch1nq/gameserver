@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
+use crate::users::UserId;
+
 /// A validated token name (3-50 characters, alphanumeric + spaces/hyphens)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenName(String);
@@ -56,7 +58,7 @@ type RegistryTokenHash = String;
 #[derive(Debug, Clone)]
 pub struct RegistryToken {
     pub id: i64,
-    pub user_id: i64,
+    pub user_id: UserId,
     pub name: String,
     pub token_hash: RegistryTokenHash,
     pub created_at: time::PrimitiveDateTime,

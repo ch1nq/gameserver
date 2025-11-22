@@ -1,6 +1,6 @@
 use crate::agents::agent::{Agent, AgentStatus};
 use crate::registry::RegistryToken;
-use crate::users::AuthSession;
+use crate::users::{AuthSession, UserId};
 use crate::web::layout::components;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -119,12 +119,12 @@ pub fn settings(
 }
 
 pub struct TokenCreated {
-    user_id: i64,
+    user_id: UserId,
     plaintext_token: String,
 }
 
 impl TokenCreated {
-    pub fn new(user_id: i64, plaintext_token: String) -> TokenCreated {
+    pub fn new(user_id: UserId, plaintext_token: String) -> TokenCreated {
         TokenCreated {
             user_id,
             plaintext_token,
