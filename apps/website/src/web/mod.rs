@@ -2,8 +2,7 @@ pub use app::App;
 
 mod app;
 mod auth;
-mod components;
+mod layout;
 mod oauth;
-mod pages;
 mod protected;
 mod public;

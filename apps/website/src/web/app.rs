@@ -1,9 +1,10 @@
 use crate::agents::manager::AgentManager;
 use crate::registry;
 use crate::registry::TokenManager;
+use crate::web::layout::pages;
 use crate::{
     users::Backend,
-    web::{auth, oauth, pages, protected, public},
+    web::{auth, oauth, protected, public},
 };
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{

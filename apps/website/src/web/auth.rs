@@ -1,4 +1,4 @@
-use crate::web::pages;
+use crate::web::layout::pages;
 use axum::{
     Form, Router,
     extract::Query,

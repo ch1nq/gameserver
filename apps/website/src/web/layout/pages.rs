@@ -1,12 +1,10 @@
 use crate::agents::agent::{Agent, AgentStatus};
 use crate::registry::RegistryToken;
 use crate::users::AuthSession;
+use crate::web::layout::components;
 use axum::http::StatusCode;
-use maud::{Markup, PreEscaped, html};
-
 use axum::response::IntoResponse;
-
-use super::*;
+use maud::{Markup, PreEscaped, html};
 
 pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Markup {
     components::page(
