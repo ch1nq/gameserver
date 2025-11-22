@@ -94,7 +94,7 @@ impl App {
             .with_state(self.state)
             .merge(auth::router())
             .merge(oauth::router())
-            .merge(registry_router)
+            .nest("/registry", registry_router)
             .layer(auth_layer);
 
         let app = axum::Router::new()
