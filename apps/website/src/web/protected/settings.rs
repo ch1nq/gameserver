@@ -32,7 +32,7 @@ async fn settings(auth_session: AuthSession, State(state): State<AppState>) -> i
         }
     };
 
-    pages::settings(&auth_session, tokens).into_response()
+    pages::settings(&auth_session, tokens, None).into_response()
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -45,9 +45,7 @@ async fn create_token(
     State(state): State<AppState>,
     Form(form): Form<CreateTokenForm>,
 ) -> impl IntoResponse {
-    let user = if let Some(user) = auth_session.user {
-        user
-    } else {
+    let Some(user) = &auth_session.user else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
@@ -66,7 +64,13 @@ async fn create_token(
     {
         Ok((token_id, plaintext_token)) => {
             // Return HTML response with modal showing the token
-            pages::token_created(token_id, user.id, &plaintext_token).into_response()
+            let token_created = pages::TokenCreated::new(token_id, plaintext_token);
+            let tokens = state
+                .token_manager
+                .get_active_tokens(&user.id.clone())
+                .await
+                .unwrap_or_default();
+            pages::settings(&auth_session, tokens, Some(token_created)).into_response()
         }
         Err(e) => {
             tracing::error!("Failed to create token: {}", e);
@@ -80,9 +84,7 @@ async fn revoke_token(
     State(state): State<AppState>,
     Path(token_id): Path<i64>,
 ) -> impl IntoResponse {
-    let user = if let Some(user) = auth_session.user {
-        user
-    } else {
+    let Some(user) = &auth_session.user else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 

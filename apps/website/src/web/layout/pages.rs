@@ -48,136 +48,157 @@ pub fn login(next: Option<String>, message: Option<String>) -> Markup {
     )
 }
 
-pub fn settings(session: &AuthSession, tokens: Vec<RegistryToken>) -> impl IntoResponse + use<> {
-    match &session.user {
-            Some(user) => components::page(
-                "Settings",
-                html! {
-                    div class="flex flex-col gap-8" {
-                        // Profile section
+pub fn settings(
+    session: &AuthSession,
+    tokens: Vec<RegistryToken>,
+    token_created: Option<TokenCreated>,
+) -> impl IntoResponse {
+    let Some(user) = &session.user else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+
+    components::page(
+        "Settings",
+        html! {
+            div class="flex flex-col gap-8" {
+                // Profile section
+                div {
+                    h1 class="text-2xl font-semibold mb-4" { "Profile settings" }
+                    div id="profile-picture" class="flex items-center gap-4" {
+                        img class="w-16 h-16 rounded-full" src=(components::profile_picture_url(&user)) alt="user photo";
                         div {
-                            h1 class="text-2xl font-semibold mb-4" { "Profile settings" }
-                            div id="profile-picture" class="flex items-center gap-4" {
-                                img class="w-16 h-16 rounded-full" src=(components::profile_picture_url(user)) alt="user photo";
-                                div {
-                                    p { "Username: " (user.username) }
-                                }
-                            }
-                        }
-
-                        // Deploy tokens section
-                        div {
-                            h2 class="text-xl font-semibold mb-4" { "Deploy Tokens" }
-                            (components::form::helper_text("Deploy tokens allow you to push Docker images to the Arcadio registry. Keep your tokens secure and never share them publicly."))
-
-                            (components::table::wrapper(
-                                vec!["Name", "Created", "Actions"],
-                                html! {
-                                    @if tokens.is_empty() {
-                                        (components::table::empty_row(3, "No tokens yet. Create your first token to start deploying agents."))
-                                    } @else {
-                                        @for token in tokens {
-                                            (components::table::row(html! {
-                                                (components::table::cell(html! { (token.name) }, true))
-                                                @let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
-                                                (components::table::cell(html! {
-                                                    (token.created_at.format(&format).unwrap_or_else(|_| "Invalid date".to_string()))
-                                                }, false))
-                                                (components::table::cell(html! {
-                                                    form method="post" action=(format!("/settings/tokens/{}/revoke", token.id)) onsubmit="return confirm('Are you sure you want to revoke this token? This action cannot be undone.');" {
-                                                        button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" {
-                                                            "Revoke"
-                                                        }
-                                                    }
-                                                }, false))
-                                            }))
-                                        }
-                                    }
-                                },
-                                Some("mb-4"),
-                            ))
-
-                            div class="flex justify-end" {
-                                (new_token_modal())
-                            }
+                            p { "Username: " (user.username) }
                         }
                     }
-                },
-                session,
-            ).into_response(),
-            None => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        }
+                }
+
+                // Deploy tokens section
+                div {
+                    h2 class="text-xl font-semibold mb-4" { "Deploy Tokens" }
+                    (components::form::helper_text("Deploy tokens allow you to push Docker images to the Arcadio registry. Keep your tokens secure and never share them publicly."))
+
+                    (components::table::wrapper(
+                        vec!["Name", "Created", "Actions"],
+                        html! {
+                            @if tokens.is_empty() {
+                                (components::table::empty_row(3, "No tokens yet. Create your first token to start deploying agents."))
+                            } @else {
+                                @for token in tokens {
+                                    (components::table::row(html! {
+                                        (components::table::cell(html! { (token.name) }, true))
+                                        @let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
+                                        (components::table::cell(html! {
+                                            (token.created_at.format(&format).unwrap_or_else(|_| "Invalid date".to_string()))
+                                        }, false))
+                                        (components::table::cell(html! {
+                                            form method="post" action=(format!("/settings/tokens/{}/revoke", token.id)) onsubmit="return confirm('Are you sure you want to revoke this token? This action cannot be undone.');" {
+                                                button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" {
+                                                    "Revoke"
+                                                }
+                                            }
+                                        }, false))
+                                    }))
+                                }
+                            }
+                        },
+                        Some("mb-4"),
+                    ))
+
+                    div class="flex justify-end" {
+                        (new_token_modal())
+                    }
+
+                    @if let Some(token_created) = token_created {
+                        (token_created.render_modal())
+                    }
+                }
+            }
+        },
+        session,
+    ).into_response()
 }
 
-pub fn token_created(_token_id: i64, user_id: i64, plaintext_token: &str) -> Markup {
-    let copy_token_script = PreEscaped(
-        r#"
-        async function copyToken() {
-            const tokenInput = document.getElementById('token-value');
-            const defaultIcon = document.getElementById('default-icon');
-            const successIcon = document.getElementById('success-icon');
-            try {
-                await navigator.clipboard.writeText(tokenInput.value);
-                defaultIcon.classList.add('hidden');
-                successIcon.classList.remove('hidden');
-                setTimeout(() => {
-                    defaultIcon.classList.remove('hidden');
-                    successIcon.classList.add('hidden');
-                }, 2000);
-            } catch (err) {
-                console.error('Failed to copy:', err);
-                alert('Failed to copy token. Please copy manually.');
-            }
-        }
-        "#,
-    );
+pub struct TokenCreated {
+    user_id: i64,
+    plaintext_token: String,
+}
 
-    components::base(
-        "Token Created",
+impl TokenCreated {
+    pub fn new(user_id: i64, plaintext_token: String) -> TokenCreated {
+        TokenCreated {
+            user_id,
+            plaintext_token,
+        }
+    }
+
+    fn render_modal(&self) -> Markup {
+        let copy_token_script = PreEscaped(
+            r#"
+            async function copyToken() {
+                const tokenInput = document.getElementById('token-value');
+                const defaultIcon = document.getElementById('default-icon');
+                const successIcon = document.getElementById('success-icon');
+                try {
+                    await navigator.clipboard.writeText(tokenInput.value);
+                    defaultIcon.classList.add('hidden');
+                    successIcon.classList.remove('hidden');
+                    setTimeout(() => {
+                        defaultIcon.classList.remove('hidden');
+                        successIcon.classList.add('hidden');
+                    }, 2000);
+                } catch (err) {
+                    console.error('Failed to copy:', err);
+                    alert('Failed to copy token. Please copy manually.');
+                }
+            }
+            "#,
+        );
+
+        let modal_content = components::modal::ModalContent {
+            modal_id: "token-created-modal",
+            title: "Token Created Successfully",
+            body: html! {
+                div class="p-4 md:p-5 space-y-4" {
+                    (components::alert::warning("Important!", "Make sure to copy your token now. You won't be able to see it again!"))
+
+                    p class="text-base leading-relaxed text-gray-500 dark:text-gray-400" {
+                        "Your deploy token has been created. Use this token to authenticate when pushing Docker images to the Arcadio registry:"
+                    }
+
+                    div class="relative" {
+                        input type="text" id="token-value" readonly="" value=(&self.plaintext_token) class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-20 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white font-mono" {}
+                        button onclick="copyToken()" class="absolute end-2 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg p-2 inline-flex items-center justify-center" {
+                            span id="default-icon" {
+                                (components::icon::copy())
+                            }
+                            span id="success-icon" class="hidden" {
+                                (components::icon::checkmark())
+                            }
+                        }
+                    }
+
+                    (components::alert::info(html! {
+                        p class="font-medium mb-2" { "Docker login command:" }
+                        code class="text-xs" {
+                            "docker login achtung-registry.fly.dev -u user-" (&self.user_id) " -p " (&self.plaintext_token)
+                        }
+                    }))
+                }
+            },
+            footer: Some(html! {
+                a href="/settings" class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800" {
+                    "Done"
+                }
+            }),
+            size: components::modal::ModalSize::Medium,
+            visible: true,
+        };
+
         html! {
             script {(copy_token_script)}
-
-            (components::modal::content(
-                "token-created-modal",
-                "Token Created Successfully",
-                html! {
-                    div class="p-4 md:p-5 space-y-4" {
-                        (components::alert::warning("Important!", "Make sure to copy your token now. You won't be able to see it again!"))
-
-                        p class="text-base leading-relaxed text-gray-500 dark:text-gray-400" {
-                            "Your deploy token has been created. Use this token to authenticate when pushing Docker images to the Arcadio registry:"
-                        }
-
-                        div class="relative" {
-                            input type="text" id="token-value" readonly="" value=(plaintext_token) class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-20 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white font-mono" {}
-                            button onclick="copyToken()" class="absolute end-2 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg p-2 inline-flex items-center justify-center" {
-                                span id="default-icon" {
-                                    (components::icon::copy())
-                                }
-                                span id="success-icon" class="hidden" {
-                                    (components::icon::checkmark())
-                                }
-                            }
-                        }
-
-                        (components::alert::info(html! {
-                            p class="font-medium mb-2" { "Docker login command:" }
-                            code class="text-xs" {
-                                "docker login achtung-registry.fly.dev -u user-" (user_id) " -p " (plaintext_token)
-                            }
-                        }))
-                    }
-                },
-                Some(html! {
-                    a href="/settings" class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800" {
-                        "Done"
-                    }
-                }),
-                "max-w-4xl",
-                true,
-            ))
-        },
-    )
+            (components::modal::content(&modal_content))
+        }
+    }
 }
 
 fn new_token_modal() -> Markup {
@@ -200,7 +221,7 @@ fn new_token_modal() -> Markup {
             Some(components::icon::plus()),
         ),
         None,
-        components::modal::ModalSize::Small,
+        components::modal::ModalSize::Medium,
     )
 }
 

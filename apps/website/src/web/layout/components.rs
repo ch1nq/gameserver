@@ -26,7 +26,7 @@ pub fn page(title: &str, content: Markup, session: &AuthSession) -> Markup {
         title,
         html! {
             (navbar(session))
-            div class="container px-10 mt-10" {
+            div class="container mx-10 mt-10" {
                 div class="mx-auto" {
                     (content)
                 }
@@ -51,10 +51,6 @@ fn user_dropdown(user: &User) -> Markup {
             }
 
         div id="dropdownAvatarName" class="z-10 hidden bg-white divide-y divide-gray-100 rounded-lg shadow-sm w-44 dark:bg-gray-700 dark:divide-gray-600" {
-            div class="px-4 py-3 text-sm text-gray-900 dark:text-white" {
-                div class="font-medium" { "Pro User" }
-                div class="truncate" { (user.username) }
-            }
             ul class="py-2 text-sm text-gray-700 dark:text-gray-200" aria-labelledby="dropdownInformdropdownAvatarNameButtonationButton" {
                 li {
                     a href="/agents" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white" { "Manage agents" }
@@ -337,9 +333,9 @@ pub mod modal {
     use super::*;
 
     pub enum ModalSize {
-        Small,  // max-w-md
-        Medium, // max-w-2xl
-        Large,  // max-w-4xl
+        Small,
+        Medium,
+        Large,
     }
 
     /// Creates a complete modal with trigger button
@@ -352,58 +348,71 @@ pub mod modal {
         footer: Option<Markup>,
         size: ModalSize,
     ) -> Markup {
-        let max_width = match size {
-            ModalSize::Small => "max-w-md",
-            ModalSize::Medium => "max-w-2xl",
-            ModalSize::Large => "max-w-4xl",
+        let modal_content = ModalContent {
+            modal_id,
+            title,
+            body,
+            footer,
+            size,
+            visible: false,
         };
-
         html! {
             (super::button::modal_trigger(modal_id, trigger_text))
-            (content(modal_id, title, body, footer, max_width, false))
+            (content(&modal_content))
         }
+    }
+
+    pub struct ModalContent<'a> {
+        pub modal_id: &'a str,
+        pub title: &'a str,
+        pub body: Markup,
+        pub footer: Option<Markup>,
+        pub size: ModalSize,
+        pub visible: bool,
     }
 
     /// Creates just the modal content without trigger button
     /// Useful for modals that are shown programmatically (like success pages)
-    pub fn content(
-        modal_id: &str,
-        title: &str,
-        body: Markup,
-        footer: Option<Markup>,
-        max_width: &str,
-        visible: bool,
-    ) -> Markup {
-        let (aria_hidden, display_class, backdrop_class) = if visible {
-            ("false", "flex", "bg-gray-900 bg-opacity-50")
-        } else {
-            ("true", "hidden", "")
+    pub fn content(modal_content: &ModalContent) -> Markup {
+        let max_width = match modal_content.size {
+            ModalSize::Small => "max-w-3xl",
+            ModalSize::Medium => "max-w-4xl",
+            ModalSize::Large => "max-w-7xl",
         };
 
         html! {
-            div id=(modal_id) tabindex="-1" aria-hidden=(aria_hidden)
-                class=(format!("overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full {} {}", display_class, backdrop_class)) {
+            div id=(&modal_content.modal_id) tabindex="-1" aria-hidden="true"
+                class="overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full hidden" {
                 div class=(format!("relative p-4 w-full {} max-h-full", max_width)) {
                     div class="relative bg-white rounded-lg shadow-sm dark:bg-gray-700" {
                         // Modal header
                         div class="flex items-center justify-between p-4 md:p-5 border-b rounded-t dark:border-gray-600 border-gray-200" {
                             h3 class="text-lg font-semibold text-gray-900 dark:text-white" {
-                                (title)
+                                (&modal_content.title)
                             }
-                            button type="button" class="text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm w-8 h-8 ms-auto inline-flex justify-center items-center dark:hover:bg-gray-600 dark:hover:text-white" data-modal-toggle=(modal_id) {
+                            button type="button" class="text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm w-8 h-8 ms-auto inline-flex justify-center items-center dark:hover:bg-gray-600 dark:hover:text-white" data-modal-toggle=(&modal_content.modal_id) {
                                 (super::icon::close())
                                 span class="sr-only" { "Close modal" }
                             }
                         }
                         // Modal body
-                        (body)
+                        (&modal_content.body)
                         // Modal footer (optional)
-                        @if let Some(footer_content) = footer {
+                        @if let Some(footer_content) = &modal_content.footer {
                             div class="flex items-center p-4 md:p-5 border-t border-gray-200 rounded-b dark:border-gray-600" {
                                 (footer_content)
                             }
                         }
                     }
+                }
+            }
+            @if modal_content.visible {
+                script {
+                    "document.addEventListener('DOMContentLoaded', function() {"
+                        "const modalEl = document.getElementById('" (&modal_content.modal_id) "');"
+                        "const modal = new Modal(modalEl);"
+                        "modal.show();"
+                    "});"
                 }
             }
         }
