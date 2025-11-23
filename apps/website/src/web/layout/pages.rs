@@ -1,5 +1,6 @@
 use crate::agents::agent::{Agent, AgentStatus};
 use crate::registry::RegistryToken;
+use crate::tournament_mananger::AgentImage;
 use crate::users::{AuthSession, UserId};
 use crate::web::layout::components;
 use axum::http::StatusCode;
@@ -278,7 +279,7 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Markup {
                 ))
 
                 div class="flex justify-end" {
-                    (new_agent_modal())
+                    (new_agent_modal(vec![]))
                 }
             }
         },
@@ -286,7 +287,11 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Markup {
     )
 }
 
-fn new_agent_modal() -> Markup {
+fn new_agent_modal(user_images: Vec<AgentImage>) -> Markup {
+    let images = user_images
+        .iter()
+        .map(|img| components::form::InputOption::from_value(&img.image_url))
+        .collect();
     components::modal::with_trigger(
         "new-agent-modal",
         "New agent",
@@ -303,9 +308,7 @@ fn new_agent_modal() -> Markup {
                     (components::form::text_input("name", "Name", "my-agent", Some("3-50 characters, alphanumeric with hyphens/underscores"), true))
                 }
                 // Docker image URL
-                div class="grid gap-4 mb-4 grid-cols-2" {
-                    (components::form::text_input("image_url", "Docker Image URL", "ghcr.io/username/agent:latest", Some("Full image URL including registry and tag"), true))
-                }
+                (components::form::select_input("image_url", "Select image", "Choose image", images, true))
             },
             "Add new agent",
             Some(components::icon::plus()),

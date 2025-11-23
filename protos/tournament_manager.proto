@@ -2,11 +2,16 @@ syntax = "proto3";
 
 package achtung.tournament;
 
-service AgentDeployService {
+service TournamentManager {
   rpc CreateAgent(CreateAgentRequest) returns (CreateAgentResponse) {}
   rpc DeleteAgent(DeleteAgentRequest) returns (DeleteAgentResponse) {}
   rpc UpdateAgentState(UpdateAgentStateRequest) returns (UpdateAgentStateResponse) {}
   rpc NewAgentVersion(NewAgentVersionRequest) returns (NewAgentVersionResponse) {}
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse) {}
+}
+
+message UserId {
+  int64 id = 1;
 }
 
 message AgentId {
@@ -28,16 +33,16 @@ message RegistryCredentials {
 message AgentImage {
   // URL to internal docker registry
   string image_url = 1; 
-  // Temporary credentials to authenticate as the tournament manager when 
-  // accessing the private docker registry
-  RegistryCredentials registry_credentials = 2;
 }
 
 // Create a new agent in the tournament system
 message CreateAgentRequest {
   string name = 1;
+  // Temporary credentials to authenticate as the tournament manager when 
+  // accessing the private docker registry
+  RegistryCredentials registry_credentials = 2;
   // Image containing agent implementation
-  AgentImage image = 2;
+  AgentImage image = 3;
 }
 message CreateAgentResponse {}
 
@@ -59,7 +64,18 @@ message UpdateAgentStateResponse {
 // Create a new version of an agent, potentially updating it's image
 message NewAgentVersionRequest {
   AgentId agent_id = 1;
+  // Temporary credentials to authenticate as the tournament manager when 
+  // accessing the private docker registry
+  RegistryCredentials registry_credentials = 2;
   // Image containing agent implementation
-  AgentImage image = 2;
+  AgentImage image = 3;
 }
 message NewAgentVersionResponse {}
+
+// List images in registry for given user
+message ListImagesRequest {
+  UserId user_id = 1;
+}
+message ListImagesResponse {
+  repeated AgentImage images = 1; 
+}

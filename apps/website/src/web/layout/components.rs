@@ -232,6 +232,40 @@ pub mod form {
         }
     }
 
+    pub struct InputOption<'a> {
+        pub value: &'a str,
+        pub label: &'a str,
+    }
+
+    impl<'a> InputOption<'a> {
+        pub fn from_value(value: &'a str) -> Self {
+            Self {
+                value: value,
+                label: value,
+            }
+        }
+    }
+
+    pub fn select_input(
+        id: &str,
+        label: &str,
+        default_label: &str,
+        options: Vec<InputOption>,
+        required: bool,
+    ) -> Markup {
+        html! {
+            label for=(id) class="block mb-2.5 text-sm font-medium text-heading" {
+                (label) @if required { " *" }
+            }
+            select id=(id) class="block w-full px-3 py-2.5 bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand shadow-xs placeholder:text-body" {
+                option selected { (default_label) }
+                @for opt in options {
+                    option value=(opt.value) { (opt.label) }
+                }
+            }
+        }
+    }
+
     pub fn helper_text(text: &str) -> Markup {
         html! {
             p class="mb-4 text-sm text-gray-500 dark:text-gray-400" { (text) }

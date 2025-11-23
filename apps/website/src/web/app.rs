@@ -1,6 +1,8 @@
+use crate::agents::deploy::tournament_mananger::tournament_manager_client;
 use crate::agents::manager::AgentManager;
 use crate::registry;
 use crate::registry::TokenManager;
+use crate::tournament_mananger::tournament_manager_client::TournamentManagerClient;
 use crate::web::layout::pages;
 use crate::{
     users::Backend,
@@ -15,6 +17,7 @@ use oauth2::{AuthUrl, ClientId, ClientSecret, TokenUrl, basic::BasicClient};
 use sqlx::PgPool;
 use std::env;
 use time::Duration;
+use tonic::transport::Channel;
 use tower_http::services::ServeDir;
 use tower_sessions_sqlx_store::PostgresStore;
 
@@ -22,6 +25,7 @@ use tower_sessions_sqlx_store::PostgresStore;
 pub struct AppState {
     pub agent_manager: AgentManager,
     pub token_manager: TokenManager,
+    pub tournament_manager: TournamentManagerClient<Channel>,
 }
 
 pub struct App {
@@ -38,6 +42,8 @@ impl App {
         let client_secret = env::var("GITHUB_CLIENT_SECRET")
             .map(ClientSecret::new)
             .expect("GITHUB_CLIENT_SECRET should be provided");
+        let tournament_manager_url =
+            env::var("TOURNAMENT_MANAGER_URL").expect("TOURNAMENT_MANAGER_URL should be provided");
 
         let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())?;
         let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())?;
@@ -49,10 +55,12 @@ impl App {
 
         let agent_manager = AgentManager::new(db.clone());
         let token_manager = TokenManager::new(db.clone());
+        let tournament_manager = TournamentManagerClient::connect(tournament_manager_url).await?;
 
         let state = AppState {
             agent_manager,
             token_manager,
+            tournament_manager,
         };
 
         Ok(Self { db, client, state })

@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/website",
+    "apps/game-server",
+    "apps/overseer",
+    "libs/arcadio",
+]
+
+[workspace.dependencies]
+# Core async runtime
+tokio = { version = "1.48", features = ["full"] }
+tokio-stream = "0.1"
+
+# gRPC
+tonic = "0.12.3"
+tonic-build = "0.12.3"
+prost = "0.13"
+
+# Web framework
+axum = "0.8"
+axum-login = "0.17"
+warp = { version = "0.3", features = ["websocket"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs"] }
+tower-sessions-sqlx-store = { version = "0.15", features = ["postgres"] }
+
+# Database
+sqlx = { version = "0.8", features = ["postgres", "time", "runtime-tokio"] }
+
+# HTTP
+http = "1.0"
+hyper = "1.0"
+reqwest = { version = "0.12", features = ["json"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"
+
+# Authentication & Crypto
+bcrypt = "0.17"
+jsonwebtoken = { version = "10.2", features = ["hmac", "rust_crypto"] }
+oauth2 = "4.4"
+rsa = { version = "0.9", features = ["pem"] }
+sha2 = "0.10"
+
+# Utilities
+async-trait = "0.1"
+base32 = "0.5"
+base64 = "0.22"
+clap = { version = "4.4", features = ["derive", "env"] }
+futures-util = "0.3"
+maud = { version = "0.27", features = ["axum"] }
+rand = "0.9"
+thiserror = "2.0"
+time = "0.3"
+uuid = { version = "1.18", features = ["v4"] }
+
+# Logging
+log = "0.4"
+pretty_env_logger = "0.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 arcadio = { version = "0.1.1", path = "../../libs/arcadio" }
-clap = { version = "4.4.7", features = ["derive", "env"] }
-tokio = { version = "1.33.0" }
+clap = { workspace = true }
+tokio = { workspace = true }

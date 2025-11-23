@@ -122,15 +122,18 @@ impl Player {
                 id: 0,
                 size: initial_size,
                 position: Position {
-                    x: rand::distributions::Uniform::new(0.0, config.arena_width as f32)
+                    x: rand::distr::Uniform::new(0.0, config.arena_width as f32)
+                        .unwrap()
                         .sample(rng),
-                    y: rand::distributions::Uniform::new(0.0, config.arena_height as f32)
+                    y: rand::distr::Uniform::new(0.0, config.arena_height as f32)
+                        .unwrap()
                         .sample(rng),
                 },
             },
             body: vec![],
             direction: Angle {
-                radians: rand::distributions::Uniform::new(0.0, 2.0 * std::f32::consts::PI)
+                radians: rand::distr::Uniform::new(0.0, 2.0 * std::f32::consts::PI)
+                    .unwrap()
                     .sample(rng),
             },
             speed: 2.0,
@@ -205,7 +208,7 @@ impl game::GameState for Achtung {
     type Config = AchtungConfig;
 
     fn init_game(config: &AchtungConfig, num_players: usize) -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         Self {
             timestep: 0,
             players: (0..num_players)
