@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+package achtung.tournament;
+
+service AgentDeployService {
+  rpc CreateAgent(CreateAgentRequest) returns (CreateAgentResponse) {}
+  rpc DeleteAgent(DeleteAgentRequest) returns (DeleteAgentResponse) {}
+  rpc UpdateAgentState(UpdateAgentStateRequest) returns (UpdateAgentStateResponse) {}
+  rpc NewAgentVersion(NewAgentVersionRequest) returns (NewAgentVersionResponse) {}
+}
+
+message AgentId {
+  int64 id = 1;
+}
+
+// AgentState indicates if agent is in the active tournament roster
+enum AgentState {
+  AGENT_STATE_UNSPECIFIED = 0;
+  AGENT_STATE_INACTIVE = 1;
+  AGENT_STATE_ACTIVE = 2;
+}
+
+message RegistryCredentials {
+  string username = 1;
+  string password = 2;
+}
+
+message AgentImage {
+  // URL to internal docker registry
+  string image_url = 1; 
+  // Temporary credentials to authenticate as the tournament manager when 
+  // accessing the private docker registry
+  RegistryCredentials registry_credentials = 2;
+}
+
+// Create a new agent in the tournament system
+message CreateAgentRequest {
+  string name = 1;
+  // Image containing agent implementation
+  AgentImage image = 2;
+}
+message CreateAgentResponse {}
+
+// Delete an agent entirely from the tournament system 
+message DeleteAgentRequest {
+  AgentId agent_id = 1;
+}
+message DeleteAgentResponse {}
+
+// Activate or deactivate an agent. This operation is idempotent
+message UpdateAgentStateRequest {
+  AgentId agent_id = 1;
+  AgentState state = 2;
+}
+message UpdateAgentStateResponse {
+  AgentState new_state = 1;
+}
+
+// Create a new version of an agent, potentially updating it's image
+message NewAgentVersionRequest {
+  AgentId agent_id = 1;
+  // Image containing agent implementation
+  AgentImage image = 2;
+}
+message NewAgentVersionResponse {}
