@@ -1,4 +1,6 @@
 use crate::agents::agent::{AgentName, ImageUrl};
+use crate::registry::manager::SYSTEM_USERNAME;
+use crate::tournament_mananger;
 use crate::users::AuthSession;
 use crate::web::app::AppState;
 use crate::web::layout::pages;
@@ -14,6 +16,7 @@ use std::str::FromStr;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(agents))
+        .route("/new", get(new_agent_page))
         .route("/new", post(new_agent))
         .route("/{id}/activate", post(activate_agent))
         .route("/{id}/deactivate", post(deactivate_agent))
@@ -36,6 +39,45 @@ async fn agents(auth_session: AuthSession, State(state): State<AppState>) -> imp
 struct CreateAgentForm {
     name: String,
     image_url: String,
+}
+
+async fn new_agent_page(
+    auth_session: AuthSession,
+    State(mut state): State<AppState>,
+) -> impl IntoResponse {
+    let user = if let Some(user) = &auth_session.user {
+        user
+    } else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+
+    // Get system token for registry authentication
+    let system_token = match state.token_manager.get_system_token().await {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to get system token: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let credentials = tournament_mananger::RegistryCredentials {
+        username: SYSTEM_USERNAME.to_string(),
+        password: system_token.into(),
+    };
+    let request = tournament_mananger::ListImagesRequest {
+        registry_credentials: Some(credentials),
+        user_id: Some(tournament_mananger::UserId { id: user.id }),
+    };
+    match state.tournament_manager.list_images(request).await {
+        Err(e) => {
+            tracing::error!("Error getting list of user images: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+        Ok(response) => {
+            let user_images = response.into_inner().images;
+            pages::new_agent_page(user_images, &auth_session).into_response()
+        }
+    }
 }
 
 async fn new_agent(

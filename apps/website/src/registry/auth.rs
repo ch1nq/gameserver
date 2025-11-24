@@ -3,6 +3,8 @@
 //! This library provides Docker Registry v2 token authentication following the spec:
 //! https://docs.docker.com/reference/api/registry/auth/
 
+use super::manager::SYSTEM_USERNAME;
+use crate::{registry::TokenManager, users::UserId};
 use axum::{
     Json,
     extract::{Query, State},
@@ -17,8 +19,6 @@ use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 use tracing::{error, info, warn};
 use uuid::Uuid;
-
-use crate::{registry::TokenManager, users::UserId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -154,10 +154,6 @@ pub async fn token_handler(
     Query(params): Query<TokenRequest>,
     headers: HeaderMap,
 ) -> Result<Json<TokenResponse>, Error> {
-    println!(
-        "Token request: service={0}, scope={1:?}",
-        params.service, params.scope
-    );
     info!(
         "Token request: service={}, scope={:?}",
         params.service, params.scope
@@ -172,29 +168,42 @@ pub async fn token_handler(
     // Extract Basic auth credentials
     let (username, token) = extract_basic_auth(&headers)?;
 
-    // Extract user_id from username (format: "user-{id}")
-    // TODO: create a type for user id and validate in ::new()
-    let user_id = username
-        .strip_prefix("user-")
-        .and_then(|s| s.parse::<UserId>().ok())
-        .ok_or(Error::InvalidCredentials)?;
+    let access_grants = match username.trim() {
+        SYSTEM_USERNAME => {
+            token_manager
+                .validate_system_token(&token)
+                .await
+                .map_err(|e| {
+                    warn!("Token validation failed for system: {}", e);
+                    Error::InvalidCredentials
+                })?;
 
-    // Validate token and get user_id
-    info!("Authenticating user: {}", username);
-    token_manager
-        .validate_token(&user_id, &token)
-        .await
-        .map_err(|e| {
-            warn!("Token validation failed for user {}: {}", username, e);
-            Error::InvalidCredentials
-        })?;
+            RequestedAccess::parse_scopes(params.scope.as_deref().unwrap_or(""))?
+                .validate_for_system()
+        }
+        _ => {
+            // Extract user_id from username (format: "user-{id}")
+            // TODO: create a type for user id and validate in ::new()
+            let user_id = username
+                .strip_prefix("user-")
+                .and_then(|s| s.parse::<UserId>().ok())
+                .ok_or(Error::InvalidCredentials)?;
 
-    // Parse and validate requested scopes against user's namespace
-    info!("Validating scopes for user {}: {:?}", user_id, params.scope);
-    let requested_scopes = params.scope.as_deref().unwrap_or("");
-    let access_grants = parse_and_validate_scopes(requested_scopes, user_id)?;
+            // Validate token and get user_id
+            info!("Authenticating user: {}", username);
+            token_manager
+                .validate_token(&user_id, &token)
+                .await
+                .map_err(|e| {
+                    warn!("Token validation failed for user {}: {}", username, e);
+                    Error::InvalidCredentials
+                })?;
 
-    info!("Access grants for user {}: {:?}", user_id, access_grants);
+            // Parse and validate requested scopes against user's namespace
+            RequestedAccess::parse_scopes(params.scope.as_deref().unwrap_or(""))?
+                .validate_for_user(&user_id)
+        }
+    };
 
     // Generate JWT
     let now = OffsetDateTime::now_utc();
@@ -203,16 +212,16 @@ pub async fn token_handler(
     // https://distribution.github.io/distribution/spec/auth/jwt/
     let claims = Claims {
         iss: "registry-auth".to_string(),
-        sub: username,
+        sub: username.clone(),
         aud: params.service.clone(),
         exp: exp.unix_timestamp(),
         nbf: now.unix_timestamp(),
         iat: now.unix_timestamp(),
         jti: Uuid::new_v4().to_string(),
-        access: access_grants,
+        access: access_grants.0,
     };
 
-    info!("Generating JWT for user {}", user_id);
+    info!("Generating JWT for {}", &username);
 
     // Use RS256 (RSA with SHA-256) for signing
     let mut header = Header::new(Algorithm::RS256);
@@ -230,7 +239,7 @@ pub async fn token_handler(
 
     let token = encode(&header, &claims, &encoding_key)?;
 
-    info!("Generated token for user {}: {}", user_id, token);
+    info!("Generated token for {}: {}", username, token);
 
     Ok(Json(TokenResponse {
         token: token.clone(),
@@ -268,45 +277,68 @@ fn extract_basic_auth(headers: &HeaderMap) -> Result<(String, String), Error> {
     Ok((username.to_string(), password.to_string()))
 }
 
-/// Parse space-delimited scopes and validate against user namespace
-fn parse_and_validate_scopes(scopes: &str, user_id: UserId) -> Result<Vec<Access>, Error> {
-    let user_namespace = format!("user-{}", user_id);
-    let mut access_grants = Vec::new();
+#[derive(Debug)]
+struct RequestedAccess(Vec<Access>);
 
-    // Split on spaces to get individual scopes
-    for scope in scopes.split_whitespace() {
-        if scope.is_empty() {
-            continue;
+#[derive(Debug)]
+struct ValidatedAccess(Vec<Access>);
+
+impl RequestedAccess {
+    /// Parse space-delimited scopes and validate against user namespace
+    fn parse_scopes(scopes: &str) -> Result<Self, Error> {
+        let mut access_request = Vec::new();
+
+        // Split on spaces to get individual scopes
+        for scope in scopes.split_whitespace() {
+            if scope.is_empty() {
+                continue;
+            }
+
+            // Parse "type:name:actions" format (e.g., "repository:user-123/myimage:push,pull")
+            let parts: Vec<&str> = scope.split(':').collect();
+            if parts.len() != 3 {
+                warn!("Invalid scope format, skipping: {}", scope);
+                continue;
+            }
+
+            let resource_type = parts[0];
+            let name = parts[1];
+            let actions: Vec<String> = parts[2].split(',').map(|s| s.to_string()).collect();
+
+            access_request.push(Access {
+                resource_type: resource_type.to_string(),
+                name: name.to_string(),
+                actions,
+            });
         }
 
-        // Parse "type:name:actions" format (e.g., "repository:user-123/myimage:push,pull")
-        let parts: Vec<&str> = scope.split(':').collect();
-        if parts.len() != 3 {
-            warn!("Invalid scope format, skipping: {}", scope);
-            continue;
-        }
-
-        let resource_type = parts[0];
-        let name = parts[1];
-        let actions: Vec<String> = parts[2].split(',').map(|s| s.to_string()).collect();
-
-        // Validate that the resource name starts with user's namespace
-        if !name.starts_with(&format!("{}/", user_namespace)) {
-            warn!(
-                "User {} requested access to {} which is outside their namespace {}",
-                user_id, name, user_namespace
-            );
-            continue; // Skip unauthorized scope (per spec: return only authorized access)
-        }
-
-        access_grants.push(Access {
-            resource_type: resource_type.to_string(),
-            name: name.to_string(),
-            actions,
-        });
+        Ok(RequestedAccess(access_request))
     }
 
-    Ok(access_grants)
+    /// Validate against user namespace. Returns the intersection of requested scopes and allowed scopes
+    fn validate_for_user(self, user_id: &UserId) -> ValidatedAccess {
+        let user_namespace = format!("user-{}", user_id);
+        let access_grants: Vec<_> = self
+            .0
+            .into_iter()
+            .filter(|access| {
+                let granted = access.name.starts_with(&format!("{}/", user_namespace));
+                if !granted {
+                    warn!(
+                        "User {} requested access to '{}' which is outside their namespace '{}'",
+                        user_id, access.name, user_namespace
+                    )
+                }
+                granted
+            })
+            .collect();
+        ValidatedAccess(access_grants)
+    }
+
+    /// Validate system access requests (allows everything for now)
+    fn validate_for_system(self) -> ValidatedAccess {
+        ValidatedAccess(self.0)
+    }
 }
 
 /// Generate a Docker registry key ID from a PEM-encoded RSA private key.

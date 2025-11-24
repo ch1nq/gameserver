@@ -64,7 +64,7 @@ async fn create_token(
     {
         Ok((token_id, plaintext_token)) => {
             // Return HTML response with modal showing the token
-            let token_created = pages::TokenCreated::new(token_id, plaintext_token);
+            let token_created = pages::TokenCreated::new(token_id, plaintext_token.into());
             let tokens = state
                 .token_manager
                 .get_active_tokens(&user.id.clone())

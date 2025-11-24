@@ -74,6 +74,9 @@ message NewAgentVersionResponse {}
 
 // List images in registry for given user
 message ListImagesRequest {
+  // Temporary credentials to authenticate as the tournament manager when 
+  // accessing the private docker registry
+  RegistryCredentials registry_credentials = 2;
   UserId user_id = 1;
 }
 message ListImagesResponse {

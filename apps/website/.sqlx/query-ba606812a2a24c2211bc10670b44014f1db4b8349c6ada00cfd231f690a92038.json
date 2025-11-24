@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT EXISTS(\n                        SELECT 1 FROM registry_tokens_internal\n                        WHERE token_hash = $1 AND expires_at > now() + interval '5 minutes'\n                    ) as \"exists!\"\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ba606812a2a24c2211bc10670b44014f1db4b8349c6ada00cfd231f690a92038"
+}

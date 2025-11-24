@@ -54,10 +54,42 @@ impl fmt::Display for TokenName {
 
 type RegistryTokenHash = String;
 
+#[derive(Debug, Clone)]
+pub struct PlaintextToken(String);
+
+impl PlaintextToken {
+    /// Generate a random token of 64 alphanumeric characters
+    pub fn generate() -> Self {
+        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        let mut rng = rand::rng();
+        let chars = (0..64)
+            .map(|_| {
+                let idx = rng.random_range(0..CHARSET.len());
+                CHARSET[idx] as char
+            })
+            .collect();
+        Self(chars)
+    }
+}
+
+impl AsRef<str> for PlaintextToken {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Into<String> for PlaintextToken {
+    fn into(self) -> String {
+        self.0
+    }
+}
+
+type RegistryTokenId = i64;
+
 /// Registry token record from database
 #[derive(Debug, Clone)]
 pub struct RegistryToken {
-    pub id: i64,
+    pub id: RegistryTokenId,
     pub user_id: UserId,
     pub name: String,
     pub token_hash: RegistryTokenHash,
@@ -65,17 +97,15 @@ pub struct RegistryToken {
     pub revoked_at: Option<time::PrimitiveDateTime>,
 }
 
-/// Generate a secure random token (64 alphanumeric characters)
-pub fn generate_token() -> String {
-    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let mut rng = rand::rng();
+type RegistryTokenInternalId = i64;
 
-    (0..64)
-        .map(|_| {
-            let idx = rng.random_range(0..CHARSET.len());
-            CHARSET[idx] as char
-        })
-        .collect()
+// System token for internal services to act on behalf of users
+#[derive(Debug)]
+struct RegistryTokenInternal {
+    id: RegistryTokenInternalId,
+    token_hash: RegistryTokenHash,
+    created_at: time::PrimitiveDateTime,
+    expires_at: time::PrimitiveDateTime,
 }
 
 #[cfg(test)]
@@ -93,8 +123,8 @@ mod tests {
 
     #[test]
     fn test_generate_token() {
-        let token = generate_token();
-        assert_eq!(token.len(), 64);
-        assert!(token.chars().all(|c| c.is_alphanumeric()));
+        let token = PlaintextToken::generate();
+        assert_eq!(token.0.len(), 64);
+        assert!(token.0.chars().all(|c| c.is_alphanumeric()));
     }
 }

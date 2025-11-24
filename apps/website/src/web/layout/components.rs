@@ -203,7 +203,7 @@ pub mod form {
 
                 // Submit button
                 div class="flex justify-end" {
-                    (super::button::primary(submit_text, submit_icon))
+                    (super::button::form_submit(submit_text, submit_icon))
                 }
             }
         }
@@ -276,9 +276,22 @@ pub mod form {
 pub mod button {
     use super::*;
 
-    pub fn primary(text: &str, icon: Option<Markup>) -> Markup {
+    const BUTTON_CSS: &str = "text-white inline-flex items-center bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800";
+
+    pub fn primary(text: &str, url: &str, icon: Option<Markup>) -> Markup {
         html! {
-            button type="submit" class="text-white inline-flex items-center bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800" {
+            a href=(url) class=(BUTTON_CSS) {
+                @if let Some(icon_markup) = icon {
+                    (icon_markup)
+                }
+                (text)
+            }
+        }
+    }
+
+    pub fn form_submit(text: &str, icon: Option<Markup>) -> Markup {
+        html! {
+            button type="submit" class=(BUTTON_CSS) {
                 @if let Some(icon_markup) = icon {
                     (icon_markup)
                 }

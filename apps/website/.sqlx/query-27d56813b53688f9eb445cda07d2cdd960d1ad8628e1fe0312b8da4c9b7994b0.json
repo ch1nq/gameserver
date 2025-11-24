@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO registry_tokens_internal (token_hash)\n            VALUES ($1)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "27d56813b53688f9eb445cda07d2cdd960d1ad8628e1fe0312b8da4c9b7994b0"
+}

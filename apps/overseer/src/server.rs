@@ -47,6 +47,7 @@ impl TournamentManager for Overseer {
         &self,
         request: Request<ListImagesRequest>,
     ) -> Result<Response<ListImagesResponse>, Status> {
-        todo!()
+        let response = ListImagesResponse { images: vec![] };
+        Ok(Response::new(response))
     }
 }

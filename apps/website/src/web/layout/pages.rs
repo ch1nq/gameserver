@@ -279,7 +279,7 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Markup {
                 ))
 
                 div class="flex justify-end" {
-                    (new_agent_modal(vec![]))
+                    (components::button::primary("New agent", "/agents/new", None))
                 }
             }
         },
@@ -287,35 +287,29 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Markup {
     )
 }
 
-fn new_agent_modal(user_images: Vec<AgentImage>) -> Markup {
+pub fn new_agent_page(user_images: Vec<AgentImage>, session: &AuthSession) -> Markup {
     let images = user_images
         .iter()
         .map(|img| components::form::InputOption::from_value(&img.image_url))
         .collect();
-    components::modal::with_trigger(
-        "new-agent-modal",
-        "New agent",
-        "Create new agent",
-        components::form::modal_form(
-            "/agents/new",
-            "post",
-            Some(
-                "Create an agent by providing a name and Docker image URL. Build and push your agent to any Docker registry (GitHub Container Registry, Docker Hub, etc.), then register it here.",
-            ),
-            html! {
-                // Name
-                div class="grid gap-4 mb-4 grid-cols-2" {
-                    (components::form::text_input("name", "Name", "my-agent", Some("3-50 characters, alphanumeric with hyphens/underscores"), true))
-                }
-                // Docker image URL
-                (components::form::select_input("image_url", "Select image", "Choose image", images, true))
-            },
-            "Add new agent",
-            Some(components::icon::plus()),
+    let form = components::form::modal_form(
+        "/agents/new",
+        "post",
+        Some(
+            "Create an agent by providing a name and choosing an image that is pushed to the achtung registry.",
         ),
-        None,
-        components::modal::ModalSize::Small,
-    )
+        html! {
+            // Name
+            div class="grid gap-4 mb-4 grid-cols-2" {
+                (components::form::text_input("name", "Name", "my-agent", Some("3-50 characters, alphanumeric with hyphens/underscores"), true))
+            }
+            // Docker image URL
+            (components::form::select_input("image_url", "Select image", "Choose image", images, true))
+        },
+        "Add new agent",
+        Some(components::icon::plus()),
+    );
+    components::page("Create new agent", form, session)
 }
 
 pub fn not_found() -> Markup {
