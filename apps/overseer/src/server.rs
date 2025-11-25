@@ -80,7 +80,7 @@ impl TournamentManager for Overseer {
         let response = self
             .http_client
             .get(&catalog_url)
-            .bearer_auth(&credentials.password)
+            .bearer_auth(&credentials.token)
             .send()
             .await
             .map_err(|e| Status::internal(format!("Failed to connect to registry: {}", e)))?;

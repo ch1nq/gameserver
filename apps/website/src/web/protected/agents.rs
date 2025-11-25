@@ -1,5 +1,4 @@
 use crate::agents::agent::{AgentName, ImageUrl};
-use crate::registry::manager::SYSTEM_USERNAME;
 use crate::tournament_mananger;
 use crate::users::AuthSession;
 use crate::web::app::AppState;
@@ -61,8 +60,7 @@ async fn new_agent_page(
     };
 
     let credentials = tournament_mananger::RegistryCredentials {
-        username: SYSTEM_USERNAME.to_string(),
-        password: system_token.value.into(),
+        token: system_token.value.into(),
     };
     let request = tournament_mananger::ListImagesRequest {
         registry_credentials: Some(credentials),
