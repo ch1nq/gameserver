@@ -199,7 +199,9 @@ pub mod form {
                     (self::helper_text(text))
                 }
 
-                (fields)
+                div class="flex flex-col gap-4 pb-4" {
+                    (fields)
+                }
 
                 // Submit button
                 div class="flex justify-end" {
@@ -254,13 +256,15 @@ pub mod form {
         required: bool,
     ) -> Markup {
         html! {
-            label for=(id) class="block mb-2.5 text-sm font-medium text-heading" {
-                (label) @if required { " *" }
-            }
-            select id=(id) class="block w-full px-3 py-2.5 bg-neutral-secondary-medium border border-default-medium text-heading text-sm rounded-base focus:ring-brand focus:border-brand shadow-xs placeholder:text-body" {
-                option selected { (default_label) }
-                @for opt in options {
-                    option value=(opt.value) { (opt.label) }
+            div class="col-span-2" {
+                label for=(id) class="block mb-2.5 text-sm font-medium text-heading" {
+                    (label) @if required { " *" }
+                }
+                select id=(id) name=(id) required[required] class="block w-full px-3 py-2.5 bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500" {
+                    option value="" { (default_label) }
+                    @for opt in options {
+                        option value=(opt.value) { (opt.label) }
+                    }
                 }
             }
         }

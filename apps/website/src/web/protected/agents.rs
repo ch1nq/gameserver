@@ -19,7 +19,7 @@ pub fn router() -> Router<AppState> {
         .route("/new", post(new_agent))
         .route("/{id}/activate", post(activate_agent))
         .route("/{id}/deactivate", post(deactivate_agent))
-        .route("/agents/{id}/delete", post(delete_agent))
+        .route("/{id}/delete", post(delete_agent))
 }
 
 async fn agents(auth_session: AuthSession, State(state): State<AppState>) -> impl IntoResponse {
@@ -37,7 +37,7 @@ async fn agents(auth_session: AuthSession, State(state): State<AppState>) -> imp
 #[derive(Debug, serde::Deserialize)]
 struct CreateAgentForm {
     name: String,
-    image_url: String,
+    image: String,
 }
 
 async fn new_agent_page(
@@ -97,7 +97,7 @@ async fn new_agent(
         }
     };
 
-    let image_url = match ImageUrl::new(form.image_url) {
+    let image_url = match ImageUrl::new(form.image) {
         Ok(url) => url,
         Err(e) => {
             tracing::warn!("Invalid image URL: {}", e);

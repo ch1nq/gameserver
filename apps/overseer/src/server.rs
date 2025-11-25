@@ -103,9 +103,7 @@ impl TournamentManager for Overseer {
             .repositories
             .into_iter()
             .filter(|repo| repo.starts_with(&user_prefix))
-            .map(|repo| AgentImage {
-                image_url: format!("{}/{}", self.registry_url, repo),
-            })
+            .map(|repo| AgentImage { image_url: repo })
             .collect();
 
         let response = ListImagesResponse { images };

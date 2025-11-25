@@ -237,42 +237,46 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Markup {
                 (components::table::wrapper(
                     vec!["Name", "Image", "Status", "Actions"],
                     html! {
-                        @for agent in agents {
-                            (components::table::row(html! {
-                                (components::table::cell(html! { (agent.name.as_ref()) }, true))
-                                (components::table::cell(html! {
-                                    span class="text-gray-500 dark:text-gray-400 text-xs font-mono truncate max-w-xs" {
-                                        (agent.image_url.as_ref())
-                                    }
-                                }, false))
-                                (components::table::cell(html! {
-                                    @let status_color = match agent.status {
-                                        AgentStatus::Active => "bg-green-400",
-                                        AgentStatus::Inactive => "bg-gray-400",
-                                    };
-                                    span class=(format!("h-3 w-3 rounded-full inline-block me-1 {}", status_color)) {}
-                                    span class="text-gray-900 dark:text-white" { (format!("{:?}", agent.status)) }
-                                }, false))
-                                (components::table::cell(html! {
-                                    div class="flex gap-2" {
-                                        @match agent.status {
-                                            AgentStatus::Active => {
-                                                form method="post" action=(format!("/agents/{}/deactivate", agent.id)) {
-                                                    button type="submit" class="text-yellow-600 hover:text-yellow-800 dark:text-yellow-400" { "Deactivate" }
+                        @if agents.is_empty() {
+                            (components::table::empty_row(4, "No agents yet."))
+                        } @else {
+                            @for agent in agents {
+                                (components::table::row(html! {
+                                    (components::table::cell(html! { (agent.name.as_ref()) }, true))
+                                    (components::table::cell(html! {
+                                        span class="text-gray-500 dark:text-gray-400 text-xs font-mono truncate max-w-xs" {
+                                            (agent.image_url.as_ref())
+                                        }
+                                    }, false))
+                                    (components::table::cell(html! {
+                                        @let status_color = match agent.status {
+                                            AgentStatus::Active => "bg-green-400",
+                                            AgentStatus::Inactive => "bg-gray-400",
+                                        };
+                                        span class=(format!("h-3 w-3 rounded-full inline-block me-1 {}", status_color)) {}
+                                        span class="text-gray-900 dark:text-white" { (format!("{:?}", agent.status)) }
+                                    }, false))
+                                    (components::table::cell(html! {
+                                        div class="flex gap-2" {
+                                            @match agent.status {
+                                                AgentStatus::Active => {
+                                                    form method="post" action=(format!("/agents/{}/deactivate", agent.id)) {
+                                                        button type="submit" class="text-yellow-600 hover:text-yellow-800 dark:text-yellow-400" { "Deactivate" }
+                                                    }
+                                                }
+                                                AgentStatus::Inactive => {
+                                                    form method="post" action=(format!("/agents/{}/activate", agent.id)) {
+                                                        button type="submit" class="text-green-600 hover:text-green-800 dark:text-green-400" { "Activate" }
+                                                    }
                                                 }
                                             }
-                                            AgentStatus::Inactive => {
-                                                form method="post" action=(format!("/agents/{}/activate", agent.id)) {
-                                                    button type="submit" class="text-green-600 hover:text-green-800 dark:text-green-400" { "Activate" }
-                                                }
+                                            form method="post" action=(format!("/agents/{}/delete", agent.id)) onsubmit="return confirm('Are you sure you want to delete this agent?');" {
+                                                button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" { "Delete" }
                                             }
                                         }
-                                        form method="post" action=(format!("/agents/{}/delete", agent.id)) onsubmit="return confirm('Are you sure you want to delete this agent?');" {
-                                            button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" { "Delete" }
-                                        }
-                                    }
-                                }, false))
-                            }))
+                                    }, false))
+                                }))
+                            }
                         }
                     },
                     None,
@@ -299,12 +303,8 @@ pub fn new_agent_page(user_images: Vec<AgentImage>, session: &AuthSession) -> Ma
             "Create an agent by providing a name and choosing an image that is pushed to the achtung registry.",
         ),
         html! {
-            // Name
-            div class="grid gap-4 mb-4 grid-cols-2" {
-                (components::form::text_input("name", "Name", "my-agent", Some("3-50 characters, alphanumeric with hyphens/underscores"), true))
-            }
-            // Docker image URL
-            (components::form::select_input("image_url", "Select image", "Choose image", images, true))
+            (components::form::text_input("name", "Name", "my-agent", Some("3-50 characters, alphanumeric with hyphens/underscores"), true))
+            (components::form::select_input("image", "Select image", "Choose image", images, true))
         },
         "Add new agent",
         Some(components::icon::plus()),
