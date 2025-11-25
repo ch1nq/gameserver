@@ -1,8 +1,11 @@
-use crate::users::UserId;
+use crate::{
+    registry::token::{RegistryTokenHash, RegistryTokenInternal, TokenHash},
+    users::UserId,
+};
 
 use super::token::{PlaintextToken, RegistryToken, TokenName};
 use sqlx::PgPool;
-use std::sync::Arc;
+use std::{arch::x86_64, sync::Arc};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
@@ -129,6 +132,7 @@ impl TokenManager {
         // Generate new token
         tracing::debug!("Creating new system token");
         let plaintext_token = PlaintextToken::generate();
+        tracing::debug!("Token: {}", plaintext_token.as_ref());
         let token_hash = bcrypt::hash(plaintext_token.as_ref(), BCRYPT_COST)
             .map_err(|e| TokenManagerError::FailedToHashToken(e.to_string()))?;
 
@@ -238,14 +242,29 @@ impl TokenManager {
         .map_err(TokenManagerError::DatabaseError)
     }
 
-    /// Validate a registry token for a user
-    pub async fn validate_token(
+    pub async fn get_active_system_tokens(
         &self,
-        user_id: &UserId,
-        token: &str,
+    ) -> Result<Vec<RegistryTokenInternal>, TokenManagerError> {
+        sqlx::query_as!(
+            RegistryTokenInternal,
+            r#"
+            SELECT id, token_hash, created_at, expires_at
+            FROM registry_tokens_internal
+            WHERE expires_at > now()
+            "#
+        )
+        .fetch_all(&self.db_pool)
+        .await
+        .map_err(TokenManagerError::DatabaseError)
+    }
+
+    async fn validate_token_from_candidates<H: TokenHash, C: IntoIterator<Item = H>>(
+        &self,
+        token_hash: &RegistryTokenHash,
+        candidates: C,
     ) -> Result<(), TokenManagerError> {
-        for db_token in self.get_active_tokens(user_id).await? {
-            if bcrypt::verify(token, &db_token.token_hash).unwrap_or(false) {
+        for candidate in candidates {
+            if bcrypt::verify(token_hash, &candidate.hash()).unwrap_or(false) {
                 return Ok(());
             }
         }
@@ -253,7 +272,23 @@ impl TokenManager {
         Err(TokenManagerError::InvalidCredentials)
     }
 
-    pub(crate) async fn validate_system_token(&self, token: &str) -> Result<(), TokenManagerError> {
-        todo!()
+    /// Validate a registry token for a user
+    pub async fn validate_token(
+        &self,
+        user_id: &UserId,
+        token_hash: &RegistryTokenHash,
+    ) -> Result<(), TokenManagerError> {
+        let candidates = self.get_active_tokens(user_id).await?;
+        self.validate_token_from_candidates(token_hash, candidates)
+            .await
+    }
+
+    pub async fn validate_system_token(
+        &self,
+        token_hash: &RegistryTokenHash,
+    ) -> Result<(), TokenManagerError> {
+        let candidates = self.get_active_system_tokens().await?;
+        self.validate_token_from_candidates(token_hash, candidates)
+            .await
     }
 }

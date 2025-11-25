@@ -52,7 +52,7 @@ impl fmt::Display for TokenName {
     }
 }
 
-type RegistryTokenHash = String;
+pub type RegistryTokenHash = String;
 
 #[derive(Debug, Clone)]
 pub struct PlaintextToken(String);
@@ -101,11 +101,27 @@ type RegistryTokenInternalId = i64;
 
 // System token for internal services to act on behalf of users
 #[derive(Debug)]
-struct RegistryTokenInternal {
-    id: RegistryTokenInternalId,
-    token_hash: RegistryTokenHash,
-    created_at: time::PrimitiveDateTime,
-    expires_at: time::PrimitiveDateTime,
+pub struct RegistryTokenInternal {
+    pub id: RegistryTokenInternalId,
+    pub token_hash: RegistryTokenHash,
+    pub created_at: time::PrimitiveDateTime,
+    pub expires_at: time::PrimitiveDateTime,
+}
+
+pub trait TokenHash {
+    fn hash(&self) -> &RegistryTokenHash;
+}
+
+impl TokenHash for RegistryToken {
+    fn hash(&self) -> &RegistryTokenHash {
+        &self.token_hash
+    }
+}
+
+impl TokenHash for RegistryTokenInternal {
+    fn hash(&self) -> &RegistryTokenHash {
+        &self.token_hash
+    }
 }
 
 #[cfg(test)]
