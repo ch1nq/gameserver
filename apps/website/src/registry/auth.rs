@@ -47,11 +47,11 @@ impl IntoResponse for Error {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RegistryAuthConfig {
     /// RSA private key in PEM format for signing JWT tokens
     private_key_pem: String,
-    registry_service: String,
+    pub registry_service: String,
     signing_key: String,
 }
 
@@ -135,7 +135,7 @@ struct Claims {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Access {
+pub struct Access {
     /// Type of resource (e.g., "repository")
     #[serde(rename = "type")]
     resource_type: String,
@@ -143,6 +143,16 @@ struct Access {
     name: String,
     /// Actions allowed (e.g., ["push", "pull"])
     actions: Vec<String>,
+}
+
+impl Access {
+    pub fn new(resource_type: String, name: String, actions: Vec<String>) -> Self {
+        Self {
+            resource_type,
+            name,
+            actions,
+        }
+    }
 }
 
 /// Token auth endpoint
@@ -205,15 +215,49 @@ pub async fn token_handler(
         }
     };
 
+    let jwt = generate_docker_jwt(username, access_grants, params.service, &config)?;
+    let token = jwt.value.clone();
+    let expires_in_secs = (jwt.expires_at - jwt.issued_at).as_seconds_f32() as i64;
+    let issued_at = jwt
+        .issued_at
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap();
+    Ok(Json(TokenResponse {
+        token: token.clone(),
+        access_token: Some(token),
+        expires_in: Some(expires_in_secs),
+        issued_at: Some(issued_at),
+    }))
+}
+
+type DockerService = String;
+type Username = String;
+pub type JwtEncoded = String;
+
+#[derive(Debug, Clone)]
+pub struct RegistryJwtToken {
+    pub value: JwtEncoded,
+    pub issued_at: OffsetDateTime,
+    pub expires_at: OffsetDateTime,
+}
+
+pub fn generate_docker_jwt(
+    username: Username,
+    access_grants: ValidatedAccess,
+    service: DockerService,
+    config: &RegistryAuthConfig,
+) -> Result<RegistryJwtToken, Error> {
     // Generate JWT
     let now = OffsetDateTime::now_utc();
     let exp = now + Duration::minutes(30);
 
+    info!("Generating JWT for {}", &username);
+
     // https://distribution.github.io/distribution/spec/auth/jwt/
     let claims = Claims {
         iss: "registry-auth".to_string(),
-        sub: username.clone(),
-        aud: params.service.clone(),
+        sub: username,
+        aud: service,
         exp: exp.unix_timestamp(),
         nbf: now.unix_timestamp(),
         iat: now.unix_timestamp(),
@@ -221,13 +265,9 @@ pub async fn token_handler(
         access: access_grants.0,
     };
 
-    info!("Generating JWT for {}", &username);
-
     // Use RS256 (RSA with SHA-256) for signing
     let mut header = Header::new(Algorithm::RS256);
     header.kid = Some(config.signing_key.clone());
-
-    info!("Loading RSA private key for signing");
 
     let encoding_key =
         EncodingKey::from_rsa_pem(config.private_key_pem.as_bytes()).map_err(|e| {
@@ -235,21 +275,13 @@ pub async fn token_handler(
             Error::TokenGeneration(e)
         })?;
 
-    info!("Loading token claims: {:?}", claims);
-
     let token = encode(&header, &claims, &encoding_key)?;
 
-    info!("Generated token for {}: {}", username, token);
-
-    Ok(Json(TokenResponse {
-        token: token.clone(),
-        access_token: Some(token),
-        expires_in: Some(1800), // 30 minutes
-        issued_at: Some(
-            now.format(&time::format_description::well_known::Rfc3339)
-                .unwrap(),
-        ),
-    }))
+    Ok(RegistryJwtToken {
+        value: token,
+        issued_at: now,
+        expires_at: exp,
+    })
 }
 
 /// Extract Basic auth credentials from Authorization header
@@ -278,12 +310,16 @@ fn extract_basic_auth(headers: &HeaderMap) -> Result<(String, String), Error> {
 }
 
 #[derive(Debug)]
-struct RequestedAccess(Vec<Access>);
+pub struct RequestedAccess(Vec<Access>);
 
 #[derive(Debug)]
-struct ValidatedAccess(Vec<Access>);
+pub struct ValidatedAccess(Vec<Access>);
 
 impl RequestedAccess {
+    pub fn new(access_request: Vec<Access>) -> Self {
+        Self(access_request)
+    }
+
     /// Parse space-delimited scopes and validate against user namespace
     fn parse_scopes(scopes: &str) -> Result<Self, Error> {
         let mut access_request = Vec::new();
@@ -336,7 +372,7 @@ impl RequestedAccess {
     }
 
     /// Validate system access requests (allows everything for now)
-    fn validate_for_system(self) -> ValidatedAccess {
+    pub fn validate_for_system(self) -> ValidatedAccess {
         ValidatedAccess(self.0)
     }
 }

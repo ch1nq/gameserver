@@ -62,7 +62,7 @@ async fn new_agent_page(
 
     let credentials = tournament_mananger::RegistryCredentials {
         username: SYSTEM_USERNAME.to_string(),
-        password: system_token.into(),
+        password: system_token.value.into(),
     };
     let request = tournament_mananger::ListImagesRequest {
         registry_credentials: Some(credentials),

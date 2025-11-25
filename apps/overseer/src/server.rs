@@ -1,16 +1,33 @@
+use reqwest::Client;
+use serde::Deserialize;
 use tonic::{Request, Response, Status};
 
 use crate::tournament_mananger::tournament_manager_server::TournamentManager;
 use crate::tournament_mananger::{
-    CreateAgentRequest, CreateAgentResponse, DeleteAgentRequest, DeleteAgentResponse,
+    AgentImage, CreateAgentRequest, CreateAgentResponse, DeleteAgentRequest, DeleteAgentResponse,
     ListImagesRequest, ListImagesResponse, NewAgentVersionRequest, NewAgentVersionResponse,
     UpdateAgentStateRequest, UpdateAgentStateResponse,
 };
 
-#[derive(Default)]
+#[derive(Deserialize)]
+struct CatalogResponse {
+    repositories: Vec<String>,
+}
+
 pub struct Overseer {
     // TODO: Initialize db_pool properly
     // db_pool: PgPool,
+    http_client: Client,
+    registry_url: String,
+}
+
+impl Overseer {
+    pub fn new(registry_url: String) -> Self {
+        Self {
+            http_client: Client::new(),
+            registry_url,
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -47,7 +64,54 @@ impl TournamentManager for Overseer {
         &self,
         request: Request<ListImagesRequest>,
     ) -> Result<Response<ListImagesResponse>, Status> {
-        let response = ListImagesResponse { images: vec![] };
+        let req = request.into_inner();
+
+        let user_id = req
+            .user_id
+            .ok_or_else(|| Status::invalid_argument("user_id is required"))?
+            .id;
+
+        let credentials = req
+            .registry_credentials
+            .ok_or_else(|| Status::invalid_argument("registry_credentials are required"))?;
+
+        // Fetch catalog from registry
+        let catalog_url = format!("{}/v2/_catalog", self.registry_url);
+        let response = self
+            .http_client
+            .get(&catalog_url)
+            .bearer_auth(&credentials.password)
+            .send()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to connect to registry: {}", e)))?;
+
+        if !response.status().is_success() {
+            dbg!(&response.headers());
+            return Err(Status::internal(format!(
+                "Registry returned error: {}",
+                response.status()
+            )));
+        }
+
+        dbg!(&response);
+
+        let catalog: CatalogResponse = response
+            .json()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to parse registry response: {}", e)))?;
+
+        // Filter repositories for this user's namespace: "user-{id}/*"
+        let user_prefix = format!("user-{}/", user_id);
+        let images: Vec<AgentImage> = catalog
+            .repositories
+            .into_iter()
+            .filter(|repo| repo.starts_with(&user_prefix))
+            .map(|repo| AgentImage {
+                image_url: format!("{}/{}", self.registry_url, repo),
+            })
+            .collect();
+
+        let response = ListImagesResponse { images };
         Ok(Response::new(response))
     }
 }

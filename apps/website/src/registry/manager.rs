@@ -1,23 +1,23 @@
 use crate::{
-    registry::token::{RegistryTokenHash, RegistryTokenInternal, TokenHash},
+    registry::{
+        self,
+        auth::{Access, JwtEncoded, RegistryAuthConfig, RegistryJwtToken, RequestedAccess},
+        token::{RegistryTokenHash, RegistryTokenInternal, TokenHash},
+    },
     users::UserId,
 };
 
 use super::token::{PlaintextToken, RegistryToken, TokenName};
 use sqlx::PgPool;
-use std::{arch::x86_64, sync::Arc};
+use std::sync::Arc;
+use time::{Duration, OffsetDateTime};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
 pub struct TokenManager {
     db_pool: PgPool,
-    system_token: Arc<RwLock<Option<SystemToken>>>,
-}
-
-#[derive(Debug, Clone)]
-struct SystemToken {
-    token: PlaintextToken,
-    created_at: std::time::Instant,
+    system_token: Arc<RwLock<Option<RegistryJwtToken>>>,
+    registry_auth_config: RegistryAuthConfig,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +26,7 @@ pub enum TokenManagerError {
     InvalidInput(String),
     TokenLimitReached,
     TokenNotFound,
+    FailedToGenerateSystemToken,
     FailedToHashToken(String),
     InvalidCredentials,
 }
@@ -39,6 +40,9 @@ impl std::fmt::Display for TokenManagerError {
             TokenManagerError::TokenNotFound => write!(f, "Token not found"),
             TokenManagerError::FailedToHashToken(msg) => write!(f, "Failed to hash token: {}", msg),
             TokenManagerError::InvalidCredentials => write!(f, "Invalid credentials"),
+            TokenManagerError::FailedToGenerateSystemToken => {
+                write!(f, "Failed to generate system token")
+            }
         }
     }
 }
@@ -50,10 +54,11 @@ pub const SYSTEM_USERNAME: &str = "system";
 const SYSTEM_TOKEN_LIFETIME_SECS: u64 = 15 * 60; // 15 minutes
 
 impl TokenManager {
-    pub fn new(db_pool: PgPool) -> Self {
+    pub fn new(db_pool: PgPool, registry_auth_config: RegistryAuthConfig) -> Self {
         Self {
             db_pool,
             system_token: Arc::new(RwLock::new(None)),
+            registry_auth_config,
         }
     }
 
@@ -99,63 +104,40 @@ impl TokenManager {
     /// Get or create a system token for this website instance. This token is
     /// cached in memory and reused across requests. Returns the plaintext token
     /// that can be used for registry authentication
-    pub async fn get_system_token(&self) -> Result<PlaintextToken, TokenManagerError> {
+    pub async fn get_system_token(&self) -> Result<RegistryJwtToken, TokenManagerError> {
         // Check if we have a valid cached token with enough time remaining
         {
             let guard = self.system_token.read().await;
             if let Some(sys_token) = guard.as_ref() {
                 // Check database to see if token has at least 5 minutes remaining
-                let has_time_remaining = sqlx::query!(
-                    r#"
-                    SELECT EXISTS(
-                        SELECT 1 FROM registry_tokens_internal
-                        WHERE token_hash = $1 AND expires_at > now() + interval '5 minutes'
-                    ) as "exists!"
-                    "#,
-                    bcrypt::hash(sys_token.token.as_ref(), BCRYPT_COST)
-                        .map_err(|e| TokenManagerError::FailedToHashToken(e.to_string()))?
-                )
-                .fetch_one(&self.db_pool)
-                .await
-                .map_err(TokenManagerError::DatabaseError)?
-                .exists;
-
-                if has_time_remaining {
+                if sys_token.expires_at < OffsetDateTime::now_utc() + Duration::minutes(5) {
                     tracing::debug!("Reusing cached system token");
-                    return Ok(sys_token.token.clone());
+                    return Ok(sys_token.clone());
                 }
-
-                tracing::debug!("Cached token expiring soon, generating new one");
             }
         }
 
-        // Generate new token
-        tracing::debug!("Creating new system token");
-        let plaintext_token = PlaintextToken::generate();
-        tracing::debug!("Token: {}", plaintext_token.as_ref());
-        let token_hash = bcrypt::hash(plaintext_token.as_ref(), BCRYPT_COST)
-            .map_err(|e| TokenManagerError::FailedToHashToken(e.to_string()))?;
+        tracing::debug!("Cached token expiring soon, generating new one");
 
-        // Store hash in database
-        sqlx::query!(
-            r#"
-            INSERT INTO registry_tokens_internal (token_hash)
-            VALUES ($1)
-            "#,
-            token_hash
+        let access_grants = RequestedAccess::new(vec![Access::new(
+            "registry".to_string(),
+            "catalog".to_string(),
+            vec!["*".to_string()],
+        )])
+        .validate_for_system();
+        let jwt = registry::auth::generate_docker_jwt(
+            SYSTEM_USERNAME.to_string(),
+            access_grants,
+            self.registry_auth_config.registry_service.clone(),
+            &self.registry_auth_config,
         )
-        .execute(&self.db_pool)
-        .await
-        .map_err(TokenManagerError::DatabaseError)?;
+        .map_err(|_| TokenManagerError::FailedToGenerateSystemToken)?;
 
         // Cache the plaintext token
         let mut guard = self.system_token.write().await;
-        *guard = Some(SystemToken {
-            token: plaintext_token.clone(),
-            created_at: std::time::Instant::now(),
-        });
+        *guard = Some(jwt.clone());
 
-        Ok(plaintext_token)
+        Ok(jwt)
     }
 
     /// List all active (non-revoked) tokens for a user

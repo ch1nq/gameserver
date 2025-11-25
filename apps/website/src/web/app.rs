@@ -1,7 +1,7 @@
-use crate::agents::deploy::tournament_mananger::tournament_manager_client;
 use crate::agents::manager::AgentManager;
 use crate::registry;
 use crate::registry::TokenManager;
+use crate::registry::auth::RegistryAuthConfig;
 use crate::tournament_mananger::tournament_manager_client::TournamentManagerClient;
 use crate::web::layout::pages;
 use crate::{
@@ -32,6 +32,7 @@ pub struct App {
     db: PgPool,
     client: BasicClient,
     state: AppState,
+    registry_auth_config: RegistryAuthConfig,
 }
 
 impl App {
@@ -44,6 +45,10 @@ impl App {
             .expect("GITHUB_CLIENT_SECRET should be provided");
         let tournament_manager_url =
             env::var("TOURNAMENT_MANAGER_URL").expect("TOURNAMENT_MANAGER_URL should be provided");
+        let private_key_pem = env::var("REGISTRY_PRIVATE_KEY")
+            .expect("REGISTRY_PRIVATE_KEY must be set for registry authentication (RSA private key in PEM format)");
+        let registry_service =
+            env::var("REGISTRY_SERVICE").unwrap_or_else(|_| "achtung-registry.fly.dev".to_string());
 
         let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())?;
         let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())?;
@@ -53,8 +58,12 @@ impl App {
         let db = PgPool::connect(&db_connection_str).await?;
         sqlx::migrate!().run(&db).await?;
 
+        let registry_auth_config =
+            registry::auth::RegistryAuthConfig::new(private_key_pem, registry_service)
+                .expect("Failed to create registry auth config");
+
         let agent_manager = AgentManager::new(db.clone());
-        let token_manager = TokenManager::new(db.clone());
+        let token_manager = TokenManager::new(db.clone(), registry_auth_config.clone());
         let tournament_manager = TournamentManagerClient::connect(tournament_manager_url).await?;
 
         let state = AppState {
@@ -63,7 +72,12 @@ impl App {
             tournament_manager,
         };
 
-        Ok(Self { db, client, state })
+        Ok(Self {
+            db,
+            client,
+            state,
+            registry_auth_config,
+        })
     }
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
@@ -86,16 +100,9 @@ impl App {
         let backend = Backend::new(self.db.clone(), self.client);
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
-        // Registry auth router - reuses the token_manager from AppState
-        let private_key_pem = env::var("REGISTRY_PRIVATE_KEY")
-            .expect("REGISTRY_PRIVATE_KEY must be set for registry authentication (RSA private key in PEM format)");
-        let registry_service =
-            env::var("REGISTRY_SERVICE").unwrap_or_else(|_| "achtung-registry.fly.dev".to_string());
-        let registry_auth_config =
-            registry::auth::RegistryAuthConfig::new(private_key_pem, registry_service)
-                .expect("Failed to create registry auth config");
+        // Registry auth router
         let registry_router =
-            registry::auth::router(self.state.token_manager.clone(), registry_auth_config);
+            registry::auth::router(self.state.token_manager.clone(), self.registry_auth_config);
 
         let services = protected::router()
             .route_layer(login_required!(Backend, login_url = "/login"))
