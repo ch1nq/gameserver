@@ -86,14 +86,11 @@ impl TournamentManager for Overseer {
             .map_err(|e| Status::internal(format!("Failed to connect to registry: {}", e)))?;
 
         if !response.status().is_success() {
-            dbg!(&response.headers());
             return Err(Status::internal(format!(
                 "Registry returned error: {}",
                 response.status()
             )));
         }
-
-        dbg!(&response);
 
         let catalog: CatalogResponse = response
             .json()
