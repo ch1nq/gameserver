@@ -110,14 +110,15 @@ impl TokenManager {
             let guard = self.system_token.read().await;
             if let Some(sys_token) = guard.as_ref() {
                 // Check database to see if token has at least 5 minutes remaining
-                if sys_token.expires_at < OffsetDateTime::now_utc() + Duration::minutes(5) {
+                if sys_token.expires_at > OffsetDateTime::now_utc() + Duration::minutes(5) {
                     tracing::debug!("Reusing cached system token");
                     return Ok(sys_token.clone());
                 }
+                tracing::debug!("Cached token expiring soon");
             }
         }
 
-        tracing::debug!("Cached token expiring soon, generating new one");
+        tracing::debug!("Generating new token");
 
         let access_grants = RequestedAccess::new(vec![Access::new(
             "registry".to_string(),
