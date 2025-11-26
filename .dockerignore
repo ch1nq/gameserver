@@ -1,6 +1,7 @@
 **/Dockerfile
 .dockerignore
 .git/
+.claude
 .gitignore
 .venv/
 **/target/
@@ -11,3 +12,6 @@
 *.pyd
 __pycache__
 **/__pycache__
+**/.mypy_cache
+**/dist
+
