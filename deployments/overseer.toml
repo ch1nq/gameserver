@@ -3,24 +3,27 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'achtung'
+app = 'achtung-overseer'
 primary_region = 'arn'
 
 [build]
-dockerfile = '../apps/website/Dockerfile'
+dockerfile = '../apps/overseer/Dockerfile'
 
 [env]
-PORT = '80'
-TOURNAMENT_MANAGER_URL = "http://achtung-overseer.flycast:50051"
+PORT = '50051'
+REGISTRY_URL = 'https://achtung-registry.fly.dev'
 
-[http_service]
-internal_port = 80
-force_https = true
-auto_stop_machines = 'stop'
+[[services]]
+protocol = "tcp"
+internal_port = 50051
+auto_stop_machines = "stop"
 auto_start_machines = true
 max_machines_running = 1
 min_machines_running = 0
-processes = ['app']
+processes = ["app"]
+
+[[services.ports]]
+port = 50051
 
 [[vm]]
 size = 'shared-cpu-1x'

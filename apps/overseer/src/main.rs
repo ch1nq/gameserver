@@ -9,12 +9,12 @@ pub mod server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "[::1]:50051".parse().unwrap();
-
-    // Get registry URL from environment or use default
+    let host = env::var("HOST").unwrap_or_else(|_| "[::]".to_string());
+    let port = env::var("PORT").unwrap_or_else(|_| "50051".to_string());
     let registry_url =
         env::var("REGISTRY_URL").unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string());
 
+    let addr = format!("{host}:{port}").parse().unwrap();
     let overseer = server::Overseer::new(registry_url);
 
     println!("Overseer listening on {addr}");
