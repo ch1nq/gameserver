@@ -5,6 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+achtung-ui = { path = "../../libs/achtung-ui" }
 async-trait = { workspace = true }
 axum = { workspace = true }
 axum-login = { workspace = true }

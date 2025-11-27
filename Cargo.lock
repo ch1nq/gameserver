@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "achtung-ui"
+version = "0.1.0"
+dependencies = [
+ "maud",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3907,6 +3914,7 @@ checksum = "5f20c57d8d7db6d3b86154206ae5d8fba62dd39573114de97c2cb0578251f8e1"
 name = "website"
 version = "0.1.0"
 dependencies = [
+ "achtung-ui",
  "async-trait",
  "axum 0.8.7",
  "axum-login",

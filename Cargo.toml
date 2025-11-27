@@ -5,6 +5,7 @@ members = [
     "apps/game-server",
     "apps/overseer",
     "libs/arcadio",
+    "libs/achtung-ui",
 ]
 
 [workspace.dependencies]
