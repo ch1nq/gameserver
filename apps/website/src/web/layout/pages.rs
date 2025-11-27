@@ -245,72 +245,70 @@ fn new_token_modal() -> Markup {
 }
 
 pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Markup {
+    let rows = agents.iter().map(|agent| {
+        components::table::Row {
+            content: html! {
+                (components::table::Cell { content: html! { (agent.name.as_ref()) }, is_primary: true })
+                (components::table::Cell {
+                    content: html! {
+                        span class="text-gray-500 dark:text-gray-400 text-xs font-mono truncate max-w-xs" {
+                            (agent.image_url.as_ref())
+                        }
+                    },
+                    is_primary: false
+                })
+                (components::table::Cell {
+                    content: html! {
+                        @let status_color = match agent.status {
+                            AgentStatus::Active => "bg-green-400",
+                            AgentStatus::Inactive => "bg-gray-400",
+                        };
+                        span class=(format!("h-3 w-3 rounded-full inline-block me-1 {}", status_color)) {}
+                        span class="text-gray-900 dark:text-white" { (format!("{:?}", agent.status)) }
+                    },
+                    is_primary: false
+                })
+                (components::table::Cell {
+                    content: html! {
+                        div class="flex gap-2" {
+                            @match agent.status {
+                                AgentStatus::Active => {
+                                    form method="post" action=(format!("/agents/{}/deactivate", agent.id)) {
+                                        button type="submit" class="text-yellow-600 hover:text-yellow-800 dark:text-yellow-400" { "Deactivate" }
+                                    }
+                                }
+                                AgentStatus::Inactive => {
+                                    form method="post" action=(format!("/agents/{}/activate", agent.id)) {
+                                        button type="submit" class="text-green-600 hover:text-green-800 dark:text-green-400" { "Activate" }
+                                    }
+                                }
+                            }
+                            form method="post" action=(format!("/agents/{}/delete", agent.id)) onsubmit="return confirm('Are you sure you want to delete this agent?');" {
+                                button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" { "Delete" }
+                            }
+                        }
+                    },
+                    is_primary: false
+                })
+            }
+        }
+    });
+    let table = components::table::Table {
+        headers: vec!["Name", "Image", "Status", "Actions"],
+        rows: html! {
+            @if agents.is_empty() {
+                (components::table::EmptyRow { colspan: 4, message: "No agents yet." })
+            } @else { @for row in rows { (row.render()) }}
+        },
+        extra_classes: None,
+    };
+
     components::Page {
         title: "Agents",
         content: html! {
             div class="flex flex-col justify-end mt-4 gap-4" {
-
                 h1 class="text-2xl font-semibold" { "Agents" }
-
-                (components::table::Table {
-                    headers: vec!["Name", "Image", "Status", "Actions"],
-                    rows: html! {
-                        @if agents.is_empty() {
-                            (components::table::EmptyRow { colspan: 4, message: "No agents yet." })
-                        } @else {
-                            @for agent in agents {
-                                (components::table::Row {
-                                    content: html! {
-                                        (components::table::Cell { content: html! { (agent.name.as_ref()) }, is_primary: true })
-                                        (components::table::Cell {
-                                            content: html! {
-                                                span class="text-gray-500 dark:text-gray-400 text-xs font-mono truncate max-w-xs" {
-                                                    (agent.image_url.as_ref())
-                                                }
-                                            },
-                                            is_primary: false
-                                        })
-                                        (components::table::Cell {
-                                            content: html! {
-                                                @let status_color = match agent.status {
-                                                    AgentStatus::Active => "bg-green-400",
-                                                    AgentStatus::Inactive => "bg-gray-400",
-                                                };
-                                                span class=(format!("h-3 w-3 rounded-full inline-block me-1 {}", status_color)) {}
-                                                span class="text-gray-900 dark:text-white" { (format!("{:?}", agent.status)) }
-                                            },
-                                            is_primary: false
-                                        })
-                                        (components::table::Cell {
-                                            content: html! {
-                                                div class="flex gap-2" {
-                                                    @match agent.status {
-                                                        AgentStatus::Active => {
-                                                            form method="post" action=(format!("/agents/{}/deactivate", agent.id)) {
-                                                                button type="submit" class="text-yellow-600 hover:text-yellow-800 dark:text-yellow-400" { "Deactivate" }
-                                                            }
-                                                        }
-                                                        AgentStatus::Inactive => {
-                                                            form method="post" action=(format!("/agents/{}/activate", agent.id)) {
-                                                                button type="submit" class="text-green-600 hover:text-green-800 dark:text-green-400" { "Activate" }
-                                                            }
-                                                        }
-                                                    }
-                                                    form method="post" action=(format!("/agents/{}/delete", agent.id)) onsubmit="return confirm('Are you sure you want to delete this agent?');" {
-                                                        button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" { "Delete" }
-                                                    }
-                                                }
-                                            },
-                                            is_primary: false
-                                        })
-                                    }
-                                })
-                            }
-                        }
-                    },
-                    extra_classes: None,
-                })
-
+                (table)
                 div class="flex justify-end" {
                     (components::button::Primary { text: "New agent", url: "/agents/new", icon: None })
                 }
