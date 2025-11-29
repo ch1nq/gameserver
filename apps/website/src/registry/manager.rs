@@ -16,29 +16,26 @@ pub struct TokenManager {
 
 #[derive(Debug, thiserror::Error)]
 pub enum TokenManagerError {
+    #[error("Database error: {0}")]
     DatabaseError(sqlx::Error),
-    InvalidInput(String),
-    TokenLimitReached,
-    TokenNotFound,
-    FailedToGenerateSystemToken,
-    FailedToHashToken(String),
-    InvalidCredentials,
-}
 
-impl std::fmt::Display for TokenManagerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TokenManagerError::DatabaseError(e) => write!(f, "Database error: {}", e),
-            TokenManagerError::InvalidInput(msg) => write!(f, "Invalid input: {}", msg),
-            TokenManagerError::TokenLimitReached => write!(f, "Token limit reached"),
-            TokenManagerError::TokenNotFound => write!(f, "Token not found"),
-            TokenManagerError::FailedToHashToken(msg) => write!(f, "Failed to hash token: {}", msg),
-            TokenManagerError::InvalidCredentials => write!(f, "Invalid credentials"),
-            TokenManagerError::FailedToGenerateSystemToken => {
-                write!(f, "Failed to generate system token")
-            }
-        }
-    }
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
+    #[error("Token limit reached")]
+    TokenLimitReached,
+
+    #[error("Token not found")]
+    TokenNotFound,
+
+    #[error("Failed to generate system token")]
+    FailedToGenerateSystemToken,
+
+    #[error("Failed to hash token: {0}")]
+    FailedToHashToken(String),
+
+    #[error("Invalid credentials")]
+    InvalidCredentials,
 }
 
 const MAX_TOKENS_PER_USER: i64 = 10;
