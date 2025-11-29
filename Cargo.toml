@@ -6,6 +6,7 @@ members = [
     "apps/overseer",
     "libs/arcadio",
     "libs/achtung-ui",
+    "libs/registry-auth",
 ]
 
 [workspace.dependencies]

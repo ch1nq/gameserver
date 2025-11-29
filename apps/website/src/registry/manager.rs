@@ -1,13 +1,7 @@
-use crate::{
-    registry::{
-        self,
-        auth::{Access, JwtEncoded, RegistryAuthConfig, RegistryJwtToken, RequestedAccess},
-        token::{RegistryTokenHash, RegistryTokenInternal, TokenHash},
-    },
-    users::UserId,
-};
-
 use super::token::{PlaintextToken, RegistryToken, TokenName};
+use crate::{registry::token::RegistryTokenHash, users::UserId};
+use registry_auth::auth::{Access, RegistryAuth, ValidatedAccess};
+use registry_auth::{RegistryAuthConfig, RegistryJwtToken};
 use sqlx::PgPool;
 use std::sync::Arc;
 use time::{Duration, OffsetDateTime};
@@ -49,9 +43,7 @@ impl std::fmt::Display for TokenManagerError {
 
 const MAX_TOKENS_PER_USER: i64 = 10;
 const BCRYPT_COST: u32 = 12;
-
-pub const SYSTEM_USERNAME: &str = "system";
-const SYSTEM_TOKEN_LIFETIME_SECS: u64 = 15 * 60; // 15 minutes
+const SYSTEM_USERNAME: &str = "system";
 
 impl TokenManager {
     pub fn new(db_pool: PgPool, registry_auth_config: RegistryAuthConfig) -> Self {
@@ -120,13 +112,13 @@ impl TokenManager {
 
         tracing::debug!("Generating new token");
 
-        let access_grants = RequestedAccess::new(vec![Access::new(
+        let access_grants = ValidatedAccess::new(vec![Access::new(
             "registry".to_string(),
             "catalog".to_string(),
             vec!["*".to_string()],
-        )])
-        .validate_for_system();
-        let jwt = registry::auth::generate_docker_jwt(
+        )]);
+
+        let jwt = registry_auth::auth::generate_docker_jwt::<Self>(
             SYSTEM_USERNAME.to_string(),
             access_grants,
             self.registry_auth_config.registry_service.clone(),
@@ -225,53 +217,50 @@ impl TokenManager {
         .map_err(TokenManagerError::DatabaseError)
     }
 
-    pub async fn get_active_system_tokens(
+    /// Validate a registry token for a user
+    pub async fn validate_token(
         &self,
-    ) -> Result<Vec<RegistryTokenInternal>, TokenManagerError> {
-        sqlx::query_as!(
-            RegistryTokenInternal,
-            r#"
-            SELECT id, token_hash, created_at, expires_at
-            FROM registry_tokens_internal
-            WHERE expires_at > now()
-            "#
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(TokenManagerError::DatabaseError)
-    }
-
-    async fn validate_token_from_candidates<H: TokenHash, C: IntoIterator<Item = H>>(
-        &self,
-        token_hash: &RegistryTokenHash,
-        candidates: C,
+        user_id: &UserId,
+        token_plaintext: &str,
     ) -> Result<(), TokenManagerError> {
+        let candidates = self.get_active_tokens(user_id).await?;
         for candidate in candidates {
-            if bcrypt::verify(token_hash, &candidate.hash()).unwrap_or(false) {
+            if bcrypt::verify(token_plaintext, &candidate.token_hash).unwrap_or(false) {
                 return Ok(());
             }
         }
 
         Err(TokenManagerError::InvalidCredentials)
     }
+}
 
-    /// Validate a registry token for a user
-    pub async fn validate_token(
-        &self,
-        user_id: &UserId,
-        token_hash: &RegistryTokenHash,
-    ) -> Result<(), TokenManagerError> {
-        let candidates = self.get_active_tokens(user_id).await?;
-        self.validate_token_from_candidates(token_hash, candidates)
-            .await
+#[async_trait::async_trait]
+impl RegistryAuth for TokenManager {
+    type UserId = UserId;
+    type Token = String;
+
+    fn parse_user_id(username: String) -> Option<UserId> {
+        username
+            .strip_prefix("user-")
+            .map(|id| id.parse::<UserId>().ok())
+            .flatten()
     }
 
-    pub async fn validate_system_token(
-        &self,
-        token_hash: &RegistryTokenHash,
-    ) -> Result<(), TokenManagerError> {
-        let candidates = self.get_active_system_tokens().await?;
-        self.validate_token_from_candidates(token_hash, candidates)
-            .await
+    fn user_has_access(access: &Access, user_id: &UserId) -> bool {
+        let user_namespace = format!("user-{}", user_id);
+        let granted = access.name.starts_with(&format!("{}/", user_namespace));
+        if !granted {
+            tracing::warn!(
+                "User {} requested access to '{}' which is outside their namespace '{}'",
+                user_id,
+                access.name,
+                user_namespace
+            )
+        }
+        granted
+    }
+
+    async fn is_valid_token(&self, user_id: &UserId, token: &Self::Token) -> bool {
+        self.validate_token(user_id, token).await.is_ok()
     }
 }

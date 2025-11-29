@@ -1,7 +1,6 @@
 use crate::agents::manager::AgentManager;
-use crate::registry;
 use crate::registry::TokenManager;
-use crate::registry::auth::RegistryAuthConfig;
+use registry_auth::RegistryAuthConfig;
 use crate::tournament_mananger::tournament_manager_client::TournamentManagerClient;
 use crate::web::layout::pages;
 use crate::{
@@ -59,7 +58,7 @@ impl App {
         sqlx::migrate!().run(&db).await?;
 
         let registry_auth_config =
-            registry::auth::RegistryAuthConfig::new(private_key_pem, registry_service)
+            RegistryAuthConfig::new(private_key_pem, registry_service)
                 .expect("Failed to create registry auth config");
 
         let agent_manager = AgentManager::new(db.clone());
@@ -101,8 +100,10 @@ impl App {
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
         // Registry auth router
-        let registry_router =
-            registry::auth::router(self.state.token_manager.clone(), self.registry_auth_config);
+        let registry_router = registry_auth::router(
+            self.state.token_manager.clone(),
+            self.registry_auth_config,
+        );
 
         let services = protected::router()
             .route_layer(login_required!(Backend, login_url = "/login"))

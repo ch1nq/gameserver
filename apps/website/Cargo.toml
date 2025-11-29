@@ -6,23 +6,19 @@ publish = false
 
 [dependencies]
 achtung-ui = { path = "../../libs/achtung-ui" }
+registry-auth = { path = "../../libs/registry-auth" }
 async-trait = { workspace = true }
 axum = { workspace = true }
 axum-login = { workspace = true }
-base32 = { workspace = true }
 base64 = { workspace = true }
 bcrypt = { workspace = true }
 http = { workspace = true }
 hyper = { workspace = true }
-jsonwebtoken = { workspace = true }
 maud = { workspace = true }
 oauth2 = { workspace = true }
 prost = { workspace = true }
-rand = { workspace = true }
 reqwest = { workspace = true }
-rsa = { workspace = true }
 serde = { workspace = true }
-sha2 = { workspace = true }
 sqlx = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
