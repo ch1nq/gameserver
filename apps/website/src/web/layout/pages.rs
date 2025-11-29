@@ -118,9 +118,7 @@ pub fn settings(
                         (new_token_modal())
                     }
 
-                    @if let Some(token_created) = token_created {
-                        (token_created.render_modal())
-                    }
+                    @if let Some(token_created) = token_created { (token_created) }
                 }
             }
         },
@@ -140,8 +138,10 @@ impl TokenCreated {
             plaintext_token,
         }
     }
+}
 
-    fn render_modal(&self) -> Markup {
+impl Render for TokenCreated {
+    fn render(&self) -> Markup {
         let copy_token_script = PreEscaped(
             r#"
             async function copyToken() {

@@ -57,7 +57,7 @@ impl TokenManager {
         &self,
         user_id: &UserId,
         name: &TokenName,
-    ) -> Result<(UserId, PlaintextToken), TokenManagerError> {
+    ) -> Result<PlaintextToken, TokenManagerError> {
         // Check token limit
         let count = self.count_active_tokens(user_id).await?;
         if count >= MAX_TOKENS_PER_USER {
@@ -72,7 +72,7 @@ impl TokenManager {
             .map_err(|e| TokenManagerError::FailedToHashToken(e.to_string()))?;
 
         // Insert into database
-        let token_id = sqlx::query!(
+        let _token_id = sqlx::query!(
             r#"
             INSERT INTO registry_tokens (user_id, token_hash, name)
             VALUES ($1, $2, $3)
@@ -87,7 +87,7 @@ impl TokenManager {
         .map_err(TokenManagerError::DatabaseError)?
         .id;
 
-        Ok((token_id, plaintext_token))
+        Ok(plaintext_token)
     }
 
     /// Get or create a system token for this website instance. This token is
