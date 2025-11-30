@@ -1,14 +1,15 @@
 use crate::agents::agent::{Agent, AgentStatus};
 use crate::registry::RegistryToken;
 use crate::tournament_mananger::AgentImage;
-use crate::users::{AuthSession, UserId};
-use crate::web::layout::components;
+use crate::users::{AuthSession, User, UserId};
+use crate::web::layout::components::{self, Page};
+use achtung_ui::error::Error;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use maud::{Markup, PreEscaped, Render, html};
 
-pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Markup {
-    components::Page {
+pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Page {
+    Page {
         title: "Achtung! battle",
         content: html! {
             div class="flex flex-col lg:flex-row gap-4" {
@@ -17,12 +18,21 @@ pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Markup {
             }
         },
         session,
+        errors: vec![],
     }
-    .render()
+}
+
+pub fn error_page(error: Error, session: &AuthSession) -> Page {
+    Page {
+        title: "An error has occurred",
+        content: error.as_content(),
+        session,
+        errors: vec![],
+    }
 }
 
 pub fn login(next: Option<String>, message: Option<String>) -> Markup {
-    components::Base {
+    achtung_ui::base::Base {
         title: "Login",
         content: html! {
             div class="flex items-center justify-center h-screen" {
@@ -50,16 +60,12 @@ pub fn login(next: Option<String>, message: Option<String>) -> Markup {
     }.render()
 }
 
-pub fn settings(
-    session: &AuthSession,
+pub fn settings<'a>(
+    session: &'a AuthSession,
+    user: &'a User,
     tokens: Vec<RegistryToken>,
-    token_created: Option<TokenCreated>,
-) -> impl IntoResponse {
-    let Some(user) = &session.user else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
-
-    components::Page {
+) -> Page<'a> {
+    Page {
         title: "Settings",
         content: html! {
             div class="flex flex-col gap-8" {
@@ -117,101 +123,86 @@ pub fn settings(
                     div class="flex justify-end" {
                         (new_token_modal())
                     }
-
-                    @if let Some(token_created) = token_created { (token_created) }
                 }
             }
         },
         session,
-    }.render().into_response()
-}
-
-pub struct TokenCreated {
-    user_id: UserId,
-    plaintext_token: String,
-}
-
-impl TokenCreated {
-    pub fn new(user_id: UserId, plaintext_token: String) -> TokenCreated {
-        TokenCreated {
-            user_id,
-            plaintext_token,
-        }
+        errors: vec![],
     }
 }
 
-impl Render for TokenCreated {
-    fn render(&self) -> Markup {
-        let copy_token_script = PreEscaped(
-            r#"
-            async function copyToken() {
-                const tokenInput = document.getElementById('token-value');
-                const defaultIcon = document.getElementById('default-icon');
-                const successIcon = document.getElementById('success-icon');
-                try {
-                    await navigator.clipboard.writeText(tokenInput.value);
-                    defaultIcon.classList.add('hidden');
-                    successIcon.classList.remove('hidden');
-                    setTimeout(() => {
-                        defaultIcon.classList.remove('hidden');
-                        successIcon.classList.add('hidden');
-                    }, 2000);
-                } catch (err) {
-                    console.error('Failed to copy:', err);
-                    alert('Failed to copy token. Please copy manually.');
+pub fn token_created(
+    user_id: UserId,
+    plaintext_token: String,
+    auth_session: &AuthSession,
+) -> Markup {
+    let copy_token_script = PreEscaped(
+        r#"
+        async function copyToken() {
+            const tokenInput = document.getElementById('token-value');
+            const defaultIcon = document.getElementById('default-icon');
+            const successIcon = document.getElementById('success-icon');
+            try {
+                await navigator.clipboard.writeText(tokenInput.value);
+                defaultIcon.classList.add('hidden');
+                successIcon.classList.remove('hidden');
+                setTimeout(() => {
+                    defaultIcon.classList.remove('hidden');
+                    successIcon.classList.add('hidden');
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy token. Please copy manually.');
+            }
+        }
+        "#,
+    );
+
+    let content = html! {
+        script {(copy_token_script)}
+        div class="flex flex-col gap-4" {
+            h1 class="mb-3 text-2xl font-semibold tracking-tight text-heading leading-8" {
+                "Token created successfully!"
+            }
+
+            (components::alert::Alert::warning("Important!", "Make sure to copy your token now. You won't be able to see it again!"))
+
+            p class="text-base leading-relaxed text-gray-500 dark:text-gray-400" {
+                "Your deploy token has been created. Use this token to authenticate when pushing Docker images to the Arcadio registry:"
+            }
+
+            div class="relative" {
+                input type="text" id="token-value" readonly="" value=(plaintext_token) class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-20 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white font-mono" {}
+                button onclick="copyToken()" class="absolute end-2 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg p-2 inline-flex items-center justify-center" {
+                    span id="default-icon" {
+                        (components::Icon::Copy)
+                    }
+                    span id="success-icon" class="hidden" {
+                        (components::Icon::Checkmark)
+                    }
                 }
             }
-            "#,
-        );
 
-        let size = components::modal::ModalSize::Medium;
-        let modal_content = components::modal::Content {
-            modal_id: "token-created-modal",
-            title: "Token Created Successfully",
-            body: html! {
-                div class="p-4 md:p-5 space-y-4" {
-                    (components::alert::Warning { title: "Important!", message: "Make sure to copy your token now. You won't be able to see it again!" })
+            p class="font-medium mb-2" { "Docker login command:" }
+            code class="text-xs" {
+                "docker login achtung-registry.fly.dev -u user-" (user_id) " -p " (plaintext_token)
+            }
 
-                    p class="text-base leading-relaxed text-gray-500 dark:text-gray-400" {
-                        "Your deploy token has been created. Use this token to authenticate when pushing Docker images to the Arcadio registry:"
-                    }
-
-                    div class="relative" {
-                        input type="text" id="token-value" readonly="" value=(&self.plaintext_token) class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-20 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white font-mono" {}
-                        button onclick="copyToken()" class="absolute end-2 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg p-2 inline-flex items-center justify-center" {
-                            span id="default-icon" {
-                                (components::Icon::Copy)
-                            }
-                            span id="success-icon" class="hidden" {
-                                (components::Icon::Checkmark)
-                            }
-                        }
-                    }
-
-                    (components::alert::Info {
-                        content: html! {
-                            p class="font-medium mb-2" { "Docker login command:" }
-                            code class="text-xs" {
-                                "docker login achtung-registry.fly.dev -u user-" (&self.user_id) " -p " (&self.plaintext_token)
-                            }
-                        }
-                    })
-                }
-            },
-            footer: Some(html! {
+            div class="flex justify-end" {
                 a href="/settings" class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800" {
                     "Done"
                 }
-            }),
-            size: &size,
-            visible: true,
-        };
-
-        html! {
-            script {(copy_token_script)}
-            (modal_content)
+            }
         }
+    };
+
+    Page {
+        title: "Token created successfully",
+        content,
+        session: auth_session,
+        errors: vec![],
     }
+    .render()
 }
 
 fn new_token_modal() -> Markup {
@@ -244,7 +235,7 @@ fn new_token_modal() -> Markup {
     }.render()
 }
 
-pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Markup {
+pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page {
     let rows = agents.iter().map(|agent| {
         components::table::Row {
             content: html! {
@@ -303,7 +294,7 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Markup {
         extra_classes: None,
     };
 
-    components::Page {
+    Page {
         title: "Agents",
         content: html! {
             div class="flex flex-col justify-end mt-4 gap-4" {
@@ -315,10 +306,11 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Markup {
             }
         },
         session,
-    }.render()
+        errors: vec![],
+    }
 }
 
-pub fn new_agent_page(user_images: Vec<AgentImage>, session: &AuthSession) -> Markup {
+pub fn new_agent_page(user_images: Vec<AgentImage>, session: &AuthSession) -> Page {
     let images = user_images
         .iter()
         .map(|img| components::form::InputOption::from_value(&img.image_url))
@@ -348,21 +340,34 @@ pub fn new_agent_page(user_images: Vec<AgentImage>, session: &AuthSession) -> Ma
         submit_text: "Add new agent",
         submit_icon: Some(components::Icon::Plus),
     }.render();
-    components::Page {
+    Page {
         title: "Create new agent",
         content: form,
         session,
+        errors: vec![],
     }
-    .render()
 }
 
 pub fn not_found() -> Markup {
-    components::Base {
+    achtung_ui::base::Base {
         title: "Not Found",
         content: html! {
             div class="text-center mt-20" {
                 h1 { "Not Found" }
                 p { "The page you are looking for does not exist." }
+            }
+        },
+    }
+    .render()
+}
+
+pub fn unauthorized() -> Markup {
+    achtung_ui::base::Base {
+        title: "unauthorized",
+        content: html! {
+            div class="text-center mt-20" {
+                h1 { "Unauthorized" }
+                p { "Content does not exist or you are not authorized to view it." }
             }
         },
     }

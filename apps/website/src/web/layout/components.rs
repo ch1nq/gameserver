@@ -1,5 +1,6 @@
 use crate::agents::agent::Agent;
 use crate::users::{AuthSession, User};
+use achtung_ui::error::Error;
 use maud::{DOCTYPE, Markup, Render, html};
 
 // Re-export components from the shared library for convenience
@@ -10,45 +11,30 @@ pub use achtung_ui::form;
 pub use achtung_ui::modal;
 pub use achtung_ui::table;
 
-pub struct Base<'a> {
-    pub title: &'a str,
-    pub content: Markup,
-}
-
-impl<'a> Render for Base<'a> {
-    fn render(&self) -> Markup {
-        html! {
-            (DOCTYPE)
-            html {
-                head {
-                    meta charset="utf-8";
-                    meta name="viewport" content="width=device-width, initial-scale=1";
-                    title { ("Achtung battle | ") (self.title) }
-                    script src="https://unpkg.com/@tailwindcss/browser@4"{}
-                    link href="https://cdn.jsdelivr.net/npm/flowbite@3.1.2/dist/flowbite.min.css" rel="stylesheet";
-                }
-                body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white" {
-                    (self.content)
-                    script src="https://cdn.jsdelivr.net/npm/flowbite@3.1.2/dist/flowbite.min.js" {};
-                }
-            }
-        }
-    }
-}
-
 pub struct Page<'a> {
     pub title: &'a str,
     pub content: Markup,
     pub session: &'a AuthSession,
+    pub errors: Vec<Error>,
+}
+
+impl Page<'_> {
+    pub fn with_errors(mut self, errors: Vec<Error>) -> Self {
+        self.errors.extend(errors);
+        self
+    }
 }
 
 impl<'a> Render for Page<'a> {
     fn render(&self) -> Markup {
-        Base {
+        achtung_ui::base::Base {
             title: self.title,
             content: html! {
                 (Navbar { session: self.session })
                 div class="container mx-10 mt-10" {
+                    @for error in &self.errors {
+                        (error)
+                    }
                     div class="mx-auto" {
                         (self.content)
                     }

@@ -2,6 +2,7 @@ use crate::registry::TokenName;
 use crate::users::AuthSession;
 use crate::web::app::AppState;
 use crate::web::layout::pages;
+use achtung_ui::error::Error;
 use axum::{
     Form, Router,
     extract::{Path, State},
@@ -9,6 +10,7 @@ use axum::{
     response::{IntoResponse, Redirect},
     routing::{get, post},
 };
+use maud::Render;
 use std::str::FromStr;
 
 pub fn router() -> Router<AppState> {
@@ -19,20 +21,28 @@ pub fn router() -> Router<AppState> {
 }
 
 async fn settings(auth_session: AuthSession, State(state): State<AppState>) -> impl IntoResponse {
-    let user_id = match &auth_session.user {
-        Some(user) => user.id,
+    let user = match &auth_session.user {
+        Some(user) => user,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
-
-    let tokens = match state.token_manager.list_tokens(&user_id).await {
+    let mut errors = vec![];
+    let tokens = match state.token_manager.list_tokens(&user.id).await {
         Ok(tokens) => tokens,
         Err(e) => {
             tracing::error!("Failed to list tokens: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            errors.push(Error {
+                title: "Internal error".to_string(),
+                message: "Failed to list tokens. Please try again.".to_string(),
+                error_type: achtung_ui::error::ErrorType::System,
+            });
+            vec![]
         }
     };
 
-    pages::settings(&auth_session, tokens, None).into_response()
+    pages::settings(&auth_session, user, tokens)
+        .with_errors(errors)
+        .render()
+        .into_response()
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -48,12 +58,23 @@ async fn create_token(
     let Some(user) = &auth_session.user else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-
+    let tokens = state
+        .token_manager
+        .get_active_tokens(&user.id.clone())
+        .await
+        .unwrap_or_default();
     let token_name = match TokenName::from_str(&form.name) {
         Ok(n) => n,
         Err(e) => {
             tracing::warn!("Invalid token name: {}", e);
-            return StatusCode::BAD_REQUEST.into_response();
+            return pages::settings(&auth_session, user, tokens)
+                .with_errors(vec![Error {
+                    title: "Invalid innput".to_string(),
+                    message: "Invalid token name".to_string(),
+                    error_type: achtung_ui::error::ErrorType::Validation,
+                }])
+                .render()
+                .into_response();
         }
     };
 
@@ -62,18 +83,20 @@ async fn create_token(
         .create_token(&user.id, &token_name)
         .await
     {
-        Ok(plaintext_token) => {
-            let token_created = pages::TokenCreated::new(user.id, plaintext_token.into());
-            let tokens = state
-                .token_manager
-                .get_active_tokens(&user.id.clone())
-                .await
-                .unwrap_or_default();
-            pages::settings(&auth_session, tokens, Some(token_created)).into_response()
-        }
+        Ok(plaintext_token) => pages::token_created(user.id, plaintext_token.into(), &auth_session)
+            .render()
+            .into_response(),
         Err(e) => {
             tracing::error!("Failed to create token: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+
+            pages::settings(&auth_session, user, tokens)
+                .with_errors(vec![Error {
+                    title: "Internal error".to_string(),
+                    message: format!("Failed to create token: {}", e).to_string(),
+                    error_type: achtung_ui::error::ErrorType::System,
+                }])
+                .render()
+                .into_response()
         }
     }
 }

@@ -2,7 +2,8 @@ use crate::agents::agent::{AgentName, ImageUrl};
 use crate::tournament_mananger;
 use crate::users::AuthSession;
 use crate::web::app::AppState;
-use crate::web::layout::pages;
+use crate::web::layout::pages::{self, error_page};
+use achtung_ui::error::Error;
 use axum::{
     Form, Router,
     extract::{Path, State},
@@ -10,6 +11,7 @@ use axum::{
     response::{IntoResponse, Redirect},
     routing::{get, post},
 };
+use maud::Render;
 use std::str::FromStr;
 
 pub fn router() -> Router<AppState> {
@@ -27,11 +29,19 @@ async fn agents(auth_session: AuthSession, State(state): State<AppState>) -> imp
         Some(user) => user.id,
         None => return StatusCode::UNAUTHORIZED.into_response(),
     };
+    let mut errors = vec![];
     let agents = match state.agent_manager.get_agents_for_user(user_id).await {
         Ok(agents) => agents,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        Err(e) => {
+            tracing::warn!("Failed to fetch agents for user: {}", e);
+            errors.push(Error::internal_error("Failed to fetch agents for user"));
+            vec![]
+        }
     };
-    pages::agents(&auth_session, agents).into_response()
+    pages::agents(&auth_session, agents)
+        .with_errors(errors)
+        .render()
+        .into_response()
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -55,7 +65,12 @@ async fn new_agent_page(
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to get system token: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return error_page(
+                Error::internal_error("Failed to get system token"),
+                &auth_session,
+            )
+            .render()
+            .into_response();
         }
     };
 
@@ -69,11 +84,18 @@ async fn new_agent_page(
     match state.tournament_manager.list_images(request).await {
         Err(e) => {
             tracing::error!("Error getting list of user images: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            return error_page(
+                Error::internal_error("Error getting list of user images"),
+                &auth_session,
+            )
+            .render()
+            .into_response();
         }
         Ok(response) => {
             let user_images = response.into_inner().images;
-            pages::new_agent_page(user_images, &auth_session).into_response()
+            pages::new_agent_page(user_images, &auth_session)
+                .render()
+                .into_response()
         }
     }
 }
@@ -83,7 +105,7 @@ async fn new_agent(
     State(state): State<AppState>,
     Form(form): Form<CreateAgentForm>,
 ) -> impl IntoResponse {
-    let user = if let Some(user) = auth_session.user {
+    let user = if let Some(user) = &auth_session.user {
         user
     } else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -93,7 +115,12 @@ async fn new_agent(
         Ok(n) => n,
         Err(e) => {
             tracing::warn!("Invalid agent name: {}", e);
-            return StatusCode::BAD_REQUEST.into_response();
+            return error_page(
+                Error::validation_error(&format!("Invalid agent name: {}", e)),
+                &auth_session,
+            )
+            .render()
+            .into_response();
         }
     };
 
@@ -101,7 +128,12 @@ async fn new_agent(
         Ok(url) => url,
         Err(e) => {
             tracing::warn!("Invalid image URL: {}", e);
-            return StatusCode::BAD_REQUEST.into_response();
+            return error_page(
+                Error::validation_error(&format!("Invalid image URL: {}", e)),
+                &auth_session,
+            )
+            .render()
+            .into_response();
         }
     };
 
@@ -113,7 +145,12 @@ async fn new_agent(
         Ok(_) => Redirect::to("/agents").into_response(),
         Err(e) => {
             tracing::error!("Failed to create agent: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            error_page(
+                Error::internal_error("Failed to create agent"),
+                &auth_session,
+            )
+            .render()
+            .into_response()
         }
     }
 }
