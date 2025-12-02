@@ -76,6 +76,12 @@ impl AsRef<str> for AgentName {
     }
 }
 
+impl Into<String> for AgentName {
+    fn into(self) -> String {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, FromRow, serde::Serialize)]
 pub struct Agent {
     pub id: AgentId,

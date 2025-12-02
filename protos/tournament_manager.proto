@@ -42,6 +42,7 @@ message CreateAgentRequest {
   RegistryCredentials registry_credentials = 2;
   // Image containing agent implementation
   AgentImage image = 3;
+  UserId owner = 4;
 }
 message CreateAgentResponse {}
 

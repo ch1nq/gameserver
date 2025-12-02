@@ -102,7 +102,7 @@ async fn new_agent_page(
 
 async fn new_agent(
     auth_session: AuthSession,
-    State(state): State<AppState>,
+    State(mut state): State<AppState>,
     Form(form): Form<CreateAgentForm>,
 ) -> impl IntoResponse {
     let user = if let Some(user) = &auth_session.user {
@@ -137,6 +137,39 @@ async fn new_agent(
         }
     };
 
+    let system_token = match state.token_manager.get_system_token().await {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to get system token: {}", e);
+            return error_page(
+                Error::internal_error("Failed to get system token"),
+                &auth_session,
+            )
+            .render()
+            .into_response();
+        }
+    };
+    let request = tournament_mananger::CreateAgentRequest {
+        name: name.clone().into(),
+        registry_credentials: Some(tournament_mananger::RegistryCredentials {
+            token: system_token.value.into(),
+        }),
+        image: Some(tournament_mananger::AgentImage {
+            image_url: image_url.to_string(),
+        }),
+        owner: Some(tournament_mananger::UserId { id: user.id }),
+    };
+
+    if let Err(status) = state.tournament_manager.create_agent(request).await {
+        tracing::error!("Failed to craete agent: {}", status);
+        return error_page(
+            Error::internal_error("Failed to craete agent"),
+            &auth_session,
+        )
+        .render()
+        .into_response();
+    };
+
     match state
         .agent_manager
         .create_agent(name, user.id, image_url)
@@ -144,9 +177,9 @@ async fn new_agent(
     {
         Ok(_) => Redirect::to("/agents").into_response(),
         Err(e) => {
-            tracing::error!("Failed to create agent: {}", e);
+            tracing::error!("Failed to create agent in db: {}", e);
             error_page(
-                Error::internal_error("Failed to create agent"),
+                Error::internal_error("Failed to create agent in db"),
                 &auth_session,
             )
             .render()
