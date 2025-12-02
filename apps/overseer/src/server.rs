@@ -36,7 +36,7 @@ impl TournamentManager for Overseer {
         &self,
         request: Request<CreateAgentRequest>,
     ) -> Result<Response<CreateAgentResponse>, Status> {
-        todo!()
+        Ok(Response::new(CreateAgentResponse {}))
     }
 
     async fn delete_agent(
@@ -50,6 +50,7 @@ impl TournamentManager for Overseer {
         &self,
         request: Request<UpdateAgentStateRequest>,
     ) -> Result<Response<UpdateAgentStateResponse>, Status> {
+        // test like a boss haha eks dee
         todo!()
     }
 
@@ -57,7 +58,7 @@ impl TournamentManager for Overseer {
         &self,
         request: Request<NewAgentVersionRequest>,
     ) -> Result<Response<NewAgentVersionResponse>, Status> {
-        todo!()
+        Ok(Response::new(NewAgentVersionResponse {}))
     }
 
     async fn list_images(

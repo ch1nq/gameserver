@@ -6,18 +6,23 @@ FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY apps ./apps
 COPY libs ./libs
-RUN cargo chef prepare --recipe-path recipe.json --bin overseer
+COPY protos ./protos
+RUN cargo chef prepare --recipe-path recipe.json
 
 
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 RUN apt-get update && apt-get install -y protobuf-compiler
-RUN cargo chef cook --release --recipe-path recipe.json --bin overseer
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo chef cook --release --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY apps ./apps
 COPY libs ./libs
 COPY protos ./protos
-RUN cargo build --release --bin overseer
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --release --bin overseer
 
 
 FROM debian:bookworm-slim AS runner

@@ -5,6 +5,7 @@ use tournament_mananger::tournament_manager_server::TournamentManagerServer;
 pub mod tournament_mananger {
     tonic::include_proto!("achtung.tournament");
 }
+pub mod fly_api;
 pub mod server;
 
 #[tokio::main]
