@@ -15,7 +15,7 @@ message UserId {
 }
 
 message AgentId {
-  int64 id = 1;
+  string id = 1;
 }
 
 // AgentState indicates if agent is in the active tournament roster
@@ -44,7 +44,9 @@ message CreateAgentRequest {
   AgentImage image = 3;
   UserId owner = 4;
 }
-message CreateAgentResponse {}
+message CreateAgentResponse {
+  AgentId agent_id = 1;
+}
 
 // Delete an agent entirely from the tournament system 
 message DeleteAgentRequest {

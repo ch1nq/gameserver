@@ -130,6 +130,34 @@ impl TokenManager {
         Ok(jwt)
     }
 
+    /// Create a new JWT token that has pull access to the given image repository
+    pub async fn get_system_deploy_token_for(
+        &self,
+        repository: &str,
+    ) -> Result<RegistryJwtToken, TokenManagerError> {
+        let access_grants = ValidatedAccess::new(vec![Access::new(
+            "repository".to_string(),
+            repository.to_string(),
+            vec!["pull".to_string()],
+        )]);
+
+        let jwt = registry_auth::auth::generate_docker_jwt::<Self>(
+            SYSTEM_USERNAME.to_string(),
+            access_grants,
+            self.registry_auth_config.registry_service.clone(),
+            &self.registry_auth_config,
+        )
+        .map_err(|_| TokenManagerError::FailedToGenerateSystemToken)?;
+
+        tracing::info!(
+            "Generated deploy token for repository '{}', expires at {}",
+            repository,
+            jwt.expires_at
+        );
+
+        Ok(jwt)
+    }
+
     /// List all active (non-revoked) tokens for a user
     pub async fn list_tokens(
         &self,

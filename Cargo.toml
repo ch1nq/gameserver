@@ -34,10 +34,12 @@ sqlx = { version = "0.8", features = ["postgres", "time", "runtime-tokio"] }
 http = "1.0"
 hyper = "1.0"
 reqwest = { version = "0.12", features = ["json"] }
+governor = "0.10.2"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
+
 
 # Authentication & Crypto
 bcrypt = "0.17"
@@ -57,6 +59,7 @@ rand = "0.9"
 thiserror = "2.0"
 time = "0.3"
 uuid = { version = "1.18", features = ["v4"] }
+nonzero_ext = "0.3.0"
 
 # Logging
 log = "0.4"

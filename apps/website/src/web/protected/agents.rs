@@ -124,7 +124,7 @@ async fn new_agent(
         }
     };
 
-    let image_url = match ImageUrl::new(form.image) {
+    let image_url = match ImageUrl::new(format!("user-{}/{}", user.id, form.image)) {
         Ok(url) => url,
         Err(e) => {
             tracing::warn!("Invalid image URL: {}", e);
@@ -137,7 +137,12 @@ async fn new_agent(
         }
     };
 
-    let system_token = match state.token_manager.get_system_token().await {
+    let image_repository = image_url.repository();
+    let system_token = match state
+        .token_manager
+        .get_system_deploy_token_for(&image_repository)
+        .await
+    {
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to get system token: {}", e);

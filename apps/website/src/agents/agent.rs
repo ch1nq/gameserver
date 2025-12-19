@@ -10,7 +10,7 @@ pub enum AgentStatus {
 
 pub type AgentId = i64;
 
-/// Container image URL (e.g., "ghcr.io/user/agent:latest")
+/// Container image URL (e.g., "ghcr.io/user/agent:latest", "http://localhost:5000/user-1234/agent:v1")
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ImageUrl(String);
 
@@ -21,6 +21,14 @@ impl ImageUrl {
             return Err("Image URL cannot be empty".to_string());
         }
         Ok(Self(s))
+    }
+
+    pub fn repository(&self) -> String {
+        self.0
+            .split_once(':')
+            .map(|(repo, _)| repo)
+            .unwrap_or(&self.0)
+            .to_string()
     }
 }
 

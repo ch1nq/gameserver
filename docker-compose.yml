@@ -10,11 +10,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U arcadio" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    # healthcheck:
+    #   test: [ "CMD-SHELL", "pg_isready -U arcadio" ]
+    #   interval: 5s
+    #   timeout: 5s
+    #   retries: 5
 
   registry:
     build:
@@ -33,11 +33,11 @@ services:
       - "5001:5001"
     volumes:
       - registry_data:/var/lib/registry
-    healthcheck:
-      test: [ "CMD", "sh", "-c", "wget --spider -S http://localhost:5001/v2/ 2>&1 | grep -q 'HTTP/1.1 [24]01'" ]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    # healthcheck:
+    #   test: [ "CMD", "sh", "-c", "wget --spider -S http://localhost:5001/v2/ 2>&1 | grep -q 'HTTP/1.1 [24]01'" ]
+    #   interval: 5s
+    #   timeout: 5s
+    #   retries: 3
 
   overseer:
     build:
@@ -48,16 +48,19 @@ services:
       HOST: "0.0.0.0"
       PORT: "50051"
       REGISTRY_URL: http://registry:5001
+      FLY_TOKEN: ${FLY_TOKEN}
+      FLY_SIMULATION_ORG: achtung
+      RUST_LOG: "debug"
     ports:
       - "50051:50051"
-    depends_on:
-      registry:
-        condition: service_healthy
-    healthcheck:
-      test: [ "CMD-SHELL", "nc -z localhost 50051 || exit 1" ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+    # depends_on:
+    #   registry:
+    #     condition: service_healthy
+    # healthcheck:
+    #   test: [ "CMD-SHELL", "nc -z localhost 50051 || exit 1" ]
+    #   interval: 90s
+    #   timeout: 5s
+    #   retries: 3
 
   website:
     build:
@@ -76,18 +79,18 @@ services:
       RUST_LOG: "website=debug,axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug,registry_auth=debug"
     ports:
       - "3000:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      overseer:
-        condition: service_started
-      registry:
-        condition: service_healthy
-    healthcheck:
-      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:3000/" ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
+    #   overseer:
+    #     condition: service_started
+    #   registry:
+    #     condition: service_healthy
+    # healthcheck:
+    #   test: [ "CMD", "wget", "--spider", "-q", "http://localhost:3000/" ]
+    #   interval: 90s
+    #   timeout: 5s
+    #   retries: 3
 
 volumes:
   postgres_data:

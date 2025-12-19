@@ -10,8 +10,10 @@ primary_region = 'arn'
 dockerfile = '../apps/overseer/Dockerfile'
 
 [env]
+HOST = "0.0.0.0"
 PORT = '50051'
 REGISTRY_URL = 'https://achtung-registry.fly.dev'
+FLY_SIMULATION_ORG = "achtung"
 
 [[services]]
 protocol = "tcp"
