@@ -1,5 +1,6 @@
 [package]
 name = "registry-auth"
+description = "Docker registry token authentication"
 version = "0.1.0"
 edition = "2024"
 publish = false

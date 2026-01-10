@@ -1,5 +1,6 @@
 [package]
 name = "achtung-api-internal"
+description = "Internal API definitions for the achtung platform"
 version = "0.1.0"
 edition = "2024"
 

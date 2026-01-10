@@ -1,5 +1,6 @@
 [package]
 name = "achtung-cli"
+description = "Command line interface for the achtung platform"
 version = "0.1.0"
 edition = "2024"
 
