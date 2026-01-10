@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-achtung-ui = { path = "../../libs/achtung-ui" }
+achtung-ui = { path = "../../libs/ui" }
 registry-auth = { path = "../../libs/registry-auth" }
 async-trait = { workspace = true }
 axum = { workspace = true }

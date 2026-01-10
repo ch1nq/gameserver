@@ -1,12 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "apps/website",
-    "apps/game-server",
-    "apps/overseer",
-    "libs/arcadio",
-    "libs/achtung-ui",
-    "libs/registry-auth",
+    "libs/*",
 ]
 
 [workspace.dependencies]
