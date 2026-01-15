@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "libs/*",
+    "apps/website",
 ]
 
 [workspace.dependencies]
@@ -16,6 +17,7 @@ prost = "0.13"
 
 # Web framework
 axum = "0.8"
+axum-extra = { version = "0.10", features = ["query"] }
 axum-login = "0.17"
 warp = { version = "0.3", features = ["websocket"] }
 tower = "0.5"

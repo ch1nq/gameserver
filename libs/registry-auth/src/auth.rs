@@ -101,9 +101,10 @@ pub struct RegistryJwtToken {
 pub struct TokenRequest {
     /// The service that hosts the resource (e.g., "achtung-registry.fly.dev")
     service: String,
-    /// Space-delimited scope(s) (e.g., "repository:user-123/myimage:push,pull")
+    /// Scope(s) for registry access. Can be specified multiple times in the query string.
+    /// Each scope has format "type:name:actions" (e.g., "repository:user-123/myimage:push,pull")
     #[serde(default)]
-    scope: Option<String>,
+    scope: Vec<String>,
     /// Client ID (optional)
     #[serde(default)]
     client_id: Option<String>,
@@ -309,7 +310,7 @@ fn extract_basic_auth(
 #[cfg(feature = "axum-integration")]
 pub async fn token_handler<R: RegistryAuth>(
     axum::extract::State((registry_auth, config)): axum::extract::State<(R, RegistryAuthConfig)>,
-    axum::extract::Query(params): axum::extract::Query<TokenRequest>,
+    axum_extra::extract::Query(params): axum_extra::extract::Query<TokenRequest>,
     headers: axum::http::HeaderMap,
 ) -> Result<axum::Json<TokenResponse>, RegistryAuthError> {
     info!(
@@ -337,7 +338,8 @@ pub async fn token_handler<R: RegistryAuth>(
         return Err(RegistryAuthError::InvalidCredentials);
     }
 
-    let reqeusted_access = RequestedAccess::parse_scopes(params.scope.as_deref().unwrap_or(""))?;
+    let scope_str = params.scope.join(" ");
+    let reqeusted_access = RequestedAccess::parse_scopes(&scope_str)?;
     let access_grants = reqeusted_access.validate_for_user::<R>(&user_id);
 
     let jwt = generate_docker_jwt::<R>(username, access_grants, params.service, &config)?;
