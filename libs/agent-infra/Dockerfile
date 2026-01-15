@@ -22,12 +22,12 @@ COPY libs ./libs
 COPY protos ./protos
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --bin overseer
+    cargo build --release --bin achtung-agent-infra
 
 
 FROM debian:bookworm-slim AS runner
 RUN apt-get update && \
     apt-get install -y openssl ca-certificates skopeo && \
     rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/overseer /usr/local/bin/
-ENTRYPOINT ["/usr/local/bin/overseer"]
+COPY --from=builder /app/target/release/achtung-agent-infra /usr/local/bin/
+ENTRYPOINT ["/usr/local/bin/achtung-agent-infra"]
