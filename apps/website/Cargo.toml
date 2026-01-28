@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 achtung-ui = { path = "../../libs/ui" }
+common = { path = "../../libs/common" }
 agent-infra = { path = "../../libs/agent-infra", package = "achtung-agent-infra" }
 coordinator = { path = "../../libs/coordinator" }
 registry-auth = { path = "../../libs/registry-auth" }

@@ -6,6 +6,7 @@ edition = "2024"
 
 [dependencies]
 agent-infra = { path = "../agent-infra", package = "achtung-agent-infra" }
+common = { path = "../common" }
 prost = { workspace = true }
 rand = { workspace = true }
 sqlx = { workspace = true }

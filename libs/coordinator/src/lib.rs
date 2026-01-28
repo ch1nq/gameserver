@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use agent_infra::{FlyMachineProvider, MachineError, MachineHandle, MachineProvider, SpawnConfig};
+use common::{AgentId, ImageUrl};
 use game_host::game_host_client::GameHostClient;
 use game_host::{AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest};
 use tokio::task::JoinHandle;
@@ -13,8 +14,8 @@ pub mod game_host {
 /// Agent info needed for a match
 #[derive(Debug, Clone)]
 pub struct AgentInfo {
-    pub id: i64,
-    pub image_url: String,
+    pub id: AgentId,
+    pub image_url: ImageUrl,
 }
 
 /// Trait for fetching active agents from the database
@@ -178,7 +179,7 @@ impl<R: AgentRepository + Clone + Send + Sync + 'static> GameCoordinator<R> {
     async fn spawn_agent(&self, agent: &AgentInfo) -> Result<MachineHandle, CoordinatorError> {
         // TODO: Get registry token for this agent's image
         let config = SpawnConfig {
-            image_url: agent.image_url.clone(),
+            image_url: agent.image_url.to_string(),
             registry_token: String::new(), // TODO: Get actual token
             env: std::collections::HashMap::new(),
         };
@@ -192,7 +193,7 @@ impl<R: AgentRepository + Clone + Send + Sync + 'static> GameCoordinator<R> {
     async fn run_game(
         &self,
         game_host: &MachineHandle,
-        agents: &[(i64, MachineHandle)],
+        agents: &[(AgentId, MachineHandle)],
     ) -> Result<GameResult, CoordinatorError> {
         // Wait a bit for the game host to start
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -286,7 +287,7 @@ impl<R: AgentRepository + Clone + Send + Sync + 'static> GameCoordinator<R> {
         }
     }
 
-    async fn cleanup(&self, game_host: &Option<MachineHandle>, agents: &[(i64, MachineHandle)]) {
+    async fn cleanup(&self, game_host: &Option<MachineHandle>, agents: &[(AgentId, MachineHandle)]) {
         // Destroy game host
         if let Some(handle) = game_host {
             if let Err(e) = self.machine_provider.destroy(handle).await {
@@ -306,13 +307,13 @@ impl<R: AgentRepository + Clone + Send + Sync + 'static> GameCoordinator<R> {
 /// Result of a completed game
 #[derive(Debug)]
 pub struct GameResult {
-    pub winner_agent_id: Option<i64>,
+    pub winner_agent_id: Option<AgentId>,
     pub placements: Vec<AgentPlacement>,
 }
 
 #[derive(Debug)]
 pub struct AgentPlacement {
-    pub agent_id: i64,
+    pub agent_id: AgentId,
     pub position: u32,
     pub score: u32,
 }

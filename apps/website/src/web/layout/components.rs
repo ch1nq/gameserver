@@ -1,15 +1,15 @@
 use crate::agents::agent::Agent;
 use crate::users::{AuthSession, User};
 use achtung_ui::error::Error;
-use maud::{DOCTYPE, Markup, Render, html};
+use maud::{html, Markup, Render, DOCTYPE};
 
 // Re-export components from the shared library for convenience
-pub use achtung_ui::Icon;
 pub use achtung_ui::alert;
 pub use achtung_ui::button;
 pub use achtung_ui::form;
 pub use achtung_ui::modal;
 pub use achtung_ui::table;
+pub use achtung_ui::Icon;
 
 pub struct Page<'a> {
     pub title: &'a str,
@@ -135,12 +135,13 @@ impl Render for Leaderboard {
                 @for agent in &self.agents {
                     (table::Row {
                         content: html! {
-                            (table::Cell { content: html! { (agent.name.as_ref()) }, is_primary: true })
+                            (table::Cell { content: html! { (&*agent.name) }, is_primary: true })
                         }
                     })
                 }
             },
             extra_classes: Some("w-full max-w-lg"),
-        }.render()
+        }
+        .render()
     }
 }

@@ -26,10 +26,10 @@ impl AgentManager {
             VALUES ($1, $2, $3, $4)
             RETURNING id
             "#,
-            name.as_ref(),
+            &*name,
             AgentStatus::Inactive as AgentStatus,
             user_id,
-            image_url.as_ref(),
+            &*image_url,
         )
         .fetch_one(&self.db_pool)
         .await?
@@ -170,7 +170,7 @@ impl AgentManager {
 
         Ok(agents
             .into_iter()
-            .map(|(id, image_url)| AgentInfo { id, image_url })
+            .map(|(id, image_url)| AgentInfo { id, image_url: image_url.into() })
             .collect())
     }
 }

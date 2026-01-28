@@ -1,7 +1,0 @@
-[package]
-name = "achtung-shared"
-description = "Shared types to be used across achtung crates"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]

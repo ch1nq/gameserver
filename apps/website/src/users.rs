@@ -10,7 +10,7 @@ use oauth2::{
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 
-pub type UserId = i64;
+pub use common::UserId;
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub struct User {

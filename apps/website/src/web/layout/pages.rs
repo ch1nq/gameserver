@@ -238,11 +238,11 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page {
     let rows = agents.iter().map(|agent| {
         components::table::Row {
             content: html! {
-                (components::table::Cell { content: html! { (agent.name.as_ref()) }, is_primary: true })
+                (components::table::Cell { content: html! { (&*agent.name) }, is_primary: true })
                 (components::table::Cell {
                     content: html! {
                         span class="text-gray-500 dark:text-gray-400 text-xs font-mono truncate max-w-xs" {
-                            (agent.image_url.as_ref())
+                            (&*agent.image_url)
                         }
                     },
                     is_primary: false
