@@ -1,0 +1,18 @@
+[package]
+name = "coordinator"
+description = "Game coordinator - orchestrates matches between agents"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+agent-infra = { path = "../agent-infra", package = "achtung-agent-infra" }
+prost = { workspace = true }
+rand = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+trait-variant = { workspace = true }
+tracing = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }

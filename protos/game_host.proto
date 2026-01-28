@@ -1,0 +1,92 @@
+syntax = "proto3";
+
+package achtung.gamehost;
+
+// GameHost service - used by the coordinator to control game execution
+service GameHost {
+  // Start a new game with the specified agents
+  rpc StartGame(StartGameRequest) returns (StartGameResponse);
+  
+  // Get the current status of the game
+  rpc GetStatus(GetStatusRequest) returns (GameStatus);
+}
+
+// Request to start a game
+message StartGameRequest {
+  // The agents participating in this game
+  repeated AgentEndpoint agents = 1;
+  
+  // Game configuration
+  GameConfig config = 2;
+}
+
+// Information about an agent's network endpoint
+message AgentEndpoint {
+  // Unique identifier for this agent (from the database)
+  int64 agent_id = 1;
+  
+  // Network address to connect to this agent (e.g., "[fd15:xxx::1]:50051")
+  string address = 2;
+}
+
+// Game configuration options
+message GameConfig {
+  // Tick rate in milliseconds (how often the game updates)
+  uint64 tick_rate_ms = 1;
+  
+  // Arena dimensions
+  uint32 arena_width = 2;
+  uint32 arena_height = 3;
+}
+
+message StartGameResponse {
+  // Unique identifier for this game session
+  string game_id = 1;
+}
+
+message GetStatusRequest {
+  string game_id = 1;
+}
+
+// Current status of the game
+message GameStatus {
+  GameState state = 1;
+  
+  // Only populated when state is FINISHED
+  GameResult result = 2;
+  
+  // Current tick number (for progress tracking)
+  uint64 current_tick = 3;
+}
+
+enum GameState {
+  GAME_STATE_UNSPECIFIED = 0;
+  
+  // Waiting for all agents to connect
+  WAITING_FOR_AGENTS = 1;
+  
+  // Game is currently running
+  RUNNING = 2;
+  
+  // Game has finished
+  FINISHED = 3;
+  
+  // Game failed to start or crashed
+  FAILED = 4;
+}
+
+// Result of a completed game
+message GameResult {
+  // Placement order of all agents (first = winner)
+  repeated AgentPlacement placements = 1;
+  
+  // Error message if game failed
+  string error = 2;
+}
+
+// Placement information for a single agent
+message AgentPlacement {
+  int64 agent_id = 1;
+  uint32 position = 2;  // 1 = first place, 2 = second, etc.
+  uint32 score = 3;     // Game-specific score
+}

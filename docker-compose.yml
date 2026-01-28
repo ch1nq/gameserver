@@ -26,7 +26,7 @@ services:
       REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /var/lib/registry
       REGISTRY_AUTH: token
       REGISTRY_AUTH_TOKEN_REALM: http://localhost:3000/registry/token
-      REGISTRY_AUTH_TOKEN_SERVICE: localhost:5001
+      REGISTRY_AUTH_TOKEN_SERVICE: registry:5001
       REGISTRY_AUTH_TOKEN_ISSUER: registry-auth
       REGISTRY_CERT: ${REGISTRY_CERT}
     ports:
@@ -49,11 +49,14 @@ services:
       PORT: "3000"
       DATABASE_URL: postgresql://arcadio:arcadio@postgres:5432/arcadio
       TOURNAMENT_MANAGER_URL: http://overseer:50051
-      REGISTRY_SERVICE: localhost:5001
-      REGISTRY_URL: http://localhost:5001
+      ENABLE_COORDINATOR: true
+      REGISTRY_SERVICE: registry:5001
+      REGISTRY_URL: http://registry:5001
       REGISTRY_PRIVATE_KEY: ${REGISTRY_PRIVATE_KEY}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      FLY_ORG: achtung
+      FLY_TOKEN: ${FLY_TOKEN}
       RUST_LOG: "website=debug,axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug,registry_auth=debug"
     ports:
       - "3000:3000"

@@ -6,6 +6,8 @@ publish = false
 
 [dependencies]
 achtung-ui = { path = "../../libs/ui" }
+agent-infra = { path = "../../libs/agent-infra", package = "achtung-agent-infra" }
+coordinator = { path = "../../libs/coordinator" }
 registry-auth = { path = "../../libs/registry-auth" }
 async-trait = { workspace = true }
 axum = { workspace = true }
@@ -16,6 +18,7 @@ http = { workspace = true }
 hyper = { workspace = true }
 maud = { workspace = true }
 oauth2 = { workspace = true }
+rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 sqlx = { workspace = true }

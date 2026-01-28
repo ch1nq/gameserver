@@ -1,4 +1,5 @@
 use crate::agents::agent::{Agent, AgentId, AgentName, AgentStatus, ImageUrl};
+use coordinator::{AgentInfo, AgentRepository};
 use sqlx::PgPool;
 
 #[derive(Debug, Clone)]
@@ -147,5 +148,35 @@ impl AgentManager {
         tracing::info!(agent_id = agent_id, "Deleted agent");
 
         Ok(())
+    }
+
+    /// Get N random active agents for a match
+    pub async fn get_random_active_agents(
+        &self,
+        count: usize,
+    ) -> Result<Vec<AgentInfo>, sqlx::Error> {
+        let agents = sqlx::query_as::<_, (i64, String)>(
+            r#"
+            SELECT id, image_url
+            FROM agents
+            WHERE status = 'active'
+            ORDER BY RANDOM()
+            LIMIT $1
+            "#,
+        )
+        .bind(count as i64)
+        .fetch_all(&self.db_pool)
+        .await?;
+
+        Ok(agents
+            .into_iter()
+            .map(|(id, image_url)| AgentInfo { id, image_url })
+            .collect())
+    }
+}
+
+impl AgentRepository for AgentManager {
+    async fn get_random_active_agents(&self, count: usize) -> Result<Vec<AgentInfo>, sqlx::Error> {
+        self.get_random_active_agents(count).await
     }
 }
