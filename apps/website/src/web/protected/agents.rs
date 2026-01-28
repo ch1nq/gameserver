@@ -1,5 +1,4 @@
 use crate::agents::agent::{AgentName, ImageUrl};
-use crate::tournament_mananger;
 use crate::users::AuthSession;
 use crate::web::app::AppState;
 use crate::web::layout::pages::{self, error_page};
@@ -52,7 +51,7 @@ struct CreateAgentForm {
 
 async fn new_agent_page(
     auth_session: AuthSession,
-    State(mut state): State<AppState>,
+    State(state): State<AppState>,
 ) -> impl IntoResponse {
     let user = if let Some(user) = &auth_session.user {
         user
@@ -74,35 +73,30 @@ async fn new_agent_page(
         }
     };
 
-    let credentials = tournament_mananger::RegistryCredentials {
-        token: system_token.value.into(),
-    };
-    let request = tournament_mananger::ListImagesRequest {
-        registry_credentials: Some(credentials),
-        user_id: Some(tournament_mananger::UserId { id: user.id }),
-    };
-    match state.tournament_manager.list_images(request).await {
+    // List images directly from registry
+    match state
+        .registry_client
+        .list_user_images(user.id, &system_token.value)
+        .await
+    {
         Err(e) => {
             tracing::error!("Error getting list of user images: {}", e);
-            return error_page(
+            error_page(
                 Error::internal_error("Error getting list of user images"),
                 &auth_session,
             )
             .render()
-            .into_response();
+            .into_response()
         }
-        Ok(response) => {
-            let user_images = response.into_inner().images;
-            pages::new_agent_page(user_images, &auth_session)
-                .render()
-                .into_response()
-        }
+        Ok(user_images) => pages::new_agent_page(user_images, &auth_session)
+            .render()
+            .into_response(),
     }
 }
 
 async fn new_agent(
     auth_session: AuthSession,
-    State(mut state): State<AppState>,
+    State(state): State<AppState>,
     Form(form): Form<CreateAgentForm>,
 ) -> impl IntoResponse {
     let user = if let Some(user) = &auth_session.user {
@@ -137,44 +131,7 @@ async fn new_agent(
         }
     };
 
-    let image_repository = image_url.repository();
-    let system_token = match state
-        .token_manager
-        .get_system_deploy_token_for(&image_repository)
-        .await
-    {
-        Ok(token) => token,
-        Err(e) => {
-            tracing::error!("Failed to get system token: {}", e);
-            return error_page(
-                Error::internal_error("Failed to get system token"),
-                &auth_session,
-            )
-            .render()
-            .into_response();
-        }
-    };
-    let request = tournament_mananger::CreateAgentRequest {
-        name: name.clone().into(),
-        registry_credentials: Some(tournament_mananger::RegistryCredentials {
-            token: system_token.value.into(),
-        }),
-        image: Some(tournament_mananger::AgentImage {
-            image_url: image_url.to_string(),
-        }),
-        owner: Some(tournament_mananger::UserId { id: user.id }),
-    };
-
-    if let Err(status) = state.tournament_manager.create_agent(request).await {
-        tracing::error!("Failed to craete agent: {}", status);
-        return error_page(
-            Error::internal_error("Failed to craete agent"),
-            &auth_session,
-        )
-        .render()
-        .into_response();
-    };
-
+    // Create agent in database only - infrastructure is provisioned per-match
     match state
         .agent_manager
         .create_agent(name, user.id, image_url)
@@ -182,9 +139,9 @@ async fn new_agent(
     {
         Ok(_) => Redirect::to("/agents").into_response(),
         Err(e) => {
-            tracing::error!("Failed to create agent in db: {}", e);
+            tracing::error!("Failed to create agent: {}", e);
             error_page(
-                Error::internal_error("Failed to create agent in db"),
+                Error::internal_error("Failed to create agent"),
                 &auth_session,
             )
             .render()

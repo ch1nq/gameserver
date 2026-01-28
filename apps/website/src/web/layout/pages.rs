@@ -1,12 +1,11 @@
 use crate::agents::agent::{Agent, AgentStatus};
 use crate::registry::RegistryToken;
-use crate::tournament_mananger::AgentImage;
 use crate::users::{AuthSession, User, UserId};
 use crate::web::layout::components::{self, Page};
 use achtung_ui::error::Error;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use maud::{Markup, PreEscaped, Render, html};
+use maud::{html, Markup, PreEscaped, Render};
 
 pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Page {
     Page {
@@ -310,10 +309,10 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page {
     }
 }
 
-pub fn new_agent_page(user_images: Vec<AgentImage>, session: &AuthSession) -> Page {
+pub fn new_agent_page(user_images: Vec<String>, session: &AuthSession) -> Page {
     let images = user_images
         .iter()
-        .map(|img| components::form::InputOption::from_value(&img.image_url))
+        .map(|img| components::form::InputOption::from_value(img))
         .collect();
     let form = components::form::ModalForm {
         action: "/agents/new",

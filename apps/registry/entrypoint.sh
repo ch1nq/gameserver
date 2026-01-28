@@ -8,7 +8,8 @@ mkdir -p /certs
 # This allows us to use Fly secrets instead of the [[files]] section
 if [ -n "$REGISTRY_CERT" ]; then
     echo "Writing public key from REGISTRY_CERT to /certs/public.crt"
-    printf '%s\n' "$REGISTRY_CERT" > /certs/public.crt
+    # Use printf with %b to interpret \n escape sequences
+    printf '%b\n' "$REGISTRY_CERT" > /certs/public.crt
     chmod 644 /certs/public.crt
     echo "Public key written successfully"
 else

@@ -6,29 +6,16 @@ type FlyAppName = String;
 type FlyNetwork = String;
 type FlyOrg = String;
 type FlyServiceName = String;
-type FlyMachineId = String;
 type FlyEnv = HashMap<String, String>;
 type ImageUrl = String;
 
 /// https://docs.machines.dev/#tag/apps/post/apps
 #[derive(Debug, Serialize, Deserialize)]
-
 struct CreateAppRequest {
     name: FlyAppName,
     org_slug: FlyOrg,
     network: FlyNetwork,
 }
-
-type CreateAppResponse = ();
-
-/// https://docs.machines.dev/#tag/apps/delete/apps/{app_name}
-#[derive(Debug, Serialize, Deserialize)]
-
-struct DestroyAppRequest {
-    name: FlyAppName,
-}
-
-type DestroyAppResponse = ();
 
 /// https://docs.machines.dev/#tag/apps/post/apps/{app_name}/ip_assignments
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,11 +27,9 @@ struct AssignIpRequest {
     ip_type: FlyIpType,
 }
 
-type AssignIpResponse = ();
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FlyIpType {
+pub(crate) enum FlyIpType {
     PrivateV6,
 }
 
@@ -55,7 +40,7 @@ struct CreateMachineRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FlyMachineConfig {
+pub(crate) struct FlyMachineConfig {
     pub image: ImageUrl,
     pub env: FlyEnv,
     pub auto_destroy: bool,
@@ -63,69 +48,40 @@ pub struct FlyMachineConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FlyRestartConfig {
-    /// When policy is on-failure, the maximum number of times to attempt to restart the Machine before letting it stop.
+pub(crate) struct FlyRestartConfig {
     pub max_retries: u32,
     pub policy: FlyRestartPolicy,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum FlyRestartPolicy {
-    /// Never try to restart a Machine automatically when its main process exits, whether that’s on purpose or on a crash.
+pub(crate) enum FlyRestartPolicy {
+    /// Never try to restart a Machine automatically.
     No,
-    /// Always restart a Machine automatically and never let it enter a stopped state, even when the main process exits cleanly.
+    /// Always restart a Machine automatically.
     Always,
-    /// Try up to MaxRetries times to automatically restart the Machine if it exits with a non-zero exit code. Default when no explicit policy is set, and for Machines with schedules.
+    /// Try up to MaxRetries times to restart on non-zero exit.
     OnFailure,
-    /// Starts the Machine only when there is capacity and the spot price is less than or equal to the bid price.
-    SpotPrice,
 }
 
-type CreateMachineResponse = ();
-
+/// Response from creating a machine
 /// https://docs.machines.dev/#tag/machines/post/apps/{app_name}/machines
-#[derive(Debug, Serialize, Deserialize)]
-struct StartMachineRequest {
-    // Path parameters
-    app_name: FlyAppName,
-    machine_id: FlyMachineId,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CreateMachineResponse {
+    pub id: String,
+    pub private_ip: String,
 }
-
-type StartMachineResponse = ();
-
-/// https://docs.machines.dev/#tag/machines/post/apps/{app_name}/machines
-#[derive(Debug, Serialize, Deserialize)]
-struct StopMachineRequest {
-    // Path parameters
-    app_name: FlyAppName,
-    machine_id: FlyMachineId,
-    // Body parameters
-    signal: StopSignal,
-    timeout: StopTimeout,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-enum StopSignal {
-    SIGTERM,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct StopTimeout {
-    #[serde(alias = "time.Duration")]
-    duration: u64,
-}
-
-type StopMachineResponse = ();
 
 #[derive(Debug, Clone)]
-pub enum FlyHost {
+pub(crate) enum FlyHost {
     Internal,
     Public,
 }
 
+pub(crate) type Error = String;
+
 #[derive(Debug)]
-pub struct FlyApi {
+pub(crate) struct FlyApi {
     token: String,
     rate_limiter: governor::RateLimiter<
         governor::state::NotKeyed,
@@ -136,8 +92,6 @@ pub struct FlyApi {
     http_client: reqwest::Client,
     api_hostname: String,
 }
-
-type Error = String;
 
 impl FlyApi {
     pub fn new(token: String, http_client: reqwest::Client, host: FlyHost) -> Self {
@@ -188,8 +142,34 @@ impl FlyApi {
         }
     }
 
-    pub async fn destroy_app(&self, request: DestroyAppRequest) -> DestroyAppResponse {
-        todo!()
+    pub async fn destroy_app(&self, app_name: FlyAppName) -> Result<(), Error> {
+        let jitter = governor::Jitter::new(Duration::ZERO, Duration::from_secs(2));
+        self.rate_limiter.until_ready_with_jitter(jitter).await;
+        tracing::debug!("Fly destroy_app: {}", app_name);
+        let host = format!("{}/v1/apps/{}", self.api_hostname, app_name);
+        let response = self
+            .http_client
+            .delete(&host)
+            .bearer_auth(&self.token)
+            .send()
+            .await;
+        tracing::info!("Fly destroy_app response: {:?}", response);
+        match response {
+            Ok(response) if response.status() == 202 => Ok(()),
+            Ok(response) => {
+                let status = response.status();
+                tracing::warn!(
+                    "Unexpected response status: {}. Message: {}",
+                    status,
+                    response.text().await.unwrap_or_default()
+                );
+                Err(format!("Unexpected response status: {}", status))
+            }
+            Err(err) => {
+                tracing::warn!("HTTP request failed: {}", err);
+                Err(format!("HTTP request failed: {}", err))
+            }
+        }
     }
 
     pub async fn assign_ip(
@@ -199,7 +179,7 @@ impl FlyApi {
         org_slug: FlyOrg,
         service_name: FlyServiceName,
         ip_type: FlyIpType,
-    ) -> Result<AssignIpResponse, Error> {
+    ) -> Result<(), Error> {
         let jitter = governor::Jitter::new(Duration::ZERO, Duration::from_secs(2));
         self.rate_limiter.until_ready_with_jitter(jitter).await;
         let request = AssignIpRequest {
@@ -255,7 +235,13 @@ impl FlyApi {
             .await;
         tracing::info!("Fly create_machine response: {:?}", response);
         match response {
-            Ok(response) if response.status() == 200 => Ok(()),
+            Ok(response) if response.status() == 200 => {
+                let machine: CreateMachineResponse = response
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse create_machine response: {}", e))?;
+                Ok(machine)
+            }
             Ok(response) => {
                 let status = response.status();
                 tracing::warn!(
@@ -270,12 +256,5 @@ impl FlyApi {
                 Err(format!("HTTP request failed: {}", err))
             }
         }
-    }
-
-    pub async fn start_machine(&self, request: StartMachineRequest) -> StartMachineResponse {
-        todo!()
-    }
-    pub async fn stop_machine(&self, request: StopMachineRequest) -> StopMachineResponse {
-        todo!()
     }
 }

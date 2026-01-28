@@ -1,22 +1,22 @@
 use crate::agents::manager::AgentManager;
-use crate::registry::TokenManager;
-use registry_auth::RegistryAuthConfig;
-use crate::tournament_mananger::tournament_manager_client::TournamentManagerClient;
+use crate::registry::{RegistryClient, TokenManager};
 use crate::web::layout::pages;
 use crate::{
     users::Backend,
     web::{auth, oauth, protected, public},
 };
+use agent_infra::FlyMachineProviderConfig;
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
     AuthManagerLayerBuilder, login_required,
     tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite},
 };
+use coordinator::{CoordinatorConfig, GameCoordinator};
 use oauth2::{AuthUrl, ClientId, ClientSecret, TokenUrl, basic::BasicClient};
+use registry_auth::RegistryAuthConfig;
 use sqlx::PgPool;
 use std::env;
 use time::Duration;
-use tonic::transport::Channel;
 use tower_http::services::ServeDir;
 use tower_sessions_sqlx_store::PostgresStore;
 
@@ -24,7 +24,7 @@ use tower_sessions_sqlx_store::PostgresStore;
 pub struct AppState {
     pub agent_manager: AgentManager,
     pub token_manager: TokenManager,
-    pub tournament_manager: TournamentManagerClient<Channel>,
+    pub registry_client: RegistryClient,
 }
 
 pub struct App {
@@ -42,12 +42,12 @@ impl App {
         let client_secret = env::var("GITHUB_CLIENT_SECRET")
             .map(ClientSecret::new)
             .expect("GITHUB_CLIENT_SECRET should be provided");
-        let tournament_manager_url =
-            env::var("TOURNAMENT_MANAGER_URL").expect("TOURNAMENT_MANAGER_URL should be provided");
         let private_key_pem = env::var("REGISTRY_PRIVATE_KEY")
             .expect("REGISTRY_PRIVATE_KEY must be set for registry authentication (RSA private key in PEM format)");
         let registry_service =
             env::var("REGISTRY_SERVICE").unwrap_or_else(|_| "achtung-registry.fly.dev".to_string());
+        let registry_url = env::var("REGISTRY_URL")
+            .unwrap_or_else(|_| format!("https://{}", registry_service));
 
         let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())?;
         let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())?;
@@ -63,12 +63,12 @@ impl App {
 
         let agent_manager = AgentManager::new(db.clone());
         let token_manager = TokenManager::new(db.clone(), registry_auth_config.clone());
-        let tournament_manager = TournamentManagerClient::connect(tournament_manager_url).await?;
+        let registry_client = RegistryClient::new(registry_url);
 
         let state = AppState {
             agent_manager,
             token_manager,
-            tournament_manager,
+            registry_client,
         };
 
         Ok(Self {
@@ -80,6 +80,11 @@ impl App {
     }
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+        // Optionally spawn the game coordinator
+        if env::var("ENABLE_COORDINATOR").is_ok() {
+            self.spawn_coordinator();
+        }
+
         // Static files service
         let static_service = ServeDir::new("static");
 
@@ -125,5 +130,48 @@ impl App {
         axum::serve(listener, app.into_make_service()).await?;
 
         Ok(())
+    }
+
+    fn spawn_coordinator(&self) {
+        let fly_token = env::var("FLY_TOKEN").expect("FLY_TOKEN required for coordinator");
+        let fly_org = env::var("FLY_ORG").expect("FLY_ORG required for coordinator");
+        let registry_url = env::var("REGISTRY_URL")
+            .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string());
+        let game_host_image = env::var("GAME_HOST_IMAGE")
+            .unwrap_or_else(|_| "achtung-game-host:latest".to_string());
+
+        let config = CoordinatorConfig {
+            machine_provider: FlyMachineProviderConfig {
+                fly_token,
+                fly_org,
+                fly_host: agent_infra::FlyMachineProviderHost::Internal,
+                registry_url,
+            },
+            game_host_image,
+            agents_per_game: env::var("AGENTS_PER_GAME")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(4),
+            tick_rate_ms: env::var("GAME_TICK_RATE_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(50),
+            arena_width: 1000,
+            arena_height: 1000,
+            game_interval: std::time::Duration::from_secs(
+                env::var("GAME_INTERVAL_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(10),
+            ),
+            poll_interval: std::time::Duration::from_secs(1),
+            game_host_grpc_port: 50051,
+            agent_grpc_port: 50052,
+        };
+
+        let coordinator = GameCoordinator::new(config, self.state.agent_manager.clone());
+        coordinator.spawn();
+
+        tracing::info!("Game coordinator spawned");
     }
 }

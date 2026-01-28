@@ -1,6 +1,8 @@
+pub mod client;
 pub mod manager;
 pub mod token;
 
+pub use client::RegistryClient;
 pub use manager::TokenManager;
 pub use token::{RegistryToken, TokenName};
 

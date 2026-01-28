@@ -47,6 +47,7 @@ sha2 = "0.10"
 
 # Utilities
 async-trait = "0.1"
+trait-variant = "0.1"
 base32 = "0.5"
 base64 = "0.22"
 clap = { version = "4.4", features = ["derive", "env"] }

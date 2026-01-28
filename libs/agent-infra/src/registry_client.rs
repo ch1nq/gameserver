@@ -1,4 +1,4 @@
-use serde::{Deserialize, de};
+use serde::Deserialize;
 
 #[derive(Debug, Clone)]
 pub struct RegistryClient {

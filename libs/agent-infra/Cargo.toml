@@ -1,22 +1,20 @@
 [package]
 name = "achtung-agent-infra"
-description = "Agent resource management"
+description = "Agent infrastructure management - machine provisioning for game matches"
 version = "0.1.0"
 edition = "2024"
+
+[lib]
+name = "agent_infra"
+path = "src/lib.rs"
 
 [dependencies]
 governor = { workspace = true }
 nonzero_ext = { workspace = true }
-prost = { workspace = true }
+rand = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sqlx = { workspace = true }
 tokio = { workspace = true }
-tonic = { workspace = true }
+trait-variant = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
-rand = { workspace = true }
-
-[build-dependencies]
-tonic-build = { workspace = true }
