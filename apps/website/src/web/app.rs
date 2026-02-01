@@ -135,12 +135,18 @@ impl App {
             .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string());
         let game_host_image =
             env::var("GAME_HOST_IMAGE").unwrap_or_else(|_| "achtung-game-host:latest".to_string());
+        let fly_api_host = match env::var("FLY_HOST").as_deref() {
+            Ok("internal") => agent_infra::FlyMachineProviderHost::Internal,
+            Ok("public") => agent_infra::FlyMachineProviderHost::Public,
+            Ok(_) => panic!("unknown host"),
+            Err(_) => agent_infra::FlyMachineProviderHost::Internal,
+        };
 
         let config = CoordinatorConfig {
             machine_provider: FlyMachineProviderConfig {
                 fly_token,
                 fly_org,
-                fly_host: agent_infra::FlyMachineProviderHost::Internal,
+                fly_host: fly_api_host,
                 registry_url,
             },
             game_host_image,

@@ -57,7 +57,7 @@ services:
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       FLY_ORG: achtung
       FLY_TOKEN: ${FLY_TOKEN}
-      RUST_LOG: "website=debug,axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug,registry_auth=debug"
+      FLY_HOST: public
     ports:
       - "3000:3000"
     # depends_on:

@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 FROM debian:bookworm-slim AS runner
 RUN apt-get update && \
-    apt-get install -y openssl ca-certificates && \
+    apt-get install -y openssl ca-certificates skopeo && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/website /usr/local/bin/
 ENTRYPOINT ["/usr/local/bin/website"]

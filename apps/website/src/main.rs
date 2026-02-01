@@ -7,7 +7,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
         .with(EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(
             |_| {
-                "website=debug,axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug,registry_auth=debug"
+                "website=debug,achtung-core=debug,coordinator=debug,axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug,registry-auth=debug"
                     .into()
             },
         )))
