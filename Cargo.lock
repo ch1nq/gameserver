@@ -18,11 +18,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "achtung-api-internal"
-version = "0.1.0"
-
-[[package]]
-name = "achtung-api-public"
+name = "achtung-api"
 version = "0.1.0"
 
 [[package]]
