@@ -3,11 +3,9 @@ use crate::registry::RegistryToken;
 use crate::users::{AuthSession, User, UserId};
 use crate::web::layout::components::{self, Page};
 use achtung_ui::error::Error;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use maud::{html, Markup, PreEscaped, Render};
 
-pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Page {
+pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
     Page {
         title: "Achtung! battle",
         content: html! {
@@ -21,7 +19,7 @@ pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Page {
     }
 }
 
-pub fn error_page(error: Error, session: &AuthSession) -> Page {
+pub fn error_page(error: Error, session: &AuthSession) -> Page<'_> {
     Page {
         title: "An error has occurred",
         content: error.as_content(),
@@ -234,7 +232,7 @@ fn new_token_modal() -> Markup {
     }.render()
 }
 
-pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page {
+pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
     let rows = agents.iter().map(|agent| {
         components::table::Row {
             content: html! {
@@ -309,7 +307,7 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page {
     }
 }
 
-pub fn new_agent_page(user_images: Vec<String>, session: &AuthSession) -> Page {
+pub fn new_agent_page(user_images: Vec<String>, session: &AuthSession) -> Page<'_> {
     let images = user_images
         .iter()
         .map(|img| components::form::InputOption::from_value(img))
@@ -354,19 +352,6 @@ pub fn not_found() -> Markup {
             div class="text-center mt-20" {
                 h1 { "Not Found" }
                 p { "The page you are looking for does not exist." }
-            }
-        },
-    }
-    .render()
-}
-
-pub fn unauthorized() -> Markup {
-    achtung_ui::base::Base {
-        title: "unauthorized",
-        content: html! {
-            div class="text-center mt-20" {
-                h1 { "Unauthorized" }
-                p { "Content does not exist or you are not authorized to view it." }
             }
         },
     }

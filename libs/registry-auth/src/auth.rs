@@ -106,8 +106,8 @@ pub struct TokenRequest {
     #[serde(default)]
     scope: Vec<String>,
     /// Client ID (optional)
-    #[serde(default)]
-    client_id: Option<String>,
+    #[serde(default, rename = "client_id")]
+    _client_id: Option<String>,
 }
 
 /// Docker registry token response

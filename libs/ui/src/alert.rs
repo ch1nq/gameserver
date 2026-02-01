@@ -1,6 +1,6 @@
 use maud::{Markup, Render, html};
 
-use crate::{Icon, icon};
+use crate::Icon;
 
 #[derive(Debug)]
 pub enum AlertSeverity {

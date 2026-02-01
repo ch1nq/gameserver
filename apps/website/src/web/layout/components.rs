@@ -1,7 +1,7 @@
 use crate::agents::agent::Agent;
 use crate::users::{AuthSession, User};
 use achtung_ui::error::Error;
-use maud::{html, Markup, Render, DOCTYPE};
+use maud::{html, Markup, Render};
 
 // Re-export components from the shared library for convenience
 pub use achtung_ui::alert;

@@ -1,5 +1,5 @@
 use super::token::{PlaintextToken, RegistryToken, TokenName};
-use crate::{registry::token::RegistryTokenHash, users::UserId};
+use crate::users::UserId;
 use registry_auth::auth::{Access, RegistryAuth, ValidatedAccess};
 use registry_auth::{RegistryAuthConfig, RegistryJwtToken};
 use sqlx::PgPool;
