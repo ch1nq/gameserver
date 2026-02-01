@@ -1,47 +1,16 @@
 use async_trait::async_trait;
 use axum::http::header::{AUTHORIZATION, USER_AGENT};
-use axum_login::{AuthUser, AuthnBackend};
+use axum_login::AuthnBackend;
 use oauth2::{
-    basic::{BasicClient, BasicRequestTokenError},
-    reqwest::{async_http_client, AsyncHttpClientError},
-    url::Url,
     AuthorizationCode, CsrfToken, TokenResponse,
+    basic::{BasicClient, BasicRequestTokenError},
+    reqwest::{AsyncHttpClientError, async_http_client},
+    url::Url,
 };
-use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, PgPool};
+use serde::Deserialize;
+use sqlx::PgPool;
 
-pub use common::UserId;
-
-#[derive(Clone, Serialize, Deserialize, FromRow)]
-pub struct User {
-    pub id: UserId,
-    pub username: String,
-    pub access_token: String,
-}
-
-// Here we've implemented `Debug` manually to avoid accidentally logging the
-// access token.
-impl std::fmt::Debug for User {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("User")
-            .field("id", &self.id)
-            .field("username", &self.username)
-            .field("access_token", &"[redacted]")
-            .finish()
-    }
-}
-
-impl AuthUser for User {
-    type Id = UserId;
-
-    fn id(&self) -> Self::Id {
-        self.id
-    }
-
-    fn session_auth_hash(&self) -> &[u8] {
-        self.access_token.as_bytes()
-    }
-}
+pub use achtung_core::users::{User, UserId};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Credentials {

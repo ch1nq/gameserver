@@ -40,9 +40,10 @@ impl RegistryClient {
             .bearer_auth(token)
             .send()
             .await
-            .map_err(|e| { 
+            .map_err(|e| {
                 tracing::info!("{}", e.to_string());
-                RegistryError::Connection(e.to_string())})?;
+                RegistryError::Connection(e.to_string())
+            })?;
 
         if !response.status().is_success() {
             return Err(RegistryError::Api(format!(

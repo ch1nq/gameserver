@@ -287,7 +287,11 @@ impl<R: AgentRepository + Clone + Send + Sync + 'static> GameCoordinator<R> {
         }
     }
 
-    async fn cleanup(&self, game_host: &Option<MachineHandle>, agents: &[(AgentId, MachineHandle)]) {
+    async fn cleanup(
+        &self,
+        game_host: &Option<MachineHandle>,
+        agents: &[(AgentId, MachineHandle)],
+    ) {
         // Destroy game host
         if let Some(handle) = game_host {
             if let Err(e) = self.machine_provider.destroy(handle).await {

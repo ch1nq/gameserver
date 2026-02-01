@@ -1,0 +1,24 @@
+[package]
+name = "achtung-core"
+description = "Core business logic for the Achtung platform"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+axum-login = ["dep:axum-login"]
+
+[dependencies]
+common = { path = "../common" }
+coordinator = { path = "../coordinator" }
+registry-auth = { path = "../registry-auth" }
+
+async-trait = { workspace = true }
+axum-login = { workspace = true, optional = true }
+bcrypt = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

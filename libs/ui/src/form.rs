@@ -1,6 +1,6 @@
-use maud::{Markup, Render, html};
-use crate::button::FormSubmit;
 use crate::Icon;
+use crate::button::FormSubmit;
+use maud::{Markup, Render, html};
 
 /// Creates a complete form wrapper with helper text, fields, and submit button
 pub struct ModalForm<'a> {

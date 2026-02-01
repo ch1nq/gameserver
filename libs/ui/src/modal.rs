@@ -1,6 +1,6 @@
-use maud::{Markup, Render, html};
-use crate::button::ModalTrigger;
 use crate::Icon;
+use crate::button::ModalTrigger;
+use maud::{Markup, Render, html};
 
 pub enum ModalSize {
     Small,

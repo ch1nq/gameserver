@@ -1,10 +1,10 @@
-use crate::agents::manager::AgentManager;
-use crate::registry::{RegistryClient, TokenManager};
 use crate::web::layout::pages;
 use crate::{
     users::Backend,
     web::{auth, oauth, protected, public},
 };
+use achtung_core::agents::manager::AgentManager;
+use achtung_core::registry::{RegistryClient, TokenManager};
 use agent_infra::FlyMachineProviderConfig;
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
@@ -46,20 +46,18 @@ impl App {
             .expect("REGISTRY_PRIVATE_KEY must be set for registry authentication (RSA private key in PEM format)");
         let registry_service =
             env::var("REGISTRY_SERVICE").unwrap_or_else(|_| "achtung-registry.fly.dev".to_string());
-        let registry_url = env::var("REGISTRY_URL")
-            .unwrap_or_else(|_| format!("https://{}", registry_service));
+        let registry_url =
+            env::var("REGISTRY_URL").unwrap_or_else(|_| format!("https://{}", registry_service));
 
         let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())?;
         let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())?;
         let client = BasicClient::new(client_id, Some(client_secret), auth_url, Some(token_url));
 
         let db_connection_str = std::env::var("DATABASE_URL").expect("Database url not defined");
-        let db = PgPool::connect(&db_connection_str).await?;
-        sqlx::migrate!().run(&db).await?;
+        let db = achtung_core::db::connect_and_migrate(&db_connection_str).await?;
 
-        let registry_auth_config =
-            RegistryAuthConfig::new(private_key_pem, registry_service)
-                .expect("Failed to create registry auth config");
+        let registry_auth_config = RegistryAuthConfig::new(private_key_pem, registry_service)
+            .expect("Failed to create registry auth config");
 
         let agent_manager = AgentManager::new(db.clone());
         let token_manager = TokenManager::new(db.clone(), registry_auth_config.clone());
@@ -105,10 +103,8 @@ impl App {
         let auth_layer = AuthManagerLayerBuilder::new(backend, session_layer).build();
 
         // Registry auth router
-        let registry_router = registry_auth::router(
-            self.state.token_manager.clone(),
-            self.registry_auth_config,
-        );
+        let registry_router =
+            registry_auth::router(self.state.token_manager.clone(), self.registry_auth_config);
 
         let services = protected::router()
             .route_layer(login_required!(Backend, login_url = "/login"))
@@ -137,8 +133,8 @@ impl App {
         let fly_org = env::var("FLY_ORG").expect("FLY_ORG required for coordinator");
         let registry_url = env::var("REGISTRY_URL")
             .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string());
-        let game_host_image = env::var("GAME_HOST_IMAGE")
-            .unwrap_or_else(|_| "achtung-game-host:latest".to_string());
+        let game_host_image =
+            env::var("GAME_HOST_IMAGE").unwrap_or_else(|_| "achtung-game-host:latest".to_string());
 
         let config = CoordinatorConfig {
             machine_provider: FlyMachineProviderConfig {

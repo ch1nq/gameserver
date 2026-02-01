@@ -1,9 +1,9 @@
 use axum::{
+    Router,
     extract::Query,
     http::StatusCode,
     response::{IntoResponse, Redirect},
     routing::get,
-    Router,
 };
 use axum_login::tower_sessions::Session;
 use maud::html;

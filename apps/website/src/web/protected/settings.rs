@@ -1,7 +1,7 @@
-use crate::registry::TokenName;
 use crate::users::AuthSession;
 use crate::web::app::AppState;
 use crate::web::layout::pages;
+use achtung_core::registry::TokenName;
 use achtung_ui::error::Error;
 use axum::{
     Form, Router,

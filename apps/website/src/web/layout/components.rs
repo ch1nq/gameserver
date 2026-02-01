@@ -1,15 +1,15 @@
-use crate::agents::agent::Agent;
 use crate::users::{AuthSession, User};
+use achtung_core::agents::agent::Agent;
 use achtung_ui::error::Error;
-use maud::{html, Markup, Render};
+use maud::{Markup, Render, html};
 
 // Re-export components from the shared library for convenience
+pub use achtung_ui::Icon;
 pub use achtung_ui::alert;
 pub use achtung_ui::button;
 pub use achtung_ui::form;
 pub use achtung_ui::modal;
 pub use achtung_ui::table;
-pub use achtung_ui::Icon;
 
 pub struct Page<'a> {
     pub title: &'a str,

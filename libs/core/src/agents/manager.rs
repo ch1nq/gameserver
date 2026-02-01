@@ -1,4 +1,5 @@
 use crate::agents::agent::{Agent, AgentId, AgentName, AgentStatus, ImageUrl};
+use crate::users::UserId;
 use coordinator::{AgentInfo, AgentRepository};
 use sqlx::PgPool;
 
@@ -17,7 +18,7 @@ impl AgentManager {
     pub async fn create_agent(
         &self,
         name: AgentName,
-        user_id: crate::users::UserId,
+        user_id: UserId,
         image_url: ImageUrl,
     ) -> Result<Agent, AgentManagerError> {
         let agent_id = sqlx::query!(
@@ -49,7 +50,7 @@ impl AgentManager {
     pub async fn activate_agent(
         &self,
         agent_id: AgentId,
-        user_id: crate::users::UserId,
+        user_id: UserId,
     ) -> Result<Agent, AgentManagerError> {
         let agent = sqlx::query_as!(
             Agent,
@@ -74,7 +75,7 @@ impl AgentManager {
     pub async fn deactivate_agent(
         &self,
         agent_id: AgentId,
-        user_id: crate::users::UserId,
+        user_id: UserId,
     ) -> Result<Agent, AgentManagerError> {
         let agent = sqlx::query_as!(
             Agent,
@@ -98,7 +99,7 @@ impl AgentManager {
 
     pub async fn get_agents_for_user(
         &self,
-        user_id: crate::users::UserId,
+        user_id: UserId,
     ) -> Result<Vec<Agent>, AgentManagerError> {
         let agents = sqlx::query_as!(
             Agent,
@@ -132,7 +133,7 @@ impl AgentManager {
     pub async fn delete_agent(
         &self,
         agent_id: AgentId,
-        user_id: crate::users::UserId,
+        user_id: UserId,
     ) -> Result<(), AgentManagerError> {
         sqlx::query!(
             r#"
@@ -170,7 +171,10 @@ impl AgentManager {
 
         Ok(agents
             .into_iter()
-            .map(|(id, image_url)| AgentInfo { id, image_url: image_url.into() })
+            .map(|(id, image_url)| AgentInfo {
+                id,
+                image_url: image_url.into(),
+            })
             .collect())
     }
 }

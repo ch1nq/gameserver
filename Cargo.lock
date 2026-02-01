@@ -26,6 +26,25 @@ name = "achtung-cli"
 version = "0.1.0"
 
 [[package]]
+name = "achtung-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum-login",
+ "bcrypt",
+ "common",
+ "coordinator",
+ "registry-auth",
+ "reqwest 0.12.28",
+ "serde",
+ "sqlx",
+ "thiserror 2.0.18",
+ "time",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "achtung-ranking"
 version = "0.1.0"
 
@@ -4013,19 +4032,14 @@ name = "website"
 version = "0.1.0"
 dependencies = [
  "achtung-agent-infra",
+ "achtung-core",
  "achtung-ui",
  "async-trait",
  "axum 0.8.8",
  "axum-login",
- "base64 0.22.1",
- "bcrypt",
- "common",
  "coordinator",
- "http 1.4.0",
- "hyper 1.8.1",
  "maud",
  "oauth2",
- "rand 0.9.2",
  "registry-auth",
  "reqwest 0.12.28",
  "serde",
@@ -4033,12 +4047,10 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tokio",
- "tower 0.5.3",
  "tower-http",
  "tower-sessions-sqlx-store",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]

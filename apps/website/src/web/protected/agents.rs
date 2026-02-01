@@ -1,7 +1,7 @@
-use crate::agents::agent::{AgentName, ImageUrl};
 use crate::users::AuthSession;
 use crate::web::app::AppState;
 use crate::web::layout::pages::{self, error_page};
+use achtung_core::agents::agent::{AgentName, ImageUrl};
 use achtung_ui::error::Error;
 use axum::{
     Form, Router,
