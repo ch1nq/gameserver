@@ -4,7 +4,7 @@ use achtung_core::agents::agent::{Agent, AgentStatus};
 use achtung_core::api_tokens::ApiToken;
 use achtung_core::registry::RegistryToken;
 use achtung_ui::error::Error;
-use maud::{html, Markup, PreEscaped, Render};
+use maud::{Markup, PreEscaped, Render, html};
 
 pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
     Page {

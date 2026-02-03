@@ -3,8 +3,8 @@ use reqwest::Client;
 use serde::de::DeserializeOwned;
 
 use crate::{
-    Agent, ApiError, ApiToken, CreateAgentRequest, CreateTokenRequest, CreateTokenResponse, GameApi,
-    routes,
+    Agent, ApiError, ApiToken, CreateAgentRequest, CreateTokenRequest, CreateTokenResponse,
+    GameApi, routes,
 };
 
 pub struct HttpClient {
@@ -132,7 +132,10 @@ impl GameApi for HttpClient {
 
     async fn deactivate_agent(&self, id: AgentId) -> Result<Agent, ApiError> {
         let response = self
-            .auth(self.client.post(self.url(&routes::agent_deactivate_path(id))))
+            .auth(
+                self.client
+                    .post(self.url(&routes::agent_deactivate_path(id))),
+            )
             .send()
             .await
             .map_err(|e| ApiError::Internal(e.to_string()))?;

@@ -3,12 +3,12 @@ use crate::auth::ApiAuth;
 use crate::error::ApiError;
 use achtung_core::agents::agent::{AgentName, ImageUrl};
 use api_types::{CreateAgentRequest, routes};
-use common::AgentId;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use common::AgentId;
 use std::str::FromStr;
 
 pub fn router() -> Router<ApiState> {
