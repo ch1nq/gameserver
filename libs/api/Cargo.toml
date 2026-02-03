@@ -1,7 +1,16 @@
 [package]
 name = "achtung-api"
-description = "API definitions for the achtung platform"
+description = "JSON API routes for the Achtung platform"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+achtung-core = { path = "../core" }
+api-types = { path = "../api-types", package = "achtung-api-types" }
+common = { path = "../common" } 
+axum = { workspace = true }
+base64 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

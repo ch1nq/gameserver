@@ -27,7 +27,7 @@ impl RegistryClient {
     /// Returns a list of image names (without the namespace prefix).
     pub async fn list_user_images(
         &self,
-        user_id: i64,
+        user_id: common::UserId,
         token: &str,
     ) -> Result<Vec<String>, RegistryError> {
         let namespace = format!("user-{}/", user_id);

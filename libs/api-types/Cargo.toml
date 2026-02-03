@@ -1,0 +1,17 @@
+[package]
+name = "achtung-api-types"
+description = "Shared API contract types for the Achtung platform"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+client = ["reqwest"]
+
+[dependencies]
+common = { path = "../common" }
+reqwest = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+trait-variant = { workspace = true }

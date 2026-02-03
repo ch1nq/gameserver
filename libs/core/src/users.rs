@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{FromRow, PgPool};
 
 pub use common::UserId;
 
@@ -21,8 +21,27 @@ impl std::fmt::Debug for User {
             .finish()
     }
 }
-#[cfg(feature = "axum-login")]
 
+#[derive(Debug, Clone)]
+pub struct UserManager {
+    db_pool: PgPool,
+}
+
+impl UserManager {
+    pub fn new(db_pool: PgPool) -> Self {
+        Self { db_pool }
+    }
+
+    /// Look up a user by ID.
+    pub async fn get_user(&self, user_id: UserId) -> Result<Option<User>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&self.db_pool)
+            .await
+    }
+}
+
+#[cfg(feature = "axum-login")]
 impl axum_login::AuthUser for User {
     type Id = UserId;
 

@@ -1,7 +1,7 @@
 use crate::users::AuthSession;
 use crate::web::app::AppState;
 use crate::web::layout::pages::{self, error_page};
-use achtung_core::agents::agent::{AgentName, ImageUrl};
+use achtung_core::agents::agent::{AgentId, AgentName, ImageUrl};
 use achtung_ui::error::Error;
 use axum::{
     Form, Router,
@@ -153,7 +153,7 @@ async fn new_agent(
 async fn activate_agent(
     auth_session: AuthSession,
     State(state): State<AppState>,
-    Path(agent_id): Path<i64>,
+    Path(agent_id): Path<AgentId>,
 ) -> impl IntoResponse {
     let user = if let Some(user) = auth_session.user {
         user
@@ -170,7 +170,7 @@ async fn activate_agent(
 async fn deactivate_agent(
     auth_session: AuthSession,
     State(state): State<AppState>,
-    Path(agent_id): Path<i64>,
+    Path(agent_id): Path<AgentId>,
 ) -> impl IntoResponse {
     let user = if let Some(user) = auth_session.user {
         user
@@ -191,7 +191,7 @@ async fn deactivate_agent(
 async fn delete_agent(
     auth_session: AuthSession,
     State(state): State<AppState>,
-    Path(agent_id): Path<i64>,
+    Path(agent_id): Path<AgentId>,
 ) -> impl IntoResponse {
     let user = if let Some(user) = auth_session.user {
         user

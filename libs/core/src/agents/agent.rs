@@ -10,3 +10,15 @@ pub struct Agent {
     pub status: AgentStatus,
     pub image_url: ImageUrl,
 }
+
+impl From<Agent> for api_types::Agent {
+    fn from(a: Agent) -> Self {
+        Self {
+            id: a.id,
+            name: a.name,
+            user_id: a.user_id,
+            status: a.status,
+            image_url: a.image_url,
+        }
+    }
+}

@@ -5,6 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+achtung-api = { path = "../../libs/api" }
 achtung-core = { path = "../../libs/core", features = ["axum-login"] }
 achtung-ui = { path = "../../libs/ui" }
 agent-infra = { path = "../../libs/agent-infra", package = "achtung-agent-infra" }

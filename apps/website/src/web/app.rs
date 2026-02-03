@@ -3,8 +3,11 @@ use crate::{
     users::Backend,
     web::{auth, oauth, protected, public},
 };
+use achtung_api::ApiState;
 use achtung_core::agents::manager::AgentManager;
+use achtung_core::api_tokens::ApiTokenManager;
 use achtung_core::registry::{RegistryClient, TokenManager};
+use achtung_core::users::UserManager;
 use agent_infra::FlyMachineProviderConfig;
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
@@ -23,6 +26,7 @@ use tower_sessions_sqlx_store::PostgresStore;
 #[derive(Clone)]
 pub struct AppState {
     pub agent_manager: AgentManager,
+    pub api_token_manager: ApiTokenManager,
     pub token_manager: TokenManager,
     pub registry_client: RegistryClient,
 }
@@ -31,6 +35,7 @@ pub struct App {
     db: PgPool,
     client: BasicClient,
     state: AppState,
+    api_state: ApiState,
     registry_auth_config: RegistryAuthConfig,
 }
 
@@ -59,12 +64,23 @@ impl App {
         let registry_auth_config = RegistryAuthConfig::new(private_key_pem, registry_service)
             .expect("Failed to create registry auth config");
 
+        let user_manager = UserManager::new(db.clone());
         let agent_manager = AgentManager::new(db.clone());
+        let api_token_manager = ApiTokenManager::new(db.clone());
         let token_manager = TokenManager::new(db.clone(), registry_auth_config.clone());
         let registry_client = RegistryClient::new(registry_url);
 
         let state = AppState {
+            agent_manager: agent_manager.clone(),
+            api_token_manager: api_token_manager.clone(),
+            token_manager: token_manager.clone(),
+            registry_client: registry_client.clone(),
+        };
+
+        let api_state = ApiState {
+            user_manager,
             agent_manager,
+            api_token_manager,
             token_manager,
             registry_client,
         };
@@ -73,6 +89,7 @@ impl App {
             db,
             client,
             state,
+            api_state,
             registry_auth_config,
         })
     }
@@ -106,6 +123,9 @@ impl App {
         let registry_router =
             registry_auth::router(self.state.token_manager.clone(), self.registry_auth_config);
 
+        // API router (stateless Basic auth, no session layer)
+        let api_router = achtung_api::router().with_state(self.api_state);
+
         let services = protected::router()
             .route_layer(login_required!(Backend, login_url = "/login"))
             .merge(public::router())
@@ -116,6 +136,7 @@ impl App {
             .layer(auth_layer);
 
         let app = axum::Router::new()
+            .nest("/api/v1", api_router)
             .nest_service("/static", static_service)
             .fallback_service(fallback_service)
             .merge(services);

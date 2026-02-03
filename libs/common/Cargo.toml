@@ -1,6 +1,6 @@
 [package]
 name = "common"
-description = "Common types shared across Arcadio crates"
+description = "Common types shared across Achtung crates"
 version = "0.1.0"
 edition = "2024"
 

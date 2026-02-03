@@ -1,9 +1,10 @@
 use crate::users::{AuthSession, User, UserId};
 use crate::web::layout::components::{self, Page};
 use achtung_core::agents::agent::{Agent, AgentStatus};
+use achtung_core::api_tokens::ApiToken;
 use achtung_core::registry::RegistryToken;
 use achtung_ui::error::Error;
-use maud::{Markup, PreEscaped, Render, html};
+use maud::{html, Markup, PreEscaped, Render};
 
 pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
     Page {
@@ -61,6 +62,7 @@ pub fn settings<'a>(
     session: &'a AuthSession,
     user: &'a User,
     tokens: Vec<RegistryToken>,
+    api_tokens: Vec<ApiToken>,
 ) -> Page<'a> {
     Page {
         title: "Settings",
@@ -78,49 +80,30 @@ pub fn settings<'a>(
                 }
 
                 // Deploy tokens section
-                div {
-                    h2 class="text-xl font-semibold mb-4" { "Deploy Tokens" }
-                    (components::form::HelperText { text: "Deploy tokens allow you to push Docker images to the Arcadio registry. Keep your tokens secure and never share them publicly." })
+                (token_section(
+                    "Deploy Tokens",
+                    "Deploy tokens allow you to push Docker images to the Arcadio registry. Keep your tokens secure and never share them publicly.",
+                    "No tokens yet. Create your first token to start deploying agents.",
+                    "/settings/tokens",
+                    &tokens.iter().map(|t| TokenRow { id: t.id, name: &t.name, created_at: &t.created_at }).collect::<Vec<_>>(),
+                    "new-deploy-token-modal",
+                    "Create Deploy Token",
+                    "/settings/tokens/new",
+                    "Create a new deploy token for pushing Docker images. You can have up to 10 active tokens.",
+                ))
 
-                    (components::table::Table {
-                        headers: vec!["Name", "Created", "Actions"],
-                        rows: html! {
-                            @if tokens.is_empty() {
-                                (components::table::EmptyRow { colspan: 3, message: "No tokens yet. Create your first token to start deploying agents." })
-                            } @else {
-                                @for token in tokens {
-                                    (components::table::Row {
-                                        content: html! {
-                                            (components::table::Cell { content: html! { (token.name) }, is_primary: true })
-                                            @let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
-                                            (components::table::Cell {
-                                                content: html! {
-                                                    (token.created_at.format(&format).unwrap_or_else(|_| "Invalid date".to_string()))
-                                                },
-                                                is_primary: false
-                                            })
-                                            (components::table::Cell {
-                                                content: html! {
-                                                    form method="post" action=(format!("/settings/tokens/{}/revoke", token.id)) onsubmit="return confirm('Are you sure you want to revoke this token? This action cannot be undone.');" {
-                                                        button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" {
-                                                            "Revoke"
-                                                        }
-                                                    }
-                                                },
-                                                is_primary: false
-                                            })
-                                        }
-                                    })
-                                }
-                            }
-                        },
-                        extra_classes: Some("mb-4"),
-                    })
-
-                    div class="flex justify-end" {
-                        (new_token_modal())
-                    }
-                }
+                // API tokens section
+                (token_section(
+                    "API Tokens",
+                    "API tokens allow you to access the Achtung API from the CLI or other tools. Keep your tokens secure.",
+                    "No API tokens yet. Create one to use the CLI.",
+                    "/settings/api-tokens",
+                    &api_tokens.iter().map(|t| TokenRow { id: t.id, name: &t.name, created_at: &t.created_at }).collect::<Vec<_>>(),
+                    "new-api-token-modal",
+                    "Create API Token",
+                    "/settings/api-tokens/new",
+                    "Create a new API token for CLI and API access. You can have up to 10 active tokens.",
+                ))
             }
         },
         session,
@@ -131,6 +114,48 @@ pub fn settings<'a>(
 pub fn token_created(
     user_id: UserId,
     plaintext_token: String,
+    auth_session: &AuthSession,
+) -> Markup {
+    token_created_page(
+        "Token created successfully!",
+        "Your deploy token has been created. Use this token to authenticate when pushing Docker images to the Arcadio registry:",
+        &plaintext_token,
+        html! {
+            p class="font-medium mb-2" { "Docker login command:" }
+            code class="text-xs" {
+                "docker login achtung-registry.fly.dev -u user-" (user_id) " -p " (plaintext_token)
+            }
+        },
+        auth_session,
+    )
+}
+
+pub fn api_token_created(
+    user_id: UserId,
+    plaintext_token: String,
+    auth_session: &AuthSession,
+) -> Markup {
+    token_created_page(
+        "API Token created successfully!",
+        "Your API token has been created. Add it to your CLI config or use it as an environment variable:",
+        &plaintext_token,
+        html! {
+            p class="font-medium mb-2" { "CLI config (~/.config/achtung/config.toml):" }
+            code class="text-xs block bg-gray-100 dark:bg-gray-700 p-3 rounded-lg" {
+                "api_url = \"http://localhost:3000\"\n"
+                "user_id = " (user_id) "\n"
+                "api_token = \"" (plaintext_token) "\""
+            }
+        },
+        auth_session,
+    )
+}
+
+fn token_created_page(
+    title: &str,
+    description: &str,
+    plaintext_token: &str,
+    usage_snippet: Markup,
     auth_session: &AuthSession,
 ) -> Markup {
     let copy_token_script = PreEscaped(
@@ -159,13 +184,13 @@ pub fn token_created(
         script {(copy_token_script)}
         div class="flex flex-col gap-4" {
             h1 class="mb-3 text-2xl font-semibold tracking-tight text-heading leading-8" {
-                "Token created successfully!"
+                (title)
             }
 
             (components::alert::Alert::warning("Important!", "Make sure to copy your token now. You won't be able to see it again!"))
 
             p class="text-base leading-relaxed text-gray-500 dark:text-gray-400" {
-                "Your deploy token has been created. Use this token to authenticate when pushing Docker images to the Arcadio registry:"
+                (description)
             }
 
             div class="relative" {
@@ -180,10 +205,7 @@ pub fn token_created(
                 }
             }
 
-            p class="font-medium mb-2" { "Docker login command:" }
-            code class="text-xs" {
-                "docker login achtung-registry.fly.dev -u user-" (user_id) " -p " (plaintext_token)
-            }
+            (usage_snippet)
 
             div class="flex justify-end" {
                 a href="/settings" class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800" {
@@ -194,7 +216,7 @@ pub fn token_created(
     };
 
     Page {
-        title: "Token created successfully",
+        title,
         content,
         session: auth_session,
         errors: vec![],
@@ -202,17 +224,79 @@ pub fn token_created(
     .render()
 }
 
-fn new_token_modal() -> Markup {
+struct TokenRow<'a> {
+    id: i64,
+    name: &'a str,
+    created_at: &'a time::PrimitiveDateTime,
+}
+
+fn token_section(
+    title: &str,
+    description: &str,
+    empty_message: &str,
+    revoke_base_url: &str,
+    tokens: &[TokenRow],
+    modal_id: &str,
+    modal_title: &str,
+    modal_action: &str,
+    modal_helper_text: &str,
+) -> Markup {
+    html! {
+        div {
+            h2 class="text-xl font-semibold mb-4" { (title) }
+            (components::form::HelperText { text: description })
+
+            (components::table::Table {
+                headers: vec!["Name", "Created", "Actions"],
+                rows: html! {
+                    @if tokens.is_empty() {
+                        (components::table::EmptyRow { colspan: 3, message: empty_message })
+                    } @else {
+                        @for token in tokens {
+                            (components::table::Row {
+                                content: html! {
+                                    (components::table::Cell { content: html! { (token.name) }, is_primary: true })
+                                    @let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
+                                    (components::table::Cell {
+                                        content: html! {
+                                            (token.created_at.format(&format).unwrap_or_else(|_| "Invalid date".to_string()))
+                                        },
+                                        is_primary: false
+                                    })
+                                    (components::table::Cell {
+                                        content: html! {
+                                            form method="post" action=(format!("{}/{}/revoke", revoke_base_url, token.id)) onsubmit="return confirm('Are you sure you want to revoke this token? This action cannot be undone.');" {
+                                                button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" {
+                                                    "Revoke"
+                                                }
+                                            }
+                                        },
+                                        is_primary: false
+                                    })
+                                }
+                            })
+                        }
+                    }
+                },
+                extra_classes: Some("mb-4"),
+            })
+
+            div class="flex justify-end" {
+                (new_token_modal(modal_id, modal_title, modal_action, modal_helper_text))
+            }
+        }
+    }
+}
+
+fn new_token_modal(modal_id: &str, title: &str, action: &str, helper_text: &str) -> Markup {
     components::modal::WithTrigger {
-        modal_id: "new-token-modal",
+        modal_id,
         trigger_text: "Generate New Token",
-        title: "Create Deploy Token",
+        title,
         body: (components::form::ModalForm {
-            action: "/settings/tokens/new",
+            action,
             method: "post",
-            helper_text: Some(
-                "Create a new deploy token for pushing Docker images. You can have up to 10 active tokens.",
-            ),
+            helper_text: Some(helper_text),
             fields: html! {
                 div class="grid gap-4 mb-4 grid-cols-1" {
                     (components::form::TextInput {
@@ -226,10 +310,12 @@ fn new_token_modal() -> Markup {
             },
             submit_text: "Generate Token",
             submit_icon: Some(components::Icon::Plus),
-        }).render(),
+        })
+        .render(),
         footer: None,
         size: components::modal::ModalSize::Medium,
-    }.render()
+    }
+    .render()
 }
 
 pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
