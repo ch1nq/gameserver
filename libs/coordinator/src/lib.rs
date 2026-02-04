@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use agent_infra::{FlyMachineProvider, MachineError, MachineHandle, MachineProvider, SpawnConfig};
-use common::{AgentId, ImageUrl};
+use common::{AgentId, AgentInfo, AgentRepository, DeployTokenProvider};
 use game_host::game_host_client::GameHostClient;
 use game_host::{AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest};
 use tokio::task::JoinHandle;
@@ -9,20 +9,6 @@ use tokio::task::JoinHandle;
 // Generated from protos/game_host.proto
 pub mod game_host {
     tonic::include_proto!("achtung.gamehost");
-}
-
-/// Agent info needed for a match
-#[derive(Debug, Clone)]
-pub struct AgentInfo {
-    pub id: AgentId,
-    pub image_url: ImageUrl,
-}
-
-/// Trait for fetching active agents from the database
-#[trait_variant::make(AgentRepository: Send)]
-pub trait LocalAgentRepository {
-    /// Get N random active agents for a match
-    async fn get_random_active_agents(&self, count: usize) -> Result<Vec<AgentInfo>, sqlx::Error>;
 }
 
 /// Configuration for the game coordinator
@@ -58,19 +44,25 @@ pub struct CoordinatorConfig {
 }
 
 /// The game coordinator that orchestrates matches
-pub struct GameCoordinator<R: AgentRepository> {
+pub struct GameCoordinator {
     config: CoordinatorConfig,
     machine_provider: FlyMachineProvider,
-    agent_repo: R,
+    agent_repo: Box<dyn AgentRepository>,
+    token_provider: Box<dyn DeployTokenProvider>,
 }
 
-impl<R: AgentRepository + Clone + Send + Sync + 'static> GameCoordinator<R> {
-    pub fn new(config: CoordinatorConfig, agent_repo: R) -> Self {
+impl GameCoordinator {
+    pub fn new(
+        config: CoordinatorConfig,
+        agent_repo: Box<dyn AgentRepository>,
+        token_provider: Box<dyn DeployTokenProvider>,
+    ) -> Self {
         let machine_provider = FlyMachineProvider::new(config.machine_provider.clone());
         Self {
             config,
             machine_provider,
             agent_repo,
+            token_provider,
         }
     }
 
@@ -164,9 +156,21 @@ impl<R: AgentRepository + Clone + Send + Sync + 'static> GameCoordinator<R> {
     }
 
     async fn spawn_game_host(&self) -> Result<MachineHandle, CoordinatorError> {
+        let registry_token = self
+            .token_provider
+            .get_deploy_token(
+                self.config
+                    .game_host_image
+                    .rsplit_once(":")
+                    .map(|(img, _)| img)
+                    .unwrap_or(&self.config.game_host_image),
+            )
+            .await
+            .map_err(CoordinatorError::DeployToken)?;
+
         let config = SpawnConfig {
             image_url: self.config.game_host_image.clone(),
-            registry_token: String::new(), // Game host image is public or pre-deployed
+            registry_token,
             env: std::collections::HashMap::new(),
         };
 
@@ -177,10 +181,15 @@ impl<R: AgentRepository + Clone + Send + Sync + 'static> GameCoordinator<R> {
     }
 
     async fn spawn_agent(&self, agent: &AgentInfo) -> Result<MachineHandle, CoordinatorError> {
-        // TODO: Get registry token for this agent's image
+        let registry_token = self
+            .token_provider
+            .get_deploy_token(&agent.image_url)
+            .await
+            .map_err(CoordinatorError::DeployToken)?;
+
         let config = SpawnConfig {
             image_url: agent.image_url.to_string(),
-            registry_token: String::new(), // TODO: Get actual token
+            registry_token,
             env: std::collections::HashMap::new(),
         };
 
@@ -325,8 +334,9 @@ pub struct AgentPlacement {
 /// Errors that can occur during coordination
 #[derive(Debug)]
 pub enum CoordinatorError {
-    Database(sqlx::Error),
+    Database(Box<dyn std::error::Error + Send + Sync>),
     MachineSpawn(MachineError),
+    DeployToken(Box<dyn std::error::Error + Send + Sync>),
     Connection(String),
     GameHost(String),
 }
@@ -336,6 +346,7 @@ impl std::fmt::Display for CoordinatorError {
         match self {
             CoordinatorError::Database(e) => write!(f, "Database error: {}", e),
             CoordinatorError::MachineSpawn(e) => write!(f, "Failed to spawn machine: {}", e),
+            CoordinatorError::DeployToken(e) => write!(f, "Failed to get deploy token: {}", e),
             CoordinatorError::Connection(e) => write!(f, "Connection error: {}", e),
             CoordinatorError::GameHost(e) => write!(f, "Game host error: {}", e),
         }

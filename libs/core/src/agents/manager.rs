@@ -1,6 +1,6 @@
 use crate::agents::agent::{Agent, AgentId, AgentName, AgentStatus, ImageUrl};
 use crate::users::UserId;
-use coordinator::{AgentInfo, AgentRepository};
+use common::{AgentInfo, AgentRepository};
 use sqlx::PgPool;
 
 #[derive(Debug, Clone)]
@@ -179,8 +179,12 @@ impl AgentManager {
     }
 }
 
+#[async_trait::async_trait]
 impl AgentRepository for AgentManager {
-    async fn get_random_active_agents(&self, count: usize) -> Result<Vec<AgentInfo>, sqlx::Error> {
-        self.get_random_active_agents(count).await
+    async fn get_random_active_agents(
+        &self,
+        count: usize,
+    ) -> Result<Vec<AgentInfo>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.get_random_active_agents(count).await?)
     }
 }

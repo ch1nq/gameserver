@@ -195,7 +195,11 @@ impl App {
             agent_grpc_port: 50052,
         };
 
-        let coordinator = GameCoordinator::new(config, self.state.agent_manager.clone());
+        let coordinator = GameCoordinator::new(
+            config,
+            Box::new(self.state.agent_manager.clone()),
+            Box::new(self.state.registry_token_manager.clone()),
+        );
         coordinator.spawn();
 
         tracing::info!("Game coordinator spawned");

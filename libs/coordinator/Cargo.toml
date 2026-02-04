@@ -9,10 +9,8 @@ agent-infra = { path = "../agent-infra", package = "achtung-agent-infra" }
 common = { path = "../common" }
 prost = { workspace = true }
 rand = { workspace = true }
-sqlx = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
-trait-variant = { workspace = true }
 tracing = { workspace = true }
 
 [build-dependencies]

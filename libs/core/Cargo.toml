@@ -10,7 +10,6 @@ axum-login = ["dep:axum-login"]
 [dependencies]
 api-types = { path = "../api-types", package = "achtung-api-types" }
 common = { path = "../common" }
-coordinator = { path = "../coordinator" }
 registry-auth = { path = "../registry-auth" }
 
 async-trait = { workspace = true }
