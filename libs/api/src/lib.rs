@@ -6,7 +6,7 @@ mod tokens;
 
 use achtung_core::agents::manager::AgentManager;
 use achtung_core::api_tokens::ApiTokenManager;
-use achtung_core::registry::{RegistryClient, TokenManager};
+use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
 use axum::Router;
 
@@ -15,7 +15,7 @@ pub struct ApiState {
     pub user_manager: UserManager,
     pub agent_manager: AgentManager,
     pub api_token_manager: ApiTokenManager,
-    pub token_manager: TokenManager,
+    pub token_manager: RegistryTokenManager,
     pub registry_client: RegistryClient,
 }
 

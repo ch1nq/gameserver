@@ -8,7 +8,7 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
-pub struct TokenManager {
+pub struct RegistryTokenManager {
     db_pool: PgPool,
     system_token: Arc<RwLock<Option<RegistryJwtToken>>>,
     registry_auth_config: RegistryAuthConfig,
@@ -42,7 +42,7 @@ const MAX_TOKENS_PER_USER: i64 = 10;
 const BCRYPT_COST: u32 = 12;
 const SYSTEM_USERNAME: &str = "system";
 
-impl TokenManager {
+impl RegistryTokenManager {
     pub fn new(db_pool: PgPool, registry_auth_config: RegistryAuthConfig) -> Self {
         Self {
             db_pool,
@@ -260,7 +260,7 @@ impl TokenManager {
 }
 
 #[async_trait::async_trait]
-impl RegistryAuth for TokenManager {
+impl RegistryAuth for RegistryTokenManager {
     type UserId = UserId;
     type Token = String;
 

@@ -6,7 +6,7 @@ use crate::{
 use achtung_api::ApiState;
 use achtung_core::agents::manager::AgentManager;
 use achtung_core::api_tokens::ApiTokenManager;
-use achtung_core::registry::{RegistryClient, TokenManager};
+use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
 use agent_infra::FlyMachineProviderConfig;
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
@@ -27,7 +27,7 @@ use tower_sessions_sqlx_store::PostgresStore;
 pub struct AppState {
     pub agent_manager: AgentManager,
     pub api_token_manager: ApiTokenManager,
-    pub token_manager: TokenManager,
+    pub token_manager: RegistryTokenManager,
     pub registry_client: RegistryClient,
 }
 
@@ -67,7 +67,7 @@ impl App {
         let user_manager = UserManager::new(db.clone());
         let agent_manager = AgentManager::new(db.clone());
         let api_token_manager = ApiTokenManager::new(db.clone());
-        let token_manager = TokenManager::new(db.clone(), registry_auth_config.clone());
+        let token_manager = RegistryTokenManager::new(db.clone(), registry_auth_config.clone());
         let registry_client = RegistryClient::new(registry_url);
 
         let state = AppState {
