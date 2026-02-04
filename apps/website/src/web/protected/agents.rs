@@ -60,7 +60,7 @@ async fn new_agent_page(
     };
 
     // Get system token for registry authentication
-    let system_token = match state.token_manager.get_system_token().await {
+    let system_token = match state.registry_token_manager.get_system_token().await {
         Ok(token) => token,
         Err(e) => {
             tracing::error!("Failed to get system token: {}", e);

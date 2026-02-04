@@ -29,7 +29,7 @@ async fn settings(auth_session: AuthSession, State(state): State<AppState>) -> i
     };
     let mut errors = vec![];
 
-    let tokens = match state.token_manager.list_tokens(&user.id).await {
+    let tokens = match state.registry_token_manager.list_tokens(&user.id).await {
         Ok(tokens) => tokens,
         Err(e) => {
             tracing::error!("Failed to list deploy tokens: {}", e);
@@ -75,7 +75,7 @@ async fn create_deploy_token(
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let tokens = state
-        .token_manager
+        .registry_token_manager
         .get_active_tokens(&user.id.clone())
         .await
         .unwrap_or_default();
@@ -100,7 +100,7 @@ async fn create_deploy_token(
     };
 
     match state
-        .token_manager
+        .registry_token_manager
         .create_token(&user.id, &token_name)
         .await
     {
@@ -130,7 +130,11 @@ async fn revoke_deploy_token(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
-    match state.token_manager.revoke_token(&user.id, token_id).await {
+    match state
+        .registry_token_manager
+        .revoke_token(&user.id, token_id)
+        .await
+    {
         Ok(_) => Redirect::to("/settings").into_response(),
         Err(e) => {
             tracing::error!("Failed to revoke deploy token: {}", e);
@@ -148,7 +152,7 @@ async fn create_api_token(
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let tokens = state
-        .token_manager
+        .registry_token_manager
         .get_active_tokens(&user.id.clone())
         .await
         .unwrap_or_default();
