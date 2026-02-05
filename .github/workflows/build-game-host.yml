@@ -1,3 +1,4 @@
+# Builds and publishes game host image to ghcr.io/ch1nq/achtung-game-host
 name: Build and Push Game Host Image
 
 on:
@@ -21,6 +22,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      attestations: write
+      id-token: write
 
     steps:
       - name: Checkout repository
@@ -31,7 +34,6 @@ jobs:
         run: |
           VERSION=$(grep '^version = ' apps/achtung-host/Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Game host version: $VERSION"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -51,10 +53,10 @@ jobs:
           tags: |
             type=raw,value=latest
             type=raw,value=v${{ steps.version.outputs.version }}
-            type=sha,prefix={{branch}}-
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        id: push
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: apps/achtung-host/Dockerfile
@@ -65,9 +67,9 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64
 
-      - name: Image published
-        run: |
-          echo "✅ Image published to ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          echo "Tags:"
-          echo "  - latest"
-          echo "  - v${{ steps.version.outputs.version }}"
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
