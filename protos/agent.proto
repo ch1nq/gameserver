@@ -5,10 +5,10 @@ package achtung.agent;
 service Agent {
   // Called at the start of each game to initialize the agent
   rpc Initialize(InitializeRequest) returns (InitializeResponse);
-  
+
   // Called each tick to get the agent's action
   rpc GetAction(GameState) returns (AgentAction);
-  
+
   // Called when the game ends
   rpc GameOver(GameOverNotification) returns (GameOverResponse);
 }
@@ -16,10 +16,10 @@ service Agent {
 message InitializeRequest {
   // The player ID assigned to this agent for this game
   uint32 player_id = 1;
-  
+
   // Total number of players in the game
   uint32 num_players = 2;
-  
+
   ArenaConfig arena = 3;
 }
 
@@ -32,7 +32,7 @@ message InitializeResponse {}
 
 message GameState {
   uint64 tick = 1;
-  
+
   // All players in the game
   repeated PlayerState players = 2;
 }
@@ -40,17 +40,17 @@ message GameState {
 message Position {
   float x = 1;
   float y = 2;
-} 
+}
 
 message PlayerState {
   uint32 player_id = 1;
-  
+
   // Current position
   Position position = 2;
 
   // Current direction in radians
   float direction = 3;
-  
+
   // Whether this player is still alive
   bool alive = 4;
 }
@@ -60,7 +60,7 @@ enum Direction {
   DIRECTION_STAIGHT = 1;
   DIRECTION_TURN_LEFT = 2;
   DIRECTION_TURN_RIGHT = 3;
-} 
+}
 
 message AgentAction {
   Direction direction = 1;
@@ -72,4 +72,3 @@ message GameOverNotification {
 }
 
 message GameOverResponse {}
-

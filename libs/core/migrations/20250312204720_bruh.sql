@@ -22,4 +22,3 @@ create table if not exists agents (
     user_id bigint not null,
     build_id text
 );
-

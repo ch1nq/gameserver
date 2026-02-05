@@ -7,7 +7,7 @@ edition = "2024"
 [dependencies]
 achtung-core = { path = "../core" }
 api-types = { path = "../api-types", package = "achtung-api-types" }
-common = { path = "../common" } 
+common = { path = "../common" }
 axum = { workspace = true }
 base64 = { workspace = true }
 serde = { workspace = true }

@@ -31,4 +31,3 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/achtung-host /usr/local/bin/
 ENTRYPOINT ["/usr/local/bin/achtung-host"]
-
