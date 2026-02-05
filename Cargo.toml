@@ -4,6 +4,7 @@ members = [
     "libs/*",
     "apps/website",
     "apps/cli",
+    "apps/achtung-host",
 ]
 
 [workspace.dependencies]

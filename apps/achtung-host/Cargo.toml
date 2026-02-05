@@ -1,9 +1,9 @@
 [package]
-name = "game-server"
+name = "achtung-host"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-arcadio = { version = "0.1.1", path = "../../libs/arcadio" }
+arcadio = { version = "0.1.1", path = "../../libs/game-host" }
 clap = { workspace = true }
 tokio = { workspace = true }

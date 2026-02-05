@@ -79,6 +79,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "achtung-host"
+version = "0.1.0"
+dependencies = [
+ "arcadio",
+ "clap",
+ "tokio",
+]
+
+[[package]]
 name = "achtung-ranking"
 version = "0.1.0"
 
