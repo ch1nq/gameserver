@@ -8,17 +8,25 @@ pub mod registry_client;
 
 use std::collections::HashMap;
 
+use common::{ImageUrl, RegistryToken};
 use fly_api::{FlyApi, FlyHost, FlyIpType, FlyMachineConfig, FlyRestartConfig, FlyRestartPolicy};
 use rand::{Rng, distr::Alphanumeric};
 use registry_client::{BasicRegistryCredentials, RegistryClient};
 
+#[derive(Debug, Clone)]
+pub enum ContainerImage {
+    Public(ImageUrl),
+    Private {
+        image_url: ImageUrl,
+        registry_token: RegistryToken,
+    },
+}
+
 /// Configuration for spawning a machine
 #[derive(Debug, Clone)]
 pub struct SpawnConfig {
-    /// The container image URL (e.g., "user-123/my-agent:v1")
-    pub image_url: String,
-    /// Registry token for pulling the image
-    pub registry_token: String,
+    /// Image to spawn
+    pub container_image: ContainerImage,
     /// Environment variables to set in the container
     pub env: HashMap<String, String>,
 }
@@ -152,32 +160,55 @@ impl MachineProvider for FlyMachineProvider {
             .await
             .map_err(|e| MachineError::IpAssignment(e))?;
 
-        // 3. Copy image from source registry to Fly registry
-        let registry_host = self
-            .config
-            .registry_url
-            .split_once("://")
-            .map(|(_, host)| host)
-            .unwrap_or(&self.config.registry_url);
-        let source_image = format!("{}/{}", registry_host, config.image_url);
-        let destination_image = format!("registry.fly.io/{}", app_name);
+        // 3. Copy image to fly registry if it's in a private repo
+        let final_image: String = match config.container_image {
+            ContainerImage::Public(image_url) => {
+                tracing::info!(
+                    "Using image directly (skip_registry_copy=true): {}",
+                    image_url.as_ref()
+                );
+                image_url.as_ref().to_string()
+            }
+            ContainerImage::Private {
+                image_url,
+                registry_token,
+            } => {
+                let registry_host = self
+                    .config
+                    .registry_url
+                    .split_once("://")
+                    .map(|(_, host)| host)
+                    .unwrap_or(&self.config.registry_url);
+                let source_image =
+                    ImageUrl::from(format!("{}/{}", registry_host, image_url.as_ref()));
+                let destination_image = ImageUrl::from(format!("registry.fly.io/{}", app_name));
 
-        self.registry_client
-            .copy_image(
-                &source_image,
-                &destination_image,
-                &config.registry_token,
-                &BasicRegistryCredentials {
-                    username: "x".into(),
-                    password: self.config.fly_token.clone(),
-                },
-            )
-            .await
-            .map_err(|e| MachineError::ImageCopy(e))?;
+                tracing::info!(
+                    "Copying image from {} to {}",
+                    source_image.as_ref(),
+                    destination_image.as_ref()
+                );
+
+                self.registry_client
+                    .copy_image(
+                        &source_image,
+                        &destination_image,
+                        &registry_token,
+                        &BasicRegistryCredentials {
+                            username: "x".into(),
+                            password: self.config.fly_token.clone(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| MachineError::ImageCopy(e))?;
+
+                destination_image.as_ref().to_string()
+            }
+        };
 
         // 4. Create and start machine
         let machine_config = FlyMachineConfig {
-            image: destination_image,
+            image: final_image,
             env: config.env,
             auto_destroy: true,
             restart: FlyRestartConfig {

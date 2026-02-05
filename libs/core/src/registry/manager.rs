@@ -264,9 +264,9 @@ impl common::DeployTokenProvider for RegistryTokenManager {
     async fn get_deploy_token(
         &self,
         repository: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<common::RegistryToken, Box<dyn std::error::Error + Send + Sync>> {
         let jwt = self.get_system_deploy_token_for(repository).await?;
-        Ok(jwt.value)
+        Ok(common::RegistryToken::from(jwt.value))
     }
 }
 

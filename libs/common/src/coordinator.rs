@@ -1,4 +1,4 @@
-use crate::{AgentId, ImageUrl};
+use crate::{AgentId, ImageUrl, RegistryToken};
 
 /// Agent info needed for a match
 #[derive(Debug, Clone)]
@@ -24,5 +24,5 @@ pub trait DeployTokenProvider: Send + Sync {
     async fn get_deploy_token(
         &self,
         repository: &str,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
+    ) -> Result<RegistryToken, Box<dyn std::error::Error + Send + Sync>>;
 }

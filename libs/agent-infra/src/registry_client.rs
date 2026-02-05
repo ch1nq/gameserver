@@ -1,3 +1,4 @@
+use common::{ImageUrl, RegistryToken};
 use serde::Deserialize;
 
 #[derive(Debug, Clone)]
@@ -7,8 +8,6 @@ pub struct RegistryClient {
 }
 
 type Namespace = String;
-type ImageUrl = String;
-type RegistryToken = String;
 type Error = String;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -40,7 +39,7 @@ impl RegistryClient {
         let response = self
             .http_client
             .get(&catalog_url)
-            .bearer_auth(&token)
+            .bearer_auth(token.as_ref())
             .send()
             .await
             .map_err(|e| format!("Failed to connect to registry: {}", e))?;
@@ -60,6 +59,7 @@ impl RegistryClient {
             .repositories
             .into_iter()
             .filter(|repo| repo.starts_with(namespace.as_str()))
+            .map(ImageUrl::from)
             .collect();
 
         Ok(images)
@@ -69,16 +69,16 @@ impl RegistryClient {
         &self,
         source_image_url: &ImageUrl,
         destination_image_url: &ImageUrl,
-        source_token: &String,
+        source_token: &RegistryToken,
         destination_credentials: &BasicRegistryCredentials,
     ) -> Result<(), Error> {
         let status = tokio::process::Command::new("skopeo")
             .arg("copy")
-            .arg(format!("docker://{}", source_image_url))
-            .arg(format!("docker://{}", destination_image_url))
+            .arg(format!("docker://{}", source_image_url.as_ref()))
+            .arg(format!("docker://{}", destination_image_url.as_ref()))
             .arg("--src-tls-verify=false")
             .arg("--src-registry-token")
-            .arg(source_token)
+            .arg(source_token.as_ref())
             .arg("--dest-creds")
             .arg(format!(
                 "{}:{}",

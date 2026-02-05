@@ -1,7 +1,9 @@
 use std::time::Duration;
 
-use agent_infra::{FlyMachineProvider, MachineError, MachineHandle, MachineProvider, SpawnConfig};
-use common::{AgentId, AgentInfo, AgentRepository, DeployTokenProvider};
+use agent_infra::{
+    ContainerImage, FlyMachineProvider, MachineError, MachineHandle, MachineProvider, SpawnConfig,
+};
+use common::{AgentId, AgentInfo, AgentRepository, DeployTokenProvider, ImageUrl};
 use game_host::game_host_client::GameHostClient;
 use game_host::{AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest};
 use tokio::task::JoinHandle;
@@ -18,6 +20,10 @@ pub struct CoordinatorConfig {
     pub machine_provider: agent_infra::FlyMachineProviderConfig,
 
     /// Image URL for the game host container
+    ///
+    /// Points to a public registry image (e.g., ghcr.io/ch1nq/achtung-game-host:latest)
+    /// that is used directly without copying through the local registry.
+    /// User agent images continue to use the local registry workflow.
     pub game_host_image: String,
 
     /// Number of agents per game
@@ -156,21 +162,11 @@ impl GameCoordinator {
     }
 
     async fn spawn_game_host(&self) -> Result<MachineHandle, CoordinatorError> {
-        let registry_token = self
-            .token_provider
-            .get_deploy_token(
-                self.config
-                    .game_host_image
-                    .rsplit_once(":")
-                    .map(|(img, _)| img)
-                    .unwrap_or(&self.config.game_host_image),
-            )
-            .await
-            .map_err(CoordinatorError::DeployToken)?;
-
+        // Game host is on GHCR (public registry), no copy or token needed
         let config = SpawnConfig {
-            image_url: self.config.game_host_image.clone(),
-            registry_token,
+            container_image: ContainerImage::Public(ImageUrl::from(
+                self.config.game_host_image.clone(),
+            )),
             env: std::collections::HashMap::new(),
         };
 
@@ -188,8 +184,10 @@ impl GameCoordinator {
             .map_err(CoordinatorError::DeployToken)?;
 
         let config = SpawnConfig {
-            image_url: agent.image_url.to_string(),
-            registry_token,
+            container_image: ContainerImage::Private {
+                image_url: agent.image_url.clone(),
+                registry_token,
+            },
             env: std::collections::HashMap::new(),
         };
 

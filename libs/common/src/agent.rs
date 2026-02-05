@@ -8,40 +8,6 @@ pub enum AgentStatus {
     Inactive,
 }
 
-/// Container image URL (e.g., "ghcr.io/user/agent:latest")
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ImageUrl(String);
-
-impl ImageUrl {
-    /// Validate and create a new ImageUrl from user input
-    pub fn new(s: String) -> Result<Self, String> {
-        if s.trim().is_empty() {
-            return Err("Image URL cannot be empty".to_string());
-        }
-        Ok(Self(s))
-    }
-
-    pub fn repository(&self) -> String {
-        self.split_once(':')
-            .map(|(repo, _)| repo)
-            .unwrap_or(self)
-            .to_string()
-    }
-}
-
-impl Deref for ImageUrl {
-    type Target = str;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<String> for ImageUrl {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
 /// Agent name (3-50 alphanumeric/hyphen/underscore chars)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AgentName(String);

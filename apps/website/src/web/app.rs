@@ -157,8 +157,8 @@ impl App {
         let fly_org = env::var("FLY_ORG").expect("FLY_ORG required for coordinator");
         let registry_url = env::var("REGISTRY_URL")
             .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string());
-        let game_host_image =
-            env::var("GAME_HOST_IMAGE").unwrap_or_else(|_| "achtung-game-host:latest".to_string());
+        let game_host_image = env::var("GAME_HOST_IMAGE")
+            .unwrap_or_else(|_| "ghcr.io/ch1nq/achtung-game-host:latest".to_string());
         let fly_api_host = match env::var("FLY_HOST").as_deref() {
             Ok("internal") => agent_infra::FlyMachineProviderHost::Internal,
             Ok("public") => agent_infra::FlyMachineProviderHost::Public,
