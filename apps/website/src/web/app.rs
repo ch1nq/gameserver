@@ -96,9 +96,25 @@ impl App {
     }
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
-        // Optionally spawn the game coordinator
         if env::var("ENABLE_COORDINATOR").is_ok() {
-            self.spawn_coordinator();
+            let fly_config = FlyMachineProviderConfig {
+                fly_token: env::var("FLY_TOKEN").expect("FLY_TOKEN required for coordinator"),
+                fly_org: env::var("FLY_ORG").expect("FLY_ORG required for coordinator"),
+                fly_host: match env::var("FLY_HOST").as_deref() {
+                    Ok("internal") => agent_infra::FlyMachineProviderHost::Internal,
+                    Ok("public") => agent_infra::FlyMachineProviderHost::Public,
+                    Ok(_) => panic!("unknown FLY_HOST value"),
+                    Err(_) => agent_infra::FlyMachineProviderHost::Internal,
+                },
+                registry_url: env::var("REGISTRY_URL")
+                    .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string()),
+            };
+
+            let coordinator_provider = agent_infra::FlyMachineProvider::new(fly_config.clone());
+            let reaper_provider = agent_infra::FlyMachineProvider::new(fly_config);
+
+            self.spawn_coordinator(Box::new(coordinator_provider));
+            self.spawn_reaper(reaper_provider);
         }
 
         // Static files service
@@ -152,27 +168,11 @@ impl App {
         Ok(())
     }
 
-    fn spawn_coordinator(&self) {
-        let fly_token = env::var("FLY_TOKEN").expect("FLY_TOKEN required for coordinator");
-        let fly_org = env::var("FLY_ORG").expect("FLY_ORG required for coordinator");
-        let registry_url = env::var("REGISTRY_URL")
-            .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string());
+    fn spawn_coordinator(&self, machine_provider: Box<dyn agent_infra::MachineProvider>) {
         let game_host_image = env::var("GAME_HOST_IMAGE")
             .unwrap_or_else(|_| "ghcr.io/ch1nq/achtung-game-host:latest".to_string());
-        let fly_api_host = match env::var("FLY_HOST").as_deref() {
-            Ok("internal") => agent_infra::FlyMachineProviderHost::Internal,
-            Ok("public") => agent_infra::FlyMachineProviderHost::Public,
-            Ok(_) => panic!("unknown host"),
-            Err(_) => agent_infra::FlyMachineProviderHost::Internal,
-        };
 
         let config = CoordinatorConfig {
-            machine_provider: FlyMachineProviderConfig {
-                fly_token,
-                fly_org,
-                fly_host: fly_api_host,
-                registry_url,
-            },
             game_host_image,
             agents_per_game: env::var("AGENTS_PER_GAME")
                 .ok()
@@ -197,11 +197,44 @@ impl App {
 
         let coordinator = GameCoordinator::new(
             config,
+            machine_provider,
             Box::new(self.state.agent_manager.clone()),
             Box::new(self.state.registry_token_manager.clone()),
         );
         coordinator.spawn();
 
         tracing::info!("Game coordinator spawned");
+    }
+
+    fn spawn_reaper<P: agent_infra::MachineProvider + 'static>(&self, machine_provider: P) {
+        let reaper_config = agent_infra::ReaperConfig {
+            interval: std::time::Duration::from_secs(
+                env::var("REAPER_INTERVAL_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(300), // Default: 5 minutes
+            ),
+            max_age: std::time::Duration::from_secs(
+                env::var("REAPER_MAX_AGE_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(3600), // Default: 1 hour
+            ),
+            prefix: env::var("REAPER_PREFIX").unwrap_or_else(|_| "achtung-match-".to_string()),
+        };
+
+        let interval = reaper_config.interval;
+        let max_age = reaper_config.max_age;
+        let prefix = reaper_config.prefix.clone();
+
+        let reaper = agent_infra::Reaper::new(machine_provider, reaper_config);
+        reaper.spawn();
+
+        tracing::info!(
+            "Infrastructure reaper spawned: interval={:?}, max_age={:?}, prefix={}",
+            interval,
+            max_age,
+            prefix
+        );
     }
 }

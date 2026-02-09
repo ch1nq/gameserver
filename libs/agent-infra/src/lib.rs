@@ -4,14 +4,32 @@
 //! for game matches.
 
 mod fly_api;
+pub mod reaper;
 pub mod registry_client;
 
 use std::collections::HashMap;
+use std::time::{Duration, SystemTime};
 
 use common::{ImageUrl, RegistryToken};
 use fly_api::{FlyApi, FlyHost, FlyIpType, FlyMachineConfig, FlyRestartConfig, FlyRestartPolicy};
 use rand::{Rng, distr::Alphanumeric};
 use registry_client::{BasicRegistryCredentials, RegistryClient};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+
+// Re-export reaper types for convenience
+pub use reaper::{Reaper, ReaperConfig};
+
+/// Parse an ISO 8601 timestamp string to SystemTime
+fn parse_iso8601_to_system_time(s: &str) -> Option<SystemTime> {
+    let dt = OffsetDateTime::parse(s, &Rfc3339).ok()?;
+    let unix_timestamp = dt.unix_timestamp();
+    if unix_timestamp >= 0 {
+        Some(SystemTime::UNIX_EPOCH + Duration::from_secs(unix_timestamp as u64))
+    } else {
+        None
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum ContainerImage {
@@ -31,6 +49,28 @@ pub struct SpawnConfig {
     pub env: HashMap<String, String>,
 }
 
+impl SpawnConfig {
+    /// Create a new SpawnConfig with the given container image
+    pub fn new(container_image: ContainerImage) -> Self {
+        Self {
+            container_image,
+            env: HashMap::new(),
+        }
+    }
+
+    /// Add an environment variable
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.insert(key.into(), value.into());
+        self
+    }
+
+    /// Add multiple environment variables
+    pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
+        self.env.extend(env);
+        self
+    }
+}
+
 /// Handle to a spawned machine, used for cleanup
 #[derive(Debug, Clone)]
 pub struct MachineHandle {
@@ -40,6 +80,17 @@ pub struct MachineHandle {
     pub machine_id: String,
     /// Private IP address for gRPC communication
     pub private_ip: String,
+}
+
+/// Information about orphaned resources to be reaped
+#[derive(Debug, Clone)]
+pub struct OrphanedResource {
+    /// Platform-specific identifier (e.g., Fly app name)
+    pub id: String,
+    /// Human-readable name for logging
+    pub name: String,
+    /// When the resource was created
+    pub created_at: SystemTime,
 }
 
 /// Errors that can occur during machine operations
@@ -72,8 +123,8 @@ impl std::fmt::Display for MachineError {
 impl std::error::Error for MachineError {}
 
 /// Trait for provisioning and managing agent machines
-#[trait_variant::make(MachineProvider: Send)]
-pub trait LocalMachineProvider {
+#[async_trait::async_trait]
+pub trait MachineProvider: Send + Sync {
     /// Spawn a new machine for an agent.
     ///
     /// This creates all necessary infrastructure (app, network, IP) and
@@ -82,6 +133,23 @@ pub trait LocalMachineProvider {
 
     /// Destroy a machine and its associated infrastructure.
     async fn destroy(&self, handle: &MachineHandle) -> Result<(), MachineError>;
+
+    /// List infrastructure (apps/machines) that match the given prefix pattern
+    /// and are older than the given age threshold.
+    ///
+    /// This is used by the reaper to find orphaned match infrastructure that
+    /// failed to clean up properly.
+    async fn list_orphaned(
+        &self,
+        prefix: &str,
+        max_age: Duration,
+    ) -> Result<Vec<OrphanedResource>, MachineError>;
+
+    /// Destroy orphaned infrastructure by ID.
+    ///
+    /// This is a best-effort operation - errors are logged but should not
+    /// prevent other orphaned infrastructure from being cleaned up.
+    async fn destroy_orphaned(&self, resource: &OrphanedResource) -> Result<(), MachineError>;
 }
 
 /// Configuration for the Fly.io machine provider
@@ -107,6 +175,7 @@ pub enum FlyMachineProviderHost {
 }
 
 /// Fly.io implementation of MachineProvider
+#[derive(Debug)]
 pub struct FlyMachineProvider {
     fly_api: FlyApi,
     registry_client: RegistryClient,
@@ -131,6 +200,7 @@ impl FlyMachineProvider {
     }
 }
 
+#[async_trait::async_trait]
 impl MachineProvider for FlyMachineProvider {
     async fn spawn(&self, config: SpawnConfig) -> Result<MachineHandle, MachineError> {
         // Generate unique identifiers
@@ -139,7 +209,8 @@ impl MachineProvider for FlyMachineProvider {
         let network = format!("achtung-match-{}-net", id);
 
         // 1. Create Fly app with network
-        self.fly_api
+        let _app_response = self
+            .fly_api
             .create_app(
                 app_name.clone(),
                 self.config.fly_org.clone(),
@@ -245,6 +316,78 @@ impl MachineProvider for FlyMachineProvider {
             .map_err(|e| MachineError::Destruction(e))?;
 
         tracing::info!("Destroyed machine: app={}", handle.app_name);
+        Ok(())
+    }
+
+    async fn list_orphaned(
+        &self,
+        prefix: &str,
+        max_age: Duration,
+    ) -> Result<Vec<OrphanedResource>, MachineError> {
+        // List all apps in the organization
+        let apps_response = self
+            .fly_api
+            .list_apps(self.config.fly_org.clone())
+            .await
+            .map_err(|e| MachineError::AppCreation(format!("Failed to list apps: {}", e)))?;
+
+        let mut orphaned = Vec::new();
+
+        for app in apps_response.apps {
+            // Filter to apps matching the prefix
+            if !app.name.starts_with(prefix) {
+                continue;
+            }
+
+            // List machines for this app
+            let machines = match self.fly_api.list_machines(app.name.clone()).await {
+                Ok(machines) => machines,
+                Err(e) => {
+                    tracing::warn!(
+                        app = %app.name,
+                        error = %e,
+                        "Failed to list machines, skipping"
+                    );
+                    continue;
+                }
+            };
+
+            if let Some(oldest_created_at) = machines
+                .iter()
+                .filter_map(|m| parse_iso8601_to_system_time(&m.created_at))
+                .min()
+            {
+                tracing::info!(
+                    app = %app.name,
+                    id = %app.id,
+                    machine_count = machines.len(),
+                    "Found orphaned app (has machines older than max_age)"
+                );
+                orphaned.push(OrphanedResource {
+                    id: app.name.clone(),
+                    name: app.name,
+                    created_at: oldest_created_at,
+                });
+            }
+        }
+
+        tracing::info!(
+            "Found {} orphaned apps with prefix '{}' older than {:?}",
+            orphaned.len(),
+            prefix,
+            max_age
+        );
+        Ok(orphaned)
+    }
+
+    async fn destroy_orphaned(&self, resource: &OrphanedResource) -> Result<(), MachineError> {
+        // The OrphanedResource.id is the app_name for Fly
+        self.fly_api
+            .destroy_app(resource.id.clone())
+            .await
+            .map_err(|e| MachineError::Destruction(e))?;
+
+        tracing::info!("Destroyed orphaned app: {}", resource.name);
         Ok(())
     }
 }

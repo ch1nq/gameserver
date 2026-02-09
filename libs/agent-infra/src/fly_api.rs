@@ -72,6 +72,42 @@ pub(crate) struct CreateMachineResponse {
     pub private_ip: String,
 }
 
+/// Response from listing apps in an organization
+/// https://docs.machines.dev/#tag/apps/get/apps
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ListAppsResponse {
+    pub total_apps: usize,
+    pub apps: Vec<AppInfo>,
+}
+
+/// Information about a Fly app (from list endpoint)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct AppInfo {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub machine_count: usize,
+    #[serde(default)]
+    pub network: Option<String>,
+}
+
+/// Information about a Fly machine
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct MachineInfo {
+    pub id: String,
+    pub name: String,
+    pub state: String,
+    pub created_at: String, // ISO 8601: "2023-10-31T02:30:10Z"
+}
+
+/// Response from creating an app
+/// https://docs.machines.dev/#tag/apps/post/apps
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CreateAppResponse {
+    pub id: String,
+    pub created_at: i64,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum FlyHost {
     Internal,
@@ -113,7 +149,7 @@ impl FlyApi {
         name: FlyAppName,
         org: FlyOrg,
         network: FlyNetwork,
-    ) -> Result<(), Error> {
+    ) -> Result<CreateAppResponse, Error> {
         let jitter = governor::Jitter::new(Duration::ZERO, Duration::from_secs(2));
         self.rate_limiter.until_ready_with_jitter(jitter).await;
         let request = CreateAppRequest {
@@ -132,7 +168,13 @@ impl FlyApi {
             .await;
         tracing::info!("Fly create_app response: {:?}", response);
         match response {
-            Ok(response) if response.status() == 201 => Ok(()),
+            Ok(response) if response.status() == 201 => {
+                let app: CreateAppResponse = response
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse create_app response: {}", e))?;
+                Ok(app)
+            }
             Ok(response) => Err(format!(
                 "Unexpected response status: {}. Message: {}",
                 response.status(),
@@ -241,6 +283,78 @@ impl FlyApi {
                     .await
                     .map_err(|e| format!("Failed to parse create_machine response: {}", e))?;
                 Ok(machine)
+            }
+            Ok(response) => {
+                let status = response.status();
+                tracing::warn!(
+                    "Unexpected response status: {}. Message: {}",
+                    status,
+                    response.text().await.unwrap_or_default()
+                );
+                Err(format!("Unexpected response status: {}", status))
+            }
+            Err(err) => {
+                tracing::warn!("HTTP request failed: {}", err);
+                Err(format!("HTTP request failed: {}", err))
+            }
+        }
+    }
+
+    pub async fn list_apps(&self, org_slug: FlyOrg) -> Result<ListAppsResponse, Error> {
+        let jitter = governor::Jitter::new(Duration::ZERO, Duration::from_secs(2));
+        self.rate_limiter.until_ready_with_jitter(jitter).await;
+        tracing::debug!("Fly list_apps: org={}", org_slug);
+        let host = format!("{}/v1/apps?org_slug={}", self.api_hostname, org_slug);
+        let response = self
+            .http_client
+            .get(&host)
+            .bearer_auth(&self.token)
+            .send()
+            .await;
+        tracing::debug!("Fly list_apps response: {:?}", response);
+        match response {
+            Ok(response) if response.status() == 200 => {
+                let apps: ListAppsResponse = response
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse list_apps response: {}", e))?;
+                Ok(apps)
+            }
+            Ok(response) => {
+                let status = response.status();
+                tracing::warn!(
+                    "Unexpected response status: {}. Message: {}",
+                    status,
+                    response.text().await.unwrap_or_default()
+                );
+                Err(format!("Unexpected response status: {}", status))
+            }
+            Err(err) => {
+                tracing::warn!("HTTP request failed: {}", err);
+                Err(format!("HTTP request failed: {}", err))
+            }
+        }
+    }
+
+    pub async fn list_machines(&self, app_name: FlyAppName) -> Result<Vec<MachineInfo>, Error> {
+        let jitter = governor::Jitter::new(Duration::ZERO, Duration::from_secs(2));
+        self.rate_limiter.until_ready_with_jitter(jitter).await;
+        tracing::debug!("Fly list_machines: app={}", app_name);
+        let host = format!("{}/v1/apps/{}/machines", self.api_hostname, app_name);
+        let response = self
+            .http_client
+            .get(&host)
+            .bearer_auth(&self.token)
+            .send()
+            .await;
+        tracing::debug!("Fly list_machines response: {:?}", response);
+        match response {
+            Ok(response) if response.status() == 200 => {
+                let machines: Vec<MachineInfo> = response
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse list_machines response: {}", e))?;
+                Ok(machines)
             }
             Ok(response) => {
                 let status = response.status();

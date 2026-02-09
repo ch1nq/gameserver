@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use agent_infra::{
-    ContainerImage, FlyMachineProvider, MachineError, MachineHandle, MachineProvider, SpawnConfig,
-};
+use agent_infra::{ContainerImage, MachineError, MachineHandle, MachineProvider, SpawnConfig};
 use common::{AgentId, AgentInfo, AgentRepository, DeployTokenProvider, ImageUrl};
 use game_host::game_host_client::GameHostClient;
 use game_host::{AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest};
@@ -16,9 +14,6 @@ pub mod game_host {
 /// Configuration for the game coordinator
 #[derive(Debug, Clone)]
 pub struct CoordinatorConfig {
-    /// Machine provider configuration
-    pub machine_provider: agent_infra::FlyMachineProviderConfig,
-
     /// Image URL for the game host container
     ///
     /// Points to a public registry image (e.g., ghcr.io/ch1nq/achtung-game-host:latest)
@@ -52,7 +47,7 @@ pub struct CoordinatorConfig {
 /// The game coordinator that orchestrates matches
 pub struct GameCoordinator {
     config: CoordinatorConfig,
-    machine_provider: FlyMachineProvider,
+    machine_provider: Box<dyn MachineProvider>,
     agent_repo: Box<dyn AgentRepository>,
     token_provider: Box<dyn DeployTokenProvider>,
 }
@@ -60,10 +55,10 @@ pub struct GameCoordinator {
 impl GameCoordinator {
     pub fn new(
         config: CoordinatorConfig,
+        machine_provider: Box<dyn MachineProvider>,
         agent_repo: Box<dyn AgentRepository>,
         token_provider: Box<dyn DeployTokenProvider>,
     ) -> Self {
-        let machine_provider = FlyMachineProvider::new(config.machine_provider.clone());
         Self {
             config,
             machine_provider,
@@ -163,12 +158,12 @@ impl GameCoordinator {
 
     async fn spawn_game_host(&self) -> Result<MachineHandle, CoordinatorError> {
         // Game host is on GHCR (public registry), no copy or token needed
-        let config = SpawnConfig {
-            container_image: ContainerImage::Public(ImageUrl::from(
-                self.config.game_host_image.clone(),
-            )),
-            env: std::collections::HashMap::new(),
-        };
+        let config = SpawnConfig::new(ContainerImage::Public(ImageUrl::from(
+            self.config.game_host_image.clone(),
+        )))
+        .env("NUM_PLAYERS", "4")
+        .env("GAME", "achtung")
+        .env("TICK_RATE_MS", "200");
 
         self.machine_provider
             .spawn(config)
