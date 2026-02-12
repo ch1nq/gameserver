@@ -1,6 +1,6 @@
 use crate::users::{AuthSession, User, UserId};
 use crate::web::layout::components::{self, Page};
-use achtung_core::agents::agent::{Agent, AgentStatus};
+use achtung_core::agents::agent::{Agent, AgentImageUrl, AgentStatus};
 use achtung_core::api_tokens::ApiToken;
 use achtung_core::registry::RegistryToken;
 use achtung_ui::error::Error;
@@ -326,7 +326,7 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
                 (components::table::Cell {
                     content: html! {
                         span class="text-gray-500 dark:text-gray-400 text-xs font-mono truncate max-w-xs" {
-                            (&*agent.image_url)
+                            (agent.image_url.as_ref())
                         }
                     },
                     is_primary: false
@@ -393,10 +393,10 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
     }
 }
 
-pub fn new_agent_page(user_images: Vec<String>, session: &AuthSession) -> Page<'_> {
+pub fn new_agent_page(user_images: Vec<AgentImageUrl>, session: &AuthSession) -> Page<'_> {
     let images = user_images
         .iter()
-        .map(|img| components::form::InputOption::from_value(img))
+        .map(|img| components::form::InputOption::from_value(img.repository_name()))
         .collect();
     let form = components::form::ModalForm {
         action: "/agents/new",

@@ -1,5 +1,6 @@
 //! Registry client for listing user images.
 
+use common::AgentImageUrl;
 use serde::Deserialize;
 
 /// Client for interacting with the Docker registry.
@@ -24,12 +25,12 @@ impl RegistryClient {
 
     /// List images for a user namespace.
     ///
-    /// Returns a list of image names (without the namespace prefix).
+    /// Returns a list of validated AgentImageUrl instances.
     pub async fn list_user_images(
         &self,
         user_id: common::UserId,
         token: &str,
-    ) -> Result<Vec<String>, RegistryError> {
+    ) -> Result<Vec<AgentImageUrl>, RegistryError> {
         let namespace = format!("user-{}/", user_id);
 
         // Fetch catalog from registry
@@ -57,15 +58,50 @@ impl RegistryClient {
             .await
             .map_err(|e| RegistryError::Parse(e.to_string()))?;
 
-        // Filter repositories for this user's namespace and strip the prefix
-        let images: Vec<String> = catalog
+        // Filter repositories for this user's namespace, strip prefix, and parse to AgentImageUrl
+        let images: Vec<AgentImageUrl> = catalog
             .repositories
             .into_iter()
             .filter(|repo| repo.starts_with(&namespace))
-            .map(|repo| repo.strip_prefix(&namespace).unwrap_or(&repo).to_string())
+            .filter_map(|repo| {
+                let image_name = repo.strip_prefix(&namespace).unwrap_or(&repo);
+                // Parse to AgentImageUrl - registry images may not have tags, so we default to :latest
+                match AgentImageUrl::parse(user_id, image_name) {
+                    Ok(img) => Some(img),
+                    Err(e) => {
+                        tracing::warn!(
+                            user_id = user_id,
+                            image = image_name,
+                            error = %e,
+                            "Failed to parse image from registry"
+                        );
+                        None
+                    }
+                }
+            })
             .collect();
 
         Ok(images)
+    }
+
+    /// Check if a specific image exists in the user's namespace.
+    ///
+    /// Validates repository name only (ignores tag) since registry catalog
+    /// doesn't include tag information.
+    pub async fn image_exists(
+        &self,
+        user_id: common::UserId,
+        image: &AgentImageUrl,
+        token: &str,
+    ) -> Result<bool, RegistryError> {
+        let available_images = self.list_user_images(user_id, token).await?;
+
+        // Compare repository name (without tag)
+        let image_repo = image.repository_name();
+
+        Ok(available_images
+            .iter()
+            .any(|img| img.repository_name() == image_repo))
     }
 }
 

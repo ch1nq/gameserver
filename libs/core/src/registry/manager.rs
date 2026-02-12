@@ -1,5 +1,6 @@
 use super::token::{PlaintextToken, RegistryToken, TokenName};
 use crate::users::UserId;
+use common::ContainerImageUrl;
 use registry_auth::auth::{Access, RegistryAuth, ValidatedAccess};
 use registry_auth::{RegistryAuthConfig, RegistryJwtToken};
 use sqlx::PgPool;
@@ -130,14 +131,15 @@ impl RegistryTokenManager {
         Ok(jwt)
     }
 
-    /// Create a new JWT token that has pull access to the given image repository
+    /// Create a new JWT token that has pull access to the given container image
     pub async fn get_system_deploy_token_for(
         &self,
-        repository: &str,
+        image: &(dyn ContainerImageUrl + Send + Sync),
     ) -> Result<RegistryJwtToken, TokenManagerError> {
+        let repository = image.repository();
         let access_grants = ValidatedAccess::new(vec![Access::new(
             "repository".to_string(),
-            repository.to_string(),
+            repository.clone(),
             vec!["pull".to_string()],
         )]);
 
@@ -263,9 +265,9 @@ impl RegistryTokenManager {
 impl common::DeployTokenProvider for RegistryTokenManager {
     async fn get_deploy_token(
         &self,
-        repository: &str,
+        image: &(dyn ContainerImageUrl + Send + Sync),
     ) -> Result<common::RegistryToken, Box<dyn std::error::Error + Send + Sync>> {
-        let jwt = self.get_system_deploy_token_for(repository).await?;
+        let jwt = self.get_system_deploy_token_for(image).await?;
         Ok(common::RegistryToken::from(jwt.value))
     }
 }

@@ -7,7 +7,7 @@ type FlyNetwork = String;
 type FlyOrg = String;
 type FlyServiceName = String;
 type FlyEnv = HashMap<String, String>;
-type ImageUrl = String;
+type FlyImageUrl = String;
 
 /// https://docs.machines.dev/#tag/apps/post/apps
 #[derive(Debug, Serialize, Deserialize)]
@@ -41,7 +41,7 @@ struct CreateMachineRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct FlyMachineConfig {
-    pub image: ImageUrl,
+    pub image: FlyImageUrl,
     pub env: FlyEnv,
     pub auto_destroy: bool,
     pub restart: FlyRestartConfig,

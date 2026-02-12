@@ -1,6 +1,6 @@
-use crate::agents::agent::{Agent, AgentId, AgentName, AgentStatus, ImageUrl};
+use crate::agents::agent::{Agent, AgentId, AgentImageUrl, AgentName, AgentStatus};
 use crate::users::UserId;
-use common::{AgentInfo, AgentRepository};
+use common::{AgentInfo, AgentRepository, ContainerImageUrl};
 use sqlx::PgPool;
 
 #[derive(Debug, Clone)]
@@ -19,7 +19,7 @@ impl AgentManager {
         &self,
         name: AgentName,
         user_id: UserId,
-        image_url: ImageUrl,
+        image_url: AgentImageUrl,
     ) -> Result<Agent, AgentManagerError> {
         let agent_id = sqlx::query!(
             r#"
@@ -30,7 +30,7 @@ impl AgentManager {
             &*name,
             AgentStatus::Inactive as AgentStatus,
             user_id,
-            &*image_url,
+            image_url.as_url(),
         )
         .fetch_one(&self.db_pool)
         .await?
@@ -40,10 +40,10 @@ impl AgentManager {
 
         Ok(Agent {
             id: agent_id,
-            name: name,
-            user_id: user_id,
+            name,
+            user_id,
             status: AgentStatus::Inactive,
-            image_url: image_url,
+            image_url,
         })
     }
 
@@ -52,18 +52,17 @@ impl AgentManager {
         agent_id: AgentId,
         user_id: UserId,
     ) -> Result<Agent, AgentManagerError> {
-        let agent = sqlx::query_as!(
-            Agent,
+        let agent = sqlx::query_as::<_, Agent>(
             r#"
             UPDATE agents
             SET status = $1
             WHERE id = $2 AND user_id = $3 AND image_url IS NOT NULL
-            RETURNING id, name, user_id, status as "status: AgentStatus", image_url
+            RETURNING id, name, user_id, status, image_url
             "#,
-            AgentStatus::Active as AgentStatus,
-            agent_id,
-            user_id,
         )
+        .bind(AgentStatus::Active)
+        .bind(agent_id)
+        .bind(user_id)
         .fetch_one(&self.db_pool)
         .await?;
 
@@ -77,18 +76,17 @@ impl AgentManager {
         agent_id: AgentId,
         user_id: UserId,
     ) -> Result<Agent, AgentManagerError> {
-        let agent = sqlx::query_as!(
-            Agent,
+        let agent = sqlx::query_as::<_, Agent>(
             r#"
             UPDATE agents
             SET status = $1
             WHERE id = $2 AND user_id = $3
-            RETURNING id, name, user_id, status as "status: AgentStatus", image_url
+            RETURNING id, name, user_id, status, image_url
             "#,
-            AgentStatus::Inactive as AgentStatus,
-            agent_id,
-            user_id,
         )
+        .bind(AgentStatus::Inactive)
+        .bind(agent_id)
+        .bind(user_id)
         .fetch_one(&self.db_pool)
         .await?;
 
@@ -101,26 +99,24 @@ impl AgentManager {
         &self,
         user_id: UserId,
     ) -> Result<Vec<Agent>, AgentManagerError> {
-        let agents = sqlx::query_as!(
-            Agent,
+        let agents = sqlx::query_as::<_, Agent>(
             r#"
-            SELECT id, name, user_id, status as "status: AgentStatus", image_url
+            SELECT id, name, user_id, status, image_url
             FROM agents
             WHERE user_id = $1
             ORDER BY id DESC
             "#,
-            user_id
         )
+        .bind(user_id)
         .fetch_all(&self.db_pool)
         .await?;
         Ok(agents)
     }
 
     pub async fn get_agents(&self) -> Result<Vec<Agent>, AgentManagerError> {
-        let agents = sqlx::query_as!(
-            Agent,
+        let agents = sqlx::query_as::<_, Agent>(
             r#"
-            SELECT id, name, user_id, status as "status: AgentStatus", image_url
+            SELECT id, name, user_id, status, image_url
             FROM agents
             ORDER BY id DESC
             "#,
@@ -156,9 +152,9 @@ impl AgentManager {
         &self,
         count: usize,
     ) -> Result<Vec<AgentInfo>, sqlx::Error> {
-        let agents = sqlx::query_as::<_, (i64, String)>(
+        let agents = sqlx::query_as::<_, (i64, i64, String)>(
             r#"
-            SELECT id, image_url
+            SELECT id, user_id, image_url
             FROM agents
             WHERE status = 'active'
             ORDER BY RANDOM()
@@ -171,9 +167,19 @@ impl AgentManager {
 
         Ok(agents
             .into_iter()
-            .map(|(id, image_url)| AgentInfo {
-                id,
-                image_url: image_url.into(),
+            .map(|(id, user_id, image_url_str)| {
+                // Parse image URL - should always succeed since we validated on creation
+                let image_url =
+                    AgentImageUrl::parse_full(&image_url_str, user_id).unwrap_or_else(|e| {
+                        tracing::error!(
+                            agent_id = id,
+                            error = %e,
+                            "Failed to parse agent image URL from database"
+                        );
+                        panic!("Invalid agent image in database: {}", e);
+                    });
+
+                AgentInfo { id, image_url }
             })
             .collect())
     }

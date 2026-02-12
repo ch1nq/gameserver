@@ -14,6 +14,7 @@ use axum_login::{
     AuthManagerLayerBuilder, login_required,
     tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite},
 };
+use coordinator::ImageUrl;
 use coordinator::{CoordinatorConfig, GameCoordinator};
 use oauth2::{AuthUrl, ClientId, ClientSecret, TokenUrl, basic::BasicClient};
 use registry_auth::RegistryAuthConfig;
@@ -171,6 +172,8 @@ impl App {
     fn spawn_coordinator(&self, machine_provider: Box<dyn agent_infra::MachineProvider>) {
         let game_host_image = env::var("GAME_HOST_IMAGE")
             .unwrap_or_else(|_| "ghcr.io/ch1nq/achtung-game-host:latest".to_string());
+        let game_host_image =
+            ImageUrl::new(game_host_image).expect("GAME_HOST_IMAGE must be a valid image URL");
 
         let config = CoordinatorConfig {
             game_host_image,

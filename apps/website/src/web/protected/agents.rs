@@ -1,7 +1,7 @@
 use crate::users::AuthSession;
 use crate::web::app::AppState;
 use crate::web::layout::pages::{self, error_page};
-use achtung_core::agents::agent::{AgentId, AgentName, ImageUrl};
+use achtung_core::agents::agent::{AgentId, AgentImageUrl, AgentName};
 use achtung_ui::error::Error;
 use axum::{
     Form, Router,
@@ -105,6 +105,7 @@ async fn new_agent(
         return StatusCode::UNAUTHORIZED.into_response();
     };
 
+    // Validate agent name
     let name = match AgentName::from_str(&form.name) {
         Ok(n) => n,
         Err(e) => {
@@ -118,12 +119,13 @@ async fn new_agent(
         }
     };
 
-    let image_url = match ImageUrl::new(format!("user-{}/{}", user.id, form.image)) {
-        Ok(url) => url,
+    // Parse and validate image URL format
+    let agent_image = match AgentImageUrl::parse(user.id, &form.image) {
+        Ok(img) => img,
         Err(e) => {
-            tracing::warn!("Invalid image URL: {}", e);
+            tracing::warn!("Invalid image: {}", e);
             return error_page(
-                Error::validation_error(&format!("Invalid image URL: {}", e)),
+                Error::validation_error(&format!("Invalid image: {}", e)),
                 &auth_session,
             )
             .render()
@@ -131,10 +133,54 @@ async fn new_agent(
         }
     };
 
-    // Create agent in database only - infrastructure is provisioned per-match
+    // Get system token for registry validation
+    let system_token = match state.registry_token_manager.get_system_token().await {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!("Failed to get system token: {}", e);
+            return error_page(
+                Error::internal_error("Failed to validate image"),
+                &auth_session,
+            )
+            .render()
+            .into_response();
+        }
+    };
+
+    // Validate image exists in registry
+    let image_exists = match state
+        .registry_client
+        .image_exists(user.id, &agent_image, &system_token.value)
+        .await
+    {
+        Ok(exists) => exists,
+        Err(e) => {
+            tracing::error!("Failed to validate image: {}", e);
+            return error_page(
+                Error::internal_error("Failed to validate image"),
+                &auth_session,
+            )
+            .render()
+            .into_response();
+        }
+    };
+
+    if !image_exists {
+        return error_page(
+            Error::validation_error(&format!(
+                "Image '{}' not found in your registry. Please select an available image.",
+                form.image
+            )),
+            &auth_session,
+        )
+        .render()
+        .into_response();
+    }
+
+    // Create agent - image is validated
     match state
         .agent_manager
-        .create_agent(name, user.id, image_url)
+        .create_agent(name, user.id, agent_image)
         .await
     {
         Ok(_) => Redirect::to("/agents").into_response(),

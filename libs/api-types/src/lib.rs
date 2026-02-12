@@ -2,7 +2,7 @@
 pub mod client;
 pub mod routes;
 
-use common::{AgentId, AgentName, AgentStatus, ApiTokenId, ImageUrl, UserId};
+use common::{AgentId, AgentImageUrl, AgentName, AgentStatus, ApiTokenId, UserId};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CreateAgentRequest {
@@ -21,7 +21,7 @@ pub struct Agent {
     pub name: AgentName,
     pub user_id: UserId,
     pub status: AgentStatus,
-    pub image_url: ImageUrl,
+    pub image_url: AgentImageUrl,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -60,7 +60,8 @@ pub trait GameApi {
     async fn activate_agent(&self, id: AgentId) -> Result<Agent, ApiError>;
     async fn deactivate_agent(&self, id: AgentId) -> Result<Agent, ApiError>;
     async fn delete_agent(&self, id: AgentId) -> Result<(), ApiError>;
-    async fn list_images(&self) -> Result<Vec<String>, ApiError>;
+    async fn list_images(&self) -> Result<Vec<AgentImageUrl>, ApiError>;
+    async fn validate_image(&self, image: &str) -> Result<AgentImageUrl, ApiError>;
     async fn list_tokens(&self) -> Result<Vec<ApiToken>, ApiError>;
     async fn create_token(&self, req: CreateTokenRequest) -> Result<CreateTokenResponse, ApiError>;
     async fn revoke_token(&self, id: ApiTokenId) -> Result<(), ApiError>;

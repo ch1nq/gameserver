@@ -21,6 +21,7 @@ pub const TOKEN: &str = "/{id}";
 
 // Registry
 pub const IMAGES: &str = "/images";
+pub const VALIDATE_IMAGE: &str = "/validate-image";
 
 pub fn agents_path() -> String {
     AGENTS_PREFIX.to_string()
@@ -48,4 +49,8 @@ pub fn token_path(id: impl std::fmt::Display) -> String {
 
 pub fn images_path() -> String {
     format!("{}{}", REGISTRY_PREFIX, IMAGES)
+}
+
+pub fn validate_image_path() -> String {
+    format!("{}{}", REGISTRY_PREFIX, VALIDATE_IMAGE)
 }

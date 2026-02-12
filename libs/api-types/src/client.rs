@@ -1,4 +1,4 @@
-use common::{AgentId, ApiTokenId, UserId};
+use common::{AgentId, AgentImageUrl, ApiTokenId, UserId};
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 
@@ -146,8 +146,18 @@ impl GameApi for HttpClient {
         self.delete_request(&routes::agent_path(id)).await
     }
 
-    async fn list_images(&self) -> Result<Vec<String>, ApiError> {
+    async fn list_images(&self) -> Result<Vec<AgentImageUrl>, ApiError> {
         self.get(&routes::images_path()).await
+    }
+
+    async fn validate_image(&self, image: &str) -> Result<AgentImageUrl, ApiError> {
+        let response = self
+            .auth(self.client.get(self.url(&routes::validate_image_path())))
+            .query(&[("image", image)])
+            .send()
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+        self.parse_response(response).await
     }
 
     async fn list_tokens(&self) -> Result<Vec<ApiToken>, ApiError> {

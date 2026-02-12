@@ -1,10 +1,13 @@
 use std::time::Duration;
 
 use agent_infra::{ContainerImage, MachineError, MachineHandle, MachineProvider, SpawnConfig};
-use common::{AgentId, AgentInfo, AgentRepository, DeployTokenProvider, ImageUrl};
+use common::{AgentId, AgentInfo, AgentRepository, ContainerImageUrl, DeployTokenProvider};
 use game_host::game_host_client::GameHostClient;
 use game_host::{AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest};
 use tokio::task::JoinHandle;
+
+// Re-export types for public API
+pub use common::ImageUrl;
 
 // Generated from protos/game_host.proto
 pub mod game_host {
@@ -19,7 +22,7 @@ pub struct CoordinatorConfig {
     /// Points to a public registry image (e.g., ghcr.io/ch1nq/achtung-game-host:latest)
     /// that is used directly without copying through the local registry.
     /// User agent images continue to use the local registry workflow.
-    pub game_host_image: String,
+    pub game_host_image: ImageUrl,
 
     /// Number of agents per game
     pub agents_per_game: usize,
@@ -158,12 +161,10 @@ impl GameCoordinator {
 
     async fn spawn_game_host(&self) -> Result<MachineHandle, CoordinatorError> {
         // Game host is on GHCR (public registry), no copy or token needed
-        let config = SpawnConfig::new(ContainerImage::Public(ImageUrl::from(
-            self.config.game_host_image.clone(),
-        )))
-        .env("NUM_PLAYERS", "4")
-        .env("GAME", "achtung")
-        .env("TICK_RATE_MS", "200");
+        let config = SpawnConfig::new(ContainerImage::Public(self.config.game_host_image.clone()))
+            .env("NUM_PLAYERS", "4")
+            .env("GAME", "achtung")
+            .env("TICK_RATE_MS", "200");
 
         self.machine_provider
             .spawn(config)
@@ -180,7 +181,7 @@ impl GameCoordinator {
 
         let config = SpawnConfig {
             container_image: ContainerImage::Private {
-                image_url: agent.image_url.clone(),
+                image_url: agent.image_url.to_image_url(),
                 registry_token,
             },
             env: std::collections::HashMap::new(),
