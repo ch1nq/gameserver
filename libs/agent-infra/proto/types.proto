@@ -1,0 +1,182 @@
+syntax = "proto3";
+
+import "google/protobuf/any.proto";
+
+option go_package = ".;proto";
+// Message to store bundle/config.json bytes
+message ExtraData {
+	bytes JsonSpec = 1;
+	google.protobuf.Any RuncOptions = 2;
+	uint32 StdinPort = 3;
+	uint32 StdoutPort = 4;
+	uint32 StderrPort = 5;
+}
+
+// Message to specify network config for a Firecracker VM
+message FirecrackerNetworkInterface {
+	bool AllowMMDS = 1; // Specifies if metadata service should be available on this network interface
+	FirecrackerRateLimiter InRateLimiter = 2; // Specifies a rate limiter for incoming bytes
+	FirecrackerRateLimiter OutRateLimiter = 3; // Specifies a rate limiter for outgoing bytes
+
+	// CNIConfiguration specifies CNI configuration that will be used to generate
+	// a network interface for a Firecracker VM.
+	CNIConfiguration CNIConfig = 4;
+
+	// StaticNetworkConfiguration specifies static configuration parameters for a
+	// Firecracker VM's network interface
+	StaticNetworkConfiguration StaticConfig = 5;
+}
+
+// Message to specify CNI configuration that will be used to
+// generate a network interface for a Firecracker VM
+message CNIConfiguration {
+	// NetworkName is the name of a CNI network (as found in CNI
+	// configuration files) that will be used to generate the
+	// network interface.
+	string NetworkName = 1;
+
+	// InterfaceName corresponds to the CNI_IFNAME parameter that will be
+	// provided to CNI plugins during invocation.
+	string InterfaceName = 2;
+
+	// BinPath is a list of directories that will be searched when
+	// looking for CNI plugin binaries. Defaults to just "/opt/cni/bin"
+	repeated string BinPath = 3;
+
+	// ConfDir is the directory in which CNI configuration will be sought.
+	// If not specified, will default to "/etc/cni/conf.d".
+	string ConfDir = 4;
+
+	// CacheDir is the directory in which CNI results will be temporarily
+	// cached by the runtime. If not specified, it will default to
+	// "/var/lib/cni"
+	string CacheDir = 5;
+
+	message CNIArg {
+		string Key = 1;
+		string Value = 2;
+	}
+
+	// Args corresponds to the CNI_ARGS parameter that will be provided to
+	// CNI plugins on invocation.
+	repeated CNIArg Args = 6;
+}
+
+// Message to specify static configuration parameters for a
+// Firecracker VM's network interface
+message StaticNetworkConfiguration {
+	string MacAddress = 1; // Specifies the mac address for the the device
+	string HostDevName = 2; // Specifies the name of the tap device on the host
+
+	// IPConfig optionally provides static IP configuration that will be configured
+	// on the VM's internal networking interface. If not specified, no IP
+	// configuration will be applied to the VM's internal nic automatically.
+	IPConfiguration IPConfig = 3;
+}
+
+// Message to specify static IP configuration that will be
+// applied to a Firecracker VM's network interface internally
+message IPConfiguration {
+	// PrimaryAddr specifies, in CIDR notation, the primary address
+	// and subnet that a network interface will be assigned inside
+	// the VM.
+	string PrimaryAddr = 1;
+
+	// GatewayAddr specifies the default gateway that a network interface
+	// should use inside the VM.
+	string GatewayAddr = 3;
+
+	// Nameservers is a list of nameservers that the VM will be configured
+	// to use internally. Currently only up to 2 nameservers can be specified
+	// (any more in the list will be ignored) and configuration is provided
+	// to the VM via /proc/net/pnp.
+	repeated string Nameservers = 4;
+}
+
+// Message to set the machine config for a Firecracker VM
+message FirecrackerMachineConfiguration {
+	string CPUTemplate = 1; // Specifies the cpu template. Example: "T2" or "C3"
+	bool HtEnabled = 2; // Specifies if hyper-threading should be enabled
+	 // Specifies the memory size of VM
+	 // This lets us create a Firecracker VM of up to 4096 TiB, which
+	 // for a microVM should be large enough
+	uint32 MemSizeMib = 3;
+	uint32 VcpuCount = 4; // Specifies the number of vCPUs for the VM
+}
+
+// Message to specify the block device config for a Firecracker VM
+message FirecrackerRootDrive {
+  // (Required) HostPath is the path on the host to the filesystem image or device
+  // that will supply the rootfs of the VM.
+  string HostPath = 1;
+
+  // (Optional) If the HostPath points to a drive or image with multiple
+  // partitions, Partuuid specifies which partition will be used to boot
+  // the VM
+  string Partuuid = 2;
+
+  // (Optional) If set to true, IsWritable results in the VM Guest's rootfs
+  // being mounted as read-write. Defaults to false, in which case the
+  // rootfs is mounted as read-only.
+  bool IsWritable = 3;
+
+  // (Optional) RateLimiter configuration that will be applied to the
+  // backing-drive for the VM's rootfs
+  FirecrackerRateLimiter RateLimiter = 4;
+
+  // (Optional) CacheType specifies the caching strategy for the block device.
+  // The supported caching strategies are: "Unsafe"(default) and "Writeback".
+  string CacheType = 5;
+}
+
+message FirecrackerDriveMount {
+  // (Required) HostPath is the path on the host to the filesystem image or device
+  // that will be mounted inside the VM.
+  string HostPath = 1;
+
+  // (Required) VMPath is the path inside the VM guest at which the filesystem
+  // image or device will be mounted.
+  string VMPath = 2;
+
+  // (Required) FilesystemType is the filesystem type (i.e. ext4, xfs, etc.), as
+  // used when mounting the filesystem image inside the VM. The VM guest kernel
+  // is expected to have support for this filesystem.
+  string FilesystemType = 3;
+
+  // (Optional) Options are fstab-style options that the mount will be performed
+  // within the VM (i.e. ["rw", "noatime"]). Defaults to none if not specified.
+  repeated string Options = 4;
+
+  // (Optional) RateLimiter configuration that will be applied to the
+  // backing-drive for the VM's rootfs
+  FirecrackerRateLimiter RateLimiter = 5;
+
+  // (Optional) If set to true, IsWritable results in the backing file for the
+  // drive being opened as read-write by the Firecracker VMM on the host, allowing
+  // writes to the image from within the guest. Defaults to false, in which case
+  // the block device in the VM will be read-only.
+  bool IsWritable = 6;
+
+  // (Optional) CacheType specifies the caching strategy for the block device.
+  // The supported caching strategies are: "Unsafe"(default) and "Writeback".
+  string CacheType = 7;
+}
+
+// Message to specify an IO rate limiter with bytes/s and ops/s limits
+message FirecrackerRateLimiter {
+	FirecrackerTokenBucket Bandwidth = 1; // Specifies a token bucket with bytes as tokens
+	FirecrackerTokenBucket Ops = 2; // Specifies a token bucket with operations as tokens
+}
+
+// Message to specify a token buicket used to rate limit disk and network IO for a Firecracker VM
+message FirecrackerTokenBucket {
+	int64 OneTimeBurst = 1; // Specifies the initial size of the token bucket
+	int64 RefillTime = 2; // Specifies the amount of millis it takes for the bucket to fill
+	int64 Capacity = 3; // Specifies the number of tokens this bucket can hold
+}
+
+message FirecrackerBalloonDevice {
+    int64 AmountMib = 1; //Target balloon size in MiB.
+    bool DeflateOnOom = 2; // Whether the balloon should deflate when the guest has memory pressure.
+    int64 StatsPollingIntervals = 3; // Interval in seconds between refreshing statistics.
+}

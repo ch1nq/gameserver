@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+import "firecracker.proto";
+
+option go_package = ".;fccontrol";
+
+service Firecracker {
+    // Runs new Firecracker VM instance
+    rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
+
+    // Pauses a VM
+    rpc PauseVM(PauseVMRequest) returns (google.protobuf.Empty);
+
+    // Resumes a VM
+    rpc ResumeVM(ResumeVMRequest) returns (google.protobuf.Empty);
+
+    // Stops existing Firecracker instance by VM ID
+    rpc StopVM(StopVMRequest) returns (google.protobuf.Empty);
+
+    // Returns VM info by VM ID
+    rpc GetVMInfo(GetVMInfoRequest) returns (GetVMInfoResponse);
+
+    // Sets VM's instance metadata
+    rpc SetVMMetadata(SetVMMetadataRequest) returns (google.protobuf.Empty);
+
+    // Update Vm's instance metadata
+    rpc UpdateVMMetadata(UpdateVMMetadataRequest) returns (google.protobuf.Empty);
+
+    // Get Vm's instance metadata
+    rpc GetVMMetadata(GetVMMetadataRequest) returns (GetVMMetadataResponse);
+
+    // Get balloon configuration
+    rpc GetBalloonConfig(GetBalloonConfigRequest) returns (GetBalloonConfigResponse);
+
+    // Update balloon's memory
+    rpc UpdateBalloon(UpdateBalloonRequest) returns (google.protobuf.Empty);
+
+    // Gets a balloon device statistics
+    rpc GetBalloonStats(GetBalloonStatsRequest) returns(GetBalloonStatsResponse);
+
+    // Updates a balloon device statistics polling interval.
+    rpc UpdateBalloonStats(UpdateBalloonStatsRequest) returns(google.protobuf.Empty);
+}

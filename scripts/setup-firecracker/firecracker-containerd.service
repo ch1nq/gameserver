@@ -1,0 +1,18 @@
+[Unit]
+Description=firecracker-containerd daemon (microVM container runtime)
+Documentation=https://github.com/firecracker-microvm/firecracker-containerd
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/firecracker-containerd --config /etc/firecracker-containerd/config.toml
+Environment=FIRECRACKER_CONTAINERD_RUNTIME_CONFIG_PATH=/etc/containerd/firecracker-runtime.json
+Delegate=yes
+KillMode=process
+Restart=always
+RestartSec=5
+LimitNOFILE=1048576
+# firecracker needs /dev/kvm; run as root
+User=root
+
+[Install]
+WantedBy=multi-user.target

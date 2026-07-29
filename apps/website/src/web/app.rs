@@ -8,18 +8,22 @@ use achtung_core::agents::manager::AgentManager;
 use achtung_core::api_tokens::ApiTokenManager;
 use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
-use agent_infra::FlyMachineProviderConfig;
+use agent_infra::{
+    FirecrackerMachineProviderConfig, FlyMachineProviderConfig, FlyMachineProviderHost,
+    MachineProvider, Reaper, ReaperConfig,
+};
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
     AuthManagerLayerBuilder, login_required,
     tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite},
 };
-use coordinator::ImageUrl;
-use coordinator::{CoordinatorConfig, GameCoordinator};
+use coordinator::{CoordinatorConfig, GameCoordinator, ImageUrl};
+use ipnet::Ipv4Net;
 use oauth2::{AuthUrl, ClientId, ClientSecret, TokenUrl, basic::BasicClient};
 use registry_auth::RegistryAuthConfig;
 use sqlx::PgPool;
 use std::env;
+use std::sync::Arc;
 use time::Duration;
 use tower_http::services::ServeDir;
 use tower_sessions_sqlx_store::PostgresStore;
@@ -98,24 +102,24 @@ impl App {
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         if env::var("ENABLE_COORDINATOR").is_ok() {
-            let fly_config = FlyMachineProviderConfig {
-                fly_token: env::var("FLY_TOKEN").expect("FLY_TOKEN required for coordinator"),
-                fly_org: env::var("FLY_ORG").expect("FLY_ORG required for coordinator"),
-                fly_host: match env::var("FLY_HOST").as_deref() {
-                    Ok("internal") => agent_infra::FlyMachineProviderHost::Internal,
-                    Ok("public") => agent_infra::FlyMachineProviderHost::Public,
-                    Ok(_) => panic!("unknown FLY_HOST value"),
-                    Err(_) => agent_infra::FlyMachineProviderHost::Internal,
-                },
-                registry_url: env::var("REGISTRY_URL")
-                    .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string()),
-            };
-
-            let coordinator_provider = agent_infra::FlyMachineProvider::new(fly_config.clone());
-            let reaper_provider = agent_infra::FlyMachineProvider::new(fly_config);
-
-            self.spawn_coordinator(Box::new(coordinator_provider));
-            self.spawn_reaper(reaper_provider);
+            match env::var("MACHINE_PROVIDER").as_deref() {
+                Ok("firecracker") => {
+                    let config = firecracker_config_from_env();
+                    let provider = Arc::new(
+                        agent_infra::FirecrackerMachineProvider::new(config)
+                            .await
+                            .expect("Failed to connect to containerd"),
+                    );
+                    // Firecracker containers are ids like "achtung-<id>-slot-N".
+                    self.spawn_coordinator_and_reaper(provider, "achtung-");
+                }
+                _ => {
+                    let config = fly_config_from_env();
+                    let provider = Arc::new(agent_infra::FlyMachineProvider::new(config));
+                    // Fly apps are named "achtung-match-<id>-app".
+                    self.spawn_coordinator_and_reaper(provider, "achtung-match-");
+                }
+            }
         }
 
         // Static files service
@@ -169,7 +173,20 @@ impl App {
         Ok(())
     }
 
-    fn spawn_coordinator(&self, machine_provider: Box<dyn agent_infra::MachineProvider>) {
+    /// Spawn coordinator and reaper sharing a single `Arc<P>` provider.
+    ///
+    /// `reaper_prefix_default` is the backend-specific default used to match this
+    /// provider's resources when `REAPER_PREFIX` is not set in the environment.
+    fn spawn_coordinator_and_reaper<P: MachineProvider + 'static>(
+        &self,
+        provider: Arc<P>,
+        reaper_prefix_default: &str,
+    ) {
+        self.spawn_coordinator(provider.clone());
+        self.spawn_reaper(provider, reaper_prefix_default);
+    }
+
+    fn spawn_coordinator<P: MachineProvider + 'static>(&self, provider: Arc<P>) {
         let game_host_image = env::var("GAME_HOST_IMAGE")
             .unwrap_or_else(|_| "ghcr.io/ch1nq/achtung-game-host:latest".to_string());
         let game_host_image =
@@ -200,7 +217,7 @@ impl App {
 
         let coordinator = GameCoordinator::new(
             config,
-            machine_provider,
+            provider,
             Box::new(self.state.agent_manager.clone()),
             Box::new(self.state.registry_token_manager.clone()),
         );
@@ -209,28 +226,32 @@ impl App {
         tracing::info!("Game coordinator spawned");
     }
 
-    fn spawn_reaper<P: agent_infra::MachineProvider + 'static>(&self, machine_provider: P) {
-        let reaper_config = agent_infra::ReaperConfig {
+    fn spawn_reaper<P: MachineProvider + 'static>(
+        &self,
+        provider: Arc<P>,
+        reaper_prefix_default: &str,
+    ) {
+        let reaper_config = ReaperConfig {
             interval: std::time::Duration::from_secs(
                 env::var("REAPER_INTERVAL_SECS")
                     .ok()
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(300), // Default: 5 minutes
+                    .unwrap_or(300),
             ),
             max_age: std::time::Duration::from_secs(
                 env::var("REAPER_MAX_AGE_SECS")
                     .ok()
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(3600), // Default: 1 hour
+                    .unwrap_or(3600),
             ),
-            prefix: env::var("REAPER_PREFIX").unwrap_or_else(|_| "achtung-match-".to_string()),
+            prefix: env::var("REAPER_PREFIX").unwrap_or_else(|_| reaper_prefix_default.to_string()),
         };
 
         let interval = reaper_config.interval;
         let max_age = reaper_config.max_age;
         let prefix = reaper_config.prefix.clone();
 
-        let reaper = agent_infra::Reaper::new(machine_provider, reaper_config);
+        let reaper = Reaper::new(provider, reaper_config);
         reaper.spawn();
 
         tracing::info!(
@@ -239,5 +260,44 @@ impl App {
             max_age,
             prefix
         );
+    }
+}
+
+fn fly_config_from_env() -> FlyMachineProviderConfig {
+    FlyMachineProviderConfig {
+        fly_token: env::var("FLY_TOKEN").expect("FLY_TOKEN required when MACHINE_PROVIDER=fly"),
+        fly_org: env::var("FLY_ORG").expect("FLY_ORG required when MACHINE_PROVIDER=fly"),
+        fly_host: match env::var("FLY_HOST").as_deref() {
+            Ok("public") => FlyMachineProviderHost::Public,
+            Ok("internal") | Err(_) => FlyMachineProviderHost::Internal,
+            Ok(v) => panic!("Unknown FLY_HOST value: {v}"),
+        },
+        registry_url: env::var("REGISTRY_URL")
+            .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string()),
+    }
+}
+
+fn firecracker_config_from_env() -> FirecrackerMachineProviderConfig {
+    let defaults = FirecrackerMachineProviderConfig::default();
+    FirecrackerMachineProviderConfig {
+        containerd_socket: env::var("CONTAINERD_SOCKET").unwrap_or(defaults.containerd_socket),
+        containerd_namespace: env::var("CONTAINERD_NAMESPACE")
+            .unwrap_or(defaults.containerd_namespace),
+        runtime: env::var("FIRECRACKER_RUNTIME").unwrap_or(defaults.runtime),
+        kernel_path: env::var("FIRECRACKER_KERNEL")
+            .expect("FIRECRACKER_KERNEL required when MACHINE_PROVIDER=firecracker"),
+        vcpu_count: env::var("FIRECRACKER_VCPU_COUNT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(defaults.vcpu_count),
+        mem_size_mib: env::var("FIRECRACKER_MEM_SIZE_MIB")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(defaults.mem_size_mib),
+        registry_url: env::var("REGISTRY_URL").unwrap_or(defaults.registry_url),
+        subnet_pool: env::var("FIRECRACKER_SUBNET_POOL")
+            .ok()
+            .and_then(|s| s.parse::<Ipv4Net>().ok())
+            .unwrap_or(defaults.subnet_pool),
     }
 }

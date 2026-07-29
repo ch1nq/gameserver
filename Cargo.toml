@@ -68,3 +68,10 @@ log = "0.4"
 pretty_env_logger = "0.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Firecracker/containerd
+containerd-client = "0.8"
+ipnet = "2.11"
+prost-types = "0.13"
+# ttrpc: firecracker-containerd's control API (CreateVM/StopVM) is ttrpc, not gRPC
+ttrpc = { version = "0.9", features = ["async"] }

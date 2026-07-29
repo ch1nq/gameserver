@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use agent_infra::{ContainerImage, MachineError, MachineHandle, MachineProvider, SpawnConfig};
@@ -48,17 +49,17 @@ pub struct CoordinatorConfig {
 }
 
 /// The game coordinator that orchestrates matches
-pub struct GameCoordinator {
+pub struct GameCoordinator<P: MachineProvider> {
     config: CoordinatorConfig,
-    machine_provider: Box<dyn MachineProvider>,
+    machine_provider: Arc<P>,
     agent_repo: Box<dyn AgentRepository>,
     token_provider: Box<dyn DeployTokenProvider>,
 }
 
-impl GameCoordinator {
+impl<P: MachineProvider> GameCoordinator<P> {
     pub fn new(
         config: CoordinatorConfig,
-        machine_provider: Box<dyn MachineProvider>,
+        machine_provider: Arc<P>,
         agent_repo: Box<dyn AgentRepository>,
         token_provider: Box<dyn DeployTokenProvider>,
     ) -> Self {
@@ -91,7 +92,6 @@ impl GameCoordinator {
                 }
             }
 
-            // Wait before starting next game
             tokio::time::sleep(self.config.game_interval).await;
         }
     }
@@ -116,39 +116,22 @@ impl GameCoordinator {
 
         tracing::info!("Starting game with {} agents", agents.len());
 
-        // 2. Spawn game host machine
-        let game_host_handle = self.spawn_game_host().await?;
-        tracing::info!("Game host spawned: {}", game_host_handle.app_name);
+        // 2. Initialize match infrastructure (network, bridge, etc.)
+        let match_id = agent_infra::generate_id();
+        let ctx = self
+            .machine_provider
+            .init_match(&match_id)
+            .await
+            .map_err(CoordinatorError::MachineSpawn)?;
 
-        // 3. Spawn agent machines
-        let mut agent_handles = Vec::new();
-        for agent in &agents {
-            match self.spawn_agent(agent).await {
-                Ok(handle) => {
-                    tracing::info!(
-                        "Agent {} spawned: {} at {}",
-                        agent.id,
-                        handle.app_name,
-                        handle.private_ip
-                    );
-                    agent_handles.push((agent.id, handle));
-                }
-                Err(e) => {
-                    tracing::error!("Failed to spawn agent {}: {}", agent.id, e);
-                    // Cleanup already-spawned machines
-                    self.cleanup(&Some(game_host_handle), &agent_handles).await;
-                    return Err(e);
-                }
-            }
+        // 3. Run the game, then always clean up
+        let game_result = self.run_game_inner(&ctx, &agents).await;
+
+        // 4. Cleanup match infrastructure regardless of outcome
+        if let Err(e) = self.machine_provider.cleanup_match(ctx).await {
+            tracing::error!("Failed to cleanup match {}: {}", match_id, e);
         }
 
-        // 4. Connect to game host and start game
-        let game_result = self.run_game(&game_host_handle, &agent_handles).await;
-
-        // 5. Cleanup all machines
-        self.cleanup(&Some(game_host_handle), &agent_handles).await;
-
-        // 6. Handle result
         match game_result {
             Ok(result) => {
                 tracing::info!("Game finished: {:?}", result);
@@ -159,51 +142,106 @@ impl GameCoordinator {
         }
     }
 
-    async fn spawn_game_host(&self) -> Result<MachineHandle, CoordinatorError> {
-        // Game host is on GHCR (public registry), no copy or token needed
-        let config = SpawnConfig::new(ContainerImage::Public(self.config.game_host_image.clone()))
-            .env("NUM_PLAYERS", "4")
-            .env("GAME", "achtung")
-            .env("TICK_RATE_MS", "200");
+    /// Spawn all machines, run the game, then destroy all machines.
+    ///
+    /// Returns before `cleanup_match` — the caller handles that so it always runs.
+    async fn run_game_inner(
+        &self,
+        ctx: &P::MatchContext,
+        agents: &[AgentInfo],
+    ) -> Result<GameResult, CoordinatorError> {
+        // Spawn game host (slot 0)
+        let game_host_handle = self.spawn_game_host(ctx).await?;
+        tracing::info!("Game host spawned at {}", game_host_handle.private_ip);
+
+        // Spawn agents (slots 1+), cleaning up on failure
+        let mut agent_handles: Vec<(AgentId, MachineHandle)> = Vec::new();
+        for (i, agent) in agents.iter().enumerate() {
+            let slot = (i + 1) as u8;
+            match self.spawn_agent(ctx, agent, slot).await {
+                Ok(handle) => {
+                    tracing::info!(
+                        agent_id = agent.id,
+                        ip = handle.private_ip,
+                        slot,
+                        "Agent spawned"
+                    );
+                    agent_handles.push((agent.id, handle));
+                }
+                Err(e) => {
+                    tracing::error!(agent_id = agent.id, "Failed to spawn agent: {}", e);
+                    self.destroy_all(ctx, Some(&game_host_handle), &agent_handles)
+                        .await;
+                    return Err(e);
+                }
+            }
+        }
+
+        // Run the game
+        let game_result = self.run_game(ctx, &game_host_handle, &agent_handles).await;
+
+        // Destroy machines regardless of game outcome
+        self.destroy_all(ctx, Some(&game_host_handle), &agent_handles)
+            .await;
+
+        game_result
+    }
+
+    async fn spawn_game_host(
+        &self,
+        ctx: &P::MatchContext,
+    ) -> Result<MachineHandle, CoordinatorError> {
+        let config = SpawnConfig::new(
+            ContainerImage::Public(self.config.game_host_image.clone()),
+            0,
+        )
+        .env("NUM_PLAYERS", self.config.agents_per_game.to_string())
+        .env("GAME", "achtung")
+        .env("TICK_RATE_MS", self.config.tick_rate_ms.to_string());
 
         self.machine_provider
-            .spawn(config)
+            .spawn(ctx, config)
             .await
             .map_err(CoordinatorError::MachineSpawn)
     }
 
-    async fn spawn_agent(&self, agent: &AgentInfo) -> Result<MachineHandle, CoordinatorError> {
+    async fn spawn_agent(
+        &self,
+        ctx: &P::MatchContext,
+        agent: &AgentInfo,
+        slot: u8,
+    ) -> Result<MachineHandle, CoordinatorError> {
         let registry_token = self
             .token_provider
             .get_deploy_token(&agent.image_url)
             .await
             .map_err(CoordinatorError::DeployToken)?;
 
-        let config = SpawnConfig {
-            container_image: ContainerImage::Private {
+        let config = SpawnConfig::new(
+            ContainerImage::Private {
                 image_url: agent.image_url.to_image_url(),
                 registry_token,
             },
-            env: std::collections::HashMap::new(),
-        };
+            slot,
+        );
 
         self.machine_provider
-            .spawn(config)
+            .spawn(ctx, config)
             .await
             .map_err(CoordinatorError::MachineSpawn)
     }
 
     async fn run_game(
         &self,
+        _ctx: &P::MatchContext,
         game_host: &MachineHandle,
         agents: &[(AgentId, MachineHandle)],
     ) -> Result<GameResult, CoordinatorError> {
-        // Wait a bit for the game host to start
+        // Wait for the game host to start up
         tokio::time::sleep(Duration::from_secs(5)).await;
 
-        // Connect to game host
         let game_host_addr = format!(
-            "http://[{}]:{}",
+            "http://{}:{}",
             game_host.private_ip, self.config.game_host_grpc_port
         );
 
@@ -211,16 +249,14 @@ impl GameCoordinator {
             .await
             .map_err(|e| CoordinatorError::Connection(e.to_string()))?;
 
-        // Build agent endpoints
         let agent_endpoints: Vec<AgentEndpoint> = agents
             .iter()
             .map(|(id, handle)| AgentEndpoint {
                 agent_id: *id,
-                address: format!("[{}]:{}", handle.private_ip, self.config.agent_grpc_port),
+                address: format!("{}:{}", handle.private_ip, self.config.agent_grpc_port),
             })
             .collect();
 
-        // Start the game
         let start_request = StartGameRequest {
             agents: agent_endpoints,
             config: Some(GameConfig {
@@ -236,18 +272,16 @@ impl GameCoordinator {
             .map_err(|e| CoordinatorError::GameHost(e.to_string()))?;
 
         let game_id = start_response.into_inner().game_id;
-        tracing::info!("Game started with ID: {}", game_id);
+        tracing::info!("Game started: {}", game_id);
 
-        // Poll for completion
+        // Poll until the game ends
         loop {
             tokio::time::sleep(self.config.poll_interval).await;
 
-            let status_request = GetStatusRequest {
-                game_id: game_id.clone(),
-            };
-
             let status = client
-                .get_status(status_request)
+                .get_status(GetStatusRequest {
+                    game_id: game_id.clone(),
+                })
                 .await
                 .map_err(|e| CoordinatorError::GameHost(e.to_string()))?
                 .into_inner();
@@ -255,6 +289,9 @@ impl GameCoordinator {
             match status.state() {
                 GameState::Running => {
                     tracing::debug!("Game running, tick {}", status.current_tick);
+                }
+                GameState::WaitingForAgents => {
+                    tracing::debug!("Waiting for agents to connect...");
                 }
                 GameState::Finished => {
                     let result = status.result.ok_or_else(|| {
@@ -280,9 +317,6 @@ impl GameCoordinator {
                         .unwrap_or_else(|| "Unknown error".into());
                     return Err(CoordinatorError::GameHost(error));
                 }
-                GameState::WaitingForAgents => {
-                    tracing::debug!("Waiting for agents to connect...");
-                }
                 GameState::Unspecified => {
                     return Err(CoordinatorError::GameHost("Unknown game state".into()));
                 }
@@ -290,21 +324,20 @@ impl GameCoordinator {
         }
     }
 
-    async fn cleanup(
+    /// Destroy all spawned machines. Best-effort: logs errors but does not abort.
+    async fn destroy_all(
         &self,
-        game_host: &Option<MachineHandle>,
+        ctx: &P::MatchContext,
+        game_host: Option<&MachineHandle>,
         agents: &[(AgentId, MachineHandle)],
     ) {
-        // Destroy game host
-        if let Some(handle) = game_host {
-            if let Err(e) = self.machine_provider.destroy(handle).await {
-                tracing::error!("Failed to destroy game host: {}", e);
-            }
+        if let Some(handle) = game_host
+            && let Err(e) = self.machine_provider.destroy(ctx, handle).await
+        {
+            tracing::error!("Failed to destroy game host: {}", e);
         }
-
-        // Destroy agent machines
         for (agent_id, handle) in agents {
-            if let Err(e) = self.machine_provider.destroy(handle).await {
+            if let Err(e) = self.machine_provider.destroy(ctx, handle).await {
                 tracing::error!("Failed to destroy agent {}: {}", agent_id, e);
             }
         }
