@@ -22,13 +22,13 @@ COPY libs ./libs
 COPY protos ./protos
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --bin achtung-host
+    cargo build --release --bin sample-agent
 
 
 FROM debian:bookworm-slim AS runner
 RUN apt-get update && \
     apt-get install -y ca-certificates && \
     rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/achtung-host /usr/local/bin/
-ENV PORT=50051
-ENTRYPOINT ["/usr/local/bin/achtung-host"]
+COPY --from=builder /app/target/release/sample-agent /usr/local/bin/
+ENV PORT=50052
+ENTRYPOINT ["/usr/local/bin/sample-agent"]

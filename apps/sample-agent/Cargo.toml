@@ -1,14 +1,19 @@
 [package]
-name = "achtung-host"
+name = "sample-agent"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "achtung-host"
+name = "sample-agent"
 path = "src/main.rs"
 
 [dependencies]
-arcadio = { version = "0.1.1", path = "../../libs/game-host" }
+tonic = { workspace = true }
+prost = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+rand = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }

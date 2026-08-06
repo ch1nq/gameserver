@@ -202,8 +202,6 @@ impl App {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(50),
-            arena_width: 1000,
-            arena_height: 1000,
             game_interval: std::time::Duration::from_secs(
                 env::var("GAME_INTERVAL_SECS")
                     .ok()
