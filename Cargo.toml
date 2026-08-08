@@ -16,6 +16,7 @@ tokio-stream = "0.1"
 # gRPC
 tonic = "0.12.3"
 tonic-build = "0.12.3"
+tonic-web = "0.12.3"
 prost = "0.13"
 
 # Web framework
@@ -69,6 +70,9 @@ log = "0.4"
 pretty_env_logger = "0.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Local Docker backend
+bollard = "0.18"
 
 # Firecracker/containerd
 containerd-client = "0.8"
