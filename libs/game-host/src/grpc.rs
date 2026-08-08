@@ -27,11 +27,17 @@ pub mod gamehost {
     tonic::include_proto!("gamehost");
 }
 
+// Shared frame message the WatchGame stream emits and the website relays.
+pub mod spectator_frame {
+    tonic::include_proto!("spectator_frame");
+}
+
 use gamehost::game_host_server::{GameHost, GameHostServer};
 use gamehost::{
     AgentEndpoint, AgentPlacement, GameConfig, GameResult, GameState as HostGameState, GameStatus,
-    GetStatusRequest, SpectatorFrame, StartGameRequest, StartGameResponse, WatchGameRequest,
+    GetStatusRequest, StartGameRequest, StartGameResponse, WatchGameRequest,
 };
+use spectator_frame::SpectatorFrame;
 
 /// Safety cap so a stuck game can never loop forever.
 const MAX_TICKS: u64 = 100_000;

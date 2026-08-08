@@ -5,6 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[
             "../../protos/game_host.proto",
             "../../protos/spectator.proto",
+            "../../protos/spectator_frame.proto",
         ],
         &["../../protos"],
     )?;

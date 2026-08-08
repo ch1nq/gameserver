@@ -4853,6 +4853,154 @@
     }
   });
 
+  // gen/spectator_frame_pb.js
+  var require_spectator_frame_pb = __commonJS({
+    "gen/spectator_frame_pb.js"(exports) {
+      var jspb = require_google_protobuf();
+      var goog = jspb;
+      var global2 = typeof globalThis !== "undefined" && globalThis || typeof window !== "undefined" && window || typeof global2 !== "undefined" && global2 || typeof self !== "undefined" && self || function() {
+        return this;
+      }.call(null) || Function("return this")();
+      goog.exportSymbol("proto.spectator_frame.SpectatorFrame", null, global2);
+      proto.spectator_frame.SpectatorFrame = function(opt_data) {
+        jspb.Message.initialize(this, opt_data, 0, -1, null, null);
+      };
+      goog.inherits(proto.spectator_frame.SpectatorFrame, jspb.Message);
+      if (goog.DEBUG && !COMPILED) {
+        proto.spectator_frame.SpectatorFrame.displayName = "proto.spectator_frame.SpectatorFrame";
+      }
+      if (jspb.Message.GENERATE_TO_OBJECT) {
+        proto.spectator_frame.SpectatorFrame.prototype.toObject = function(opt_includeInstance) {
+          return proto.spectator_frame.SpectatorFrame.toObject(opt_includeInstance, this);
+        };
+        proto.spectator_frame.SpectatorFrame.toObject = function(includeInstance, msg) {
+          var f, obj = {
+            tick: jspb.Message.getFieldWithDefault(msg, 1, 0),
+            isSnapshot: jspb.Message.getBooleanFieldWithDefault(msg, 2, false),
+            payload: msg.getPayload_asB64()
+          };
+          if (includeInstance) {
+            obj.$jspbMessageInstance = msg;
+          }
+          return obj;
+        };
+      }
+      proto.spectator_frame.SpectatorFrame.deserializeBinary = function(bytes) {
+        var reader = new jspb.BinaryReader(bytes);
+        var msg = new proto.spectator_frame.SpectatorFrame();
+        return proto.spectator_frame.SpectatorFrame.deserializeBinaryFromReader(msg, reader);
+      };
+      proto.spectator_frame.SpectatorFrame.deserializeBinaryFromReader = function(msg, reader) {
+        while (reader.nextField()) {
+          if (reader.isEndGroup()) {
+            break;
+          }
+          var field = reader.getFieldNumber();
+          switch (field) {
+            case 1:
+              var value = (
+                /** @type {number} */
+                reader.readUint64()
+              );
+              msg.setTick(value);
+              break;
+            case 2:
+              var value = (
+                /** @type {boolean} */
+                reader.readBool()
+              );
+              msg.setIsSnapshot(value);
+              break;
+            case 3:
+              var value = (
+                /** @type {!Uint8Array} */
+                reader.readBytes()
+              );
+              msg.setPayload(value);
+              break;
+            default:
+              reader.skipField();
+              break;
+          }
+        }
+        return msg;
+      };
+      proto.spectator_frame.SpectatorFrame.prototype.serializeBinary = function() {
+        var writer = new jspb.BinaryWriter();
+        proto.spectator_frame.SpectatorFrame.serializeBinaryToWriter(this, writer);
+        return writer.getResultBuffer();
+      };
+      proto.spectator_frame.SpectatorFrame.serializeBinaryToWriter = function(message, writer) {
+        var f = void 0;
+        f = message.getTick();
+        if (f !== 0) {
+          writer.writeUint64(
+            1,
+            f
+          );
+        }
+        f = message.getIsSnapshot();
+        if (f) {
+          writer.writeBool(
+            2,
+            f
+          );
+        }
+        f = message.getPayload_asU8();
+        if (f.length > 0) {
+          writer.writeBytes(
+            3,
+            f
+          );
+        }
+      };
+      proto.spectator_frame.SpectatorFrame.prototype.getTick = function() {
+        return (
+          /** @type {number} */
+          jspb.Message.getFieldWithDefault(this, 1, 0)
+        );
+      };
+      proto.spectator_frame.SpectatorFrame.prototype.setTick = function(value) {
+        return jspb.Message.setProto3IntField(this, 1, value);
+      };
+      proto.spectator_frame.SpectatorFrame.prototype.getIsSnapshot = function() {
+        return (
+          /** @type {boolean} */
+          jspb.Message.getBooleanFieldWithDefault(this, 2, false)
+        );
+      };
+      proto.spectator_frame.SpectatorFrame.prototype.setIsSnapshot = function(value) {
+        return jspb.Message.setProto3BooleanField(this, 2, value);
+      };
+      proto.spectator_frame.SpectatorFrame.prototype.getPayload = function() {
+        return (
+          /** @type {!(string|Uint8Array)} */
+          jspb.Message.getFieldWithDefault(this, 3, "")
+        );
+      };
+      proto.spectator_frame.SpectatorFrame.prototype.getPayload_asB64 = function() {
+        return (
+          /** @type {string} */
+          jspb.Message.bytesAsB64(
+            this.getPayload()
+          )
+        );
+      };
+      proto.spectator_frame.SpectatorFrame.prototype.getPayload_asU8 = function() {
+        return (
+          /** @type {!Uint8Array} */
+          jspb.Message.bytesAsU8(
+            this.getPayload()
+          )
+        );
+      };
+      proto.spectator_frame.SpectatorFrame.prototype.setPayload = function(value) {
+        return jspb.Message.setProto3BytesField(this, 3, value);
+      };
+      goog.object.extend(exports, proto.spectator_frame);
+    }
+  });
+
   // gen/spectator_pb.js
   var require_spectator_pb = __commonJS({
     "gen/spectator_pb.js"(exports) {
@@ -4861,7 +5009,8 @@
       var global2 = typeof globalThis !== "undefined" && globalThis || typeof window !== "undefined" && window || typeof global2 !== "undefined" && global2 || typeof self !== "undefined" && self || function() {
         return this;
       }.call(null) || Function("return this")();
-      goog.exportSymbol("proto.spectator.SpectatorFrame", null, global2);
+      var spectator_frame_pb = require_spectator_frame_pb();
+      goog.object.extend(proto, spectator_frame_pb);
       goog.exportSymbol("proto.spectator.WatchRequest", null, global2);
       proto.spectator.WatchRequest = function(opt_data) {
         jspb.Message.initialize(this, opt_data, 0, -1, null, null);
@@ -4869,13 +5018,6 @@
       goog.inherits(proto.spectator.WatchRequest, jspb.Message);
       if (goog.DEBUG && !COMPILED) {
         proto.spectator.WatchRequest.displayName = "proto.spectator.WatchRequest";
-      }
-      proto.spectator.SpectatorFrame = function(opt_data) {
-        jspb.Message.initialize(this, opt_data, 0, -1, null, null);
-      };
-      goog.inherits(proto.spectator.SpectatorFrame, jspb.Message);
-      if (goog.DEBUG && !COMPILED) {
-        proto.spectator.SpectatorFrame.displayName = "proto.spectator.SpectatorFrame";
       }
       if (jspb.Message.GENERATE_TO_OBJECT) {
         proto.spectator.WatchRequest.prototype.toObject = function(opt_includeInstance) {
@@ -4916,134 +5058,6 @@
       proto.spectator.WatchRequest.serializeBinaryToWriter = function(message, writer) {
         var f = void 0;
       };
-      if (jspb.Message.GENERATE_TO_OBJECT) {
-        proto.spectator.SpectatorFrame.prototype.toObject = function(opt_includeInstance) {
-          return proto.spectator.SpectatorFrame.toObject(opt_includeInstance, this);
-        };
-        proto.spectator.SpectatorFrame.toObject = function(includeInstance, msg) {
-          var f, obj = {
-            tick: jspb.Message.getFieldWithDefault(msg, 1, 0),
-            isSnapshot: jspb.Message.getBooleanFieldWithDefault(msg, 2, false),
-            payload: msg.getPayload_asB64()
-          };
-          if (includeInstance) {
-            obj.$jspbMessageInstance = msg;
-          }
-          return obj;
-        };
-      }
-      proto.spectator.SpectatorFrame.deserializeBinary = function(bytes) {
-        var reader = new jspb.BinaryReader(bytes);
-        var msg = new proto.spectator.SpectatorFrame();
-        return proto.spectator.SpectatorFrame.deserializeBinaryFromReader(msg, reader);
-      };
-      proto.spectator.SpectatorFrame.deserializeBinaryFromReader = function(msg, reader) {
-        while (reader.nextField()) {
-          if (reader.isEndGroup()) {
-            break;
-          }
-          var field = reader.getFieldNumber();
-          switch (field) {
-            case 1:
-              var value = (
-                /** @type {number} */
-                reader.readUint64()
-              );
-              msg.setTick(value);
-              break;
-            case 2:
-              var value = (
-                /** @type {boolean} */
-                reader.readBool()
-              );
-              msg.setIsSnapshot(value);
-              break;
-            case 3:
-              var value = (
-                /** @type {!Uint8Array} */
-                reader.readBytes()
-              );
-              msg.setPayload(value);
-              break;
-            default:
-              reader.skipField();
-              break;
-          }
-        }
-        return msg;
-      };
-      proto.spectator.SpectatorFrame.prototype.serializeBinary = function() {
-        var writer = new jspb.BinaryWriter();
-        proto.spectator.SpectatorFrame.serializeBinaryToWriter(this, writer);
-        return writer.getResultBuffer();
-      };
-      proto.spectator.SpectatorFrame.serializeBinaryToWriter = function(message, writer) {
-        var f = void 0;
-        f = message.getTick();
-        if (f !== 0) {
-          writer.writeUint64(
-            1,
-            f
-          );
-        }
-        f = message.getIsSnapshot();
-        if (f) {
-          writer.writeBool(
-            2,
-            f
-          );
-        }
-        f = message.getPayload_asU8();
-        if (f.length > 0) {
-          writer.writeBytes(
-            3,
-            f
-          );
-        }
-      };
-      proto.spectator.SpectatorFrame.prototype.getTick = function() {
-        return (
-          /** @type {number} */
-          jspb.Message.getFieldWithDefault(this, 1, 0)
-        );
-      };
-      proto.spectator.SpectatorFrame.prototype.setTick = function(value) {
-        return jspb.Message.setProto3IntField(this, 1, value);
-      };
-      proto.spectator.SpectatorFrame.prototype.getIsSnapshot = function() {
-        return (
-          /** @type {boolean} */
-          jspb.Message.getBooleanFieldWithDefault(this, 2, false)
-        );
-      };
-      proto.spectator.SpectatorFrame.prototype.setIsSnapshot = function(value) {
-        return jspb.Message.setProto3BooleanField(this, 2, value);
-      };
-      proto.spectator.SpectatorFrame.prototype.getPayload = function() {
-        return (
-          /** @type {!(string|Uint8Array)} */
-          jspb.Message.getFieldWithDefault(this, 3, "")
-        );
-      };
-      proto.spectator.SpectatorFrame.prototype.getPayload_asB64 = function() {
-        return (
-          /** @type {string} */
-          jspb.Message.bytesAsB64(
-            this.getPayload()
-          )
-        );
-      };
-      proto.spectator.SpectatorFrame.prototype.getPayload_asU8 = function() {
-        return (
-          /** @type {!Uint8Array} */
-          jspb.Message.bytesAsU8(
-            this.getPayload()
-          )
-        );
-      };
-      proto.spectator.SpectatorFrame.prototype.setPayload = function(value) {
-        return jspb.Message.setProto3BytesField(this, 3, value);
-      };
       goog.object.extend(exports, proto.spectator);
     }
   });
@@ -5053,6 +5067,7 @@
     "gen/spectator_grpc_web_pb.js"(exports, module) {
       var grpc = {};
       grpc.web = require_grpc_web();
+      var spectator_frame_pb = require_spectator_frame_pb();
       var proto2 = {};
       proto2.spectator = require_spectator_pb();
       proto2.spectator.SpectatorClient = function(hostname, credentials, options) {
@@ -5071,7 +5086,7 @@
         "/spectator.Spectator/Watch",
         grpc.web.MethodType.SERVER_STREAMING,
         proto2.spectator.WatchRequest,
-        proto2.spectator.SpectatorFrame,
+        spectator_frame_pb.SpectatorFrame,
         /**
          * @param {!proto.spectator.WatchRequest} request
          * @return {!Uint8Array}
@@ -5079,7 +5094,7 @@
         function(request) {
           return request.serializeBinary();
         },
-        proto2.spectator.SpectatorFrame.deserializeBinary
+        spectator_frame_pb.SpectatorFrame.deserializeBinary
       );
       proto2.spectator.SpectatorClient.prototype.watch = function(request, metadata) {
         return this.client_.serverStreaming(

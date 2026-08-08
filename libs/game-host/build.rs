@@ -5,6 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure().compile_protos(
         &[
             "../../protos/game_host.proto",
+            "../../protos/spectator_frame.proto",
             "../../protos/achtung_agent.proto",
             "../../protos/achtung_spectator.proto",
         ],

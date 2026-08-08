@@ -10,7 +10,7 @@ use game_host::{
 };
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio_stream::{Stream, StreamExt};
+use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
 // Re-export types for public API
@@ -26,8 +26,14 @@ pub mod spectator {
     tonic::include_proto!("spectator");
 }
 
+// Shared frame message produced by the game host and forwarded by the relay.
+pub mod spectator_frame {
+    tonic::include_proto!("spectator_frame");
+}
+
+use spectator::WatchRequest;
 use spectator::spectator_server::{Spectator, SpectatorServer};
-use spectator::{SpectatorFrame, WatchRequest};
+use spectator_frame::SpectatorFrame;
 
 /// The gRPC URL of the game host currently hosting a match, or `None` between
 /// games. Written by the coordinator, read by the spectator relay. One game
@@ -95,16 +101,9 @@ impl Spectator for SpectatorRelay {
 
         let upstream = client.watch_game(WatchGameRequest {}).await?.into_inner();
 
-        // Frames are structurally identical; copy them field-for-field.
-        let mapped = upstream.map(|res| {
-            res.map(|f| SpectatorFrame {
-                tick: f.tick,
-                is_snapshot: f.is_snapshot,
-                payload: f.payload,
-            })
-        });
-
-        Ok(Response::new(Box::pin(mapped)))
+        // Upstream and downstream share spectator_frame.SpectatorFrame, so the
+        // relay just forwards frames through — no re-mapping.
+        Ok(Response::new(Box::pin(upstream)))
     }
 }
 

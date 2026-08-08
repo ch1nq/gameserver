@@ -15,5 +15,5 @@ gen-spectator-client:
         --plugin=protoc-gen-grpc-web=node_modules/.bin/protoc-gen-grpc-web \
         --js_out=import_style=commonjs,binary:gen \
         --grpc-web_out=import_style=commonjs,mode=grpcwebtext:gen \
-        spectator.proto achtung_spectator.proto
+        spectator.proto achtung_spectator.proto spectator_frame.proto
     npx esbuild entry.js --bundle --format=iife --outfile=../static/spectator.js
