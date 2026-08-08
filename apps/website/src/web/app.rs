@@ -9,8 +9,8 @@ use achtung_core::api_tokens::ApiTokenManager;
 use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
 use agent_infra::{
-    DockerMachineProviderConfig, FirecrackerMachineProviderConfig, FlyMachineProviderConfig,
-    FlyMachineProviderHost, MachineProvider, Reaper, ReaperConfig,
+    DockerMachineProviderConfig, FirecrackerMachineProviderConfig, MachineProvider, Reaper,
+    ReaperConfig,
 };
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
@@ -109,8 +109,10 @@ impl App {
             Arc::new(tokio::sync::RwLock::new(None));
 
         if env::var("ENABLE_COORDINATOR").is_ok() {
-            match env::var("MACHINE_PROVIDER").as_deref() {
-                Ok("firecracker") => {
+            // Defaults to firecracker (the production backend) when unset.
+            let provider = env::var("MACHINE_PROVIDER").unwrap_or_else(|_| "firecracker".into());
+            match provider.as_str() {
+                "firecracker" => {
                     let config = firecracker_config_from_env();
                     let provider = Arc::new(
                         agent_infra::FirecrackerMachineProvider::new(config)
@@ -124,7 +126,7 @@ impl App {
                         spectator_registry.clone(),
                     );
                 }
-                Ok("docker") => {
+                "docker" => {
                     let config = docker_config_from_env();
                     let provider = Arc::new(
                         agent_infra::DockerMachineProvider::new(config)
@@ -137,16 +139,9 @@ impl App {
                         spectator_registry.clone(),
                     );
                 }
-                _ => {
-                    let config = fly_config_from_env();
-                    let provider = Arc::new(agent_infra::FlyMachineProvider::new(config));
-                    // Fly apps are named "achtung-match-<id>-app".
-                    self.spawn_coordinator_and_reaper(
-                        provider,
-                        "achtung-match-",
-                        spectator_registry.clone(),
-                    );
-                }
+                other => panic!(
+                    "Unknown MACHINE_PROVIDER={other:?} (expected \"firecracker\" or \"docker\")"
+                ),
             }
         }
 
@@ -299,20 +294,6 @@ impl App {
             max_age,
             prefix
         );
-    }
-}
-
-fn fly_config_from_env() -> FlyMachineProviderConfig {
-    FlyMachineProviderConfig {
-        fly_token: env::var("FLY_TOKEN").expect("FLY_TOKEN required when MACHINE_PROVIDER=fly"),
-        fly_org: env::var("FLY_ORG").expect("FLY_ORG required when MACHINE_PROVIDER=fly"),
-        fly_host: match env::var("FLY_HOST").as_deref() {
-            Ok("public") => FlyMachineProviderHost::Public,
-            Ok("internal") | Err(_) => FlyMachineProviderHost::Internal,
-            Ok(v) => panic!("Unknown FLY_HOST value: {v}"),
-        },
-        registry_url: env::var("REGISTRY_URL")
-            .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string()),
     }
 }
 
