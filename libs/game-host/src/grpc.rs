@@ -10,10 +10,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::{Stream, StreamExt};
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
@@ -26,11 +30,15 @@ pub mod gamehost {
 use gamehost::game_host_server::{GameHost, GameHostServer};
 use gamehost::{
     AgentEndpoint, AgentPlacement, GameConfig, GameResult, GameState as HostGameState, GameStatus,
-    GetStatusRequest, StartGameRequest, StartGameResponse,
+    GetStatusRequest, SpectatorFrame, StartGameRequest, StartGameResponse, WatchGameRequest,
 };
 
 /// Safety cap so a stuck game can never loop forever.
 const MAX_TICKS: u64 = 100_000;
+
+/// Buffer of spectator frames a lagging subscriber can fall behind before it is
+/// dropped and forced to reconnect (which re-snapshots).
+const SPECTATOR_BUFFER: usize = 1024;
 
 /// The per-game seam. Owns only the typed bits: how to build the engine, how to
 /// talk to this game's agents, and how the engine's `PlayerId`/`GameAction`
@@ -44,9 +52,25 @@ pub trait GameAdapter: Send + Sync + 'static {
     /// This game's typed agent gRPC client.
     type Client: Send;
 
+    /// Accumulated spectator state used to encode snapshots and derive deltas.
+    /// Holds whatever this game needs to diff frames across ticks (e.g. the
+    /// trail length already sent).
+    type Spectator: Send;
+
     /// Build a fresh engine for `num_players`. The adapter owns the game
     /// `Config` (arena size, etc.); slot `i` controls `get_player_ids()[i]`.
     fn init_engine(&self, num_players: usize) -> Self::Engine;
+
+    /// Seed spectator state from the freshly built engine (tick 0).
+    fn init_spectator(&self, engine: &Self::Engine) -> Self::Spectator;
+
+    /// Advance `spec` to `engine`'s current tick and return the encoded delta
+    /// (game-specific proto bytes) to broadcast to spectators.
+    fn tick_spectator(&self, spec: &mut Self::Spectator, engine: &Self::Engine) -> Vec<u8>;
+
+    /// Encode the full accumulated state as snapshot bytes for a joining
+    /// spectator.
+    fn encode_snapshot(&self, spec: &Self::Spectator) -> Vec<u8>;
 
     /// Currently-alive players. Diffed across ticks to derive elimination order.
     fn active_players(&self, engine: &Self::Engine) -> Vec<<Self::Engine as GameState>::PlayerId>;
@@ -95,17 +119,27 @@ impl Default for GameProgress {
 
 type Progress = Arc<Mutex<GameProgress>>;
 
+/// Accumulated spectator state, populated once the game starts. Guarded so the
+/// `watch_game` handler can snapshot it and subscribe atomically with respect
+/// to the per-tick producer in `run_game`.
+type SpectatorState<G> = Arc<Mutex<Option<<G as GameAdapter>::Spectator>>>;
+
 /// Generic tonic `GameHost` service, parameterised over a [`GameAdapter`].
 pub struct GrpcGameServer<G: GameAdapter> {
     adapter: Arc<G>,
     progress: Progress,
+    spectator: SpectatorState<G>,
+    spectator_tx: broadcast::Sender<SpectatorFrame>,
 }
 
 impl<G: GameAdapter> GrpcGameServer<G> {
     pub fn new(adapter: G) -> Self {
+        let (spectator_tx, _) = broadcast::channel(SPECTATOR_BUFFER);
         Self {
             adapter: Arc::new(adapter),
             progress: Arc::new(Mutex::new(GameProgress::default())),
+            spectator: Arc::new(Mutex::new(None)),
+            spectator_tx,
         }
     }
 
@@ -145,8 +179,12 @@ impl<G: GameAdapter> GameHost for GrpcGameServer<G> {
 
         let progress = self.progress.clone();
         let adapter = self.adapter.clone();
+        let spectator = self.spectator.clone();
+        let spectator_tx = self.spectator_tx.clone();
         tokio::spawn(async move {
-            if let Err(e) = run_game(&*adapter, agents, cfg, &progress).await {
+            if let Err(e) =
+                run_game(&*adapter, agents, cfg, &progress, &spectator, &spectator_tx).await
+            {
                 tracing::error!(error = %e, "game failed");
                 let mut p = progress.lock().await;
                 p.state = HostGameState::Failed;
@@ -171,6 +209,42 @@ impl<G: GameAdapter> GameHost for GrpcGameServer<G> {
             current_tick: p.current_tick,
         }))
     }
+
+    type WatchGameStream = Pin<Box<dyn Stream<Item = Result<SpectatorFrame, Status>> + Send>>;
+
+    async fn watch_game(
+        &self,
+        _request: Request<WatchGameRequest>,
+    ) -> Result<Response<Self::WatchGameStream>, Status> {
+        // Snapshot the current state and subscribe under the same lock the
+        // per-tick producer holds while broadcasting. This guarantees no delta
+        // slips between the snapshot and the subscription: every broadcast
+        // frame is either already folded into the snapshot or delivered on `rx`.
+        let (snapshot, rx) = {
+            let spec = self.spectator.lock().await;
+            let rx = self.spectator_tx.subscribe();
+            let snapshot = spec.as_ref().map(|s| SpectatorFrame {
+                tick: 0,
+                is_snapshot: true,
+                payload: self.adapter.encode_snapshot(s),
+            });
+            (snapshot, rx)
+        };
+
+        // Deltas are append-only, so a dropped frame would leave a permanent
+        // hole in the client's trail. When a spectator falls too far behind,
+        // end the stream with an error instead: the client reconnects and
+        // re-snapshots from a consistent state.
+        let deltas = BroadcastStream::new(rx).map(|r| match r {
+            Ok(frame) => Ok(frame),
+            Err(BroadcastStreamRecvError::Lagged(n)) => Err(Status::resource_exhausted(format!(
+                "spectator lagged {n} frames behind; reconnect for a fresh snapshot"
+            ))),
+        });
+        let stream = tokio_stream::iter(snapshot.into_iter().map(Ok)).chain(deltas);
+
+        Ok(Response::new(Box::pin(stream)))
+    }
 }
 
 async fn run_game<G: GameAdapter>(
@@ -178,11 +252,17 @@ async fn run_game<G: GameAdapter>(
     agents: Vec<AgentEndpoint>,
     cfg: GameConfig,
     progress: &Progress,
+    spectator: &SpectatorState<G>,
+    spectator_tx: &broadcast::Sender<SpectatorFrame>,
 ) -> Result<(), String> {
     let num_players = agents.len();
     let tick_rate = Duration::from_millis(cfg.tick_rate_ms.max(1));
 
     let mut engine = adapter.init_engine(num_players);
+
+    // Seed spectator state from the initial engine so joiners can snapshot even
+    // before the first tick is produced.
+    *spectator.lock().await = Some(adapter.init_spectator(&engine));
 
     // Stable slot -> engine player id mapping: slot i is controlled by agents[i].
     let player_ids = engine.get_player_ids();
@@ -232,6 +312,22 @@ async fn run_game<G: GameAdapter>(
 
         engine.update_game_state();
         current_tick += 1;
+
+        // Publish this tick to spectators. Update the accumulated state and
+        // broadcast the delta while holding the lock, so a concurrently-joining
+        // `watch_game` either sees this delta folded into its snapshot or
+        // receives it on its subscription — never neither.
+        {
+            let mut spec = spectator.lock().await;
+            if let Some(s) = spec.as_mut() {
+                let payload = adapter.tick_spectator(s, &engine);
+                let _ = spectator_tx.send(SpectatorFrame {
+                    tick: current_tick,
+                    is_snapshot: false,
+                    payload,
+                });
+            }
+        }
 
         // Record any newly-dead players (previous-alive order → placement order).
         let new_alive = adapter.active_players(&engine);

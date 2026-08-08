@@ -9,6 +9,26 @@ service GameHost {
 
   // Get the current status of the game
   rpc GetStatus(GetStatusRequest) returns (GameStatus);
+
+  // Stream live game state for spectators. The stream first yields a full
+  // snapshot of the current state, then per-tick deltas. The `payload` is a
+  // game-specific encoded message, opaque to this generic service.
+  rpc WatchGame(WatchGameRequest) returns (stream SpectatorFrame);
+}
+
+message WatchGameRequest {}
+
+// One frame of the spectator stream.
+message SpectatorFrame {
+  uint64 tick = 1;
+
+  // true  => `payload` is a full snapshot of the current state
+  // false => `payload` is a delta relative to previously sent frames
+  bool is_snapshot = 2;
+
+  // Game-specific encoded state (e.g. achtung.spectator.SpectatorSnapshot /
+  // SpectatorDelta). Opaque to the generic game host.
+  bytes payload = 3;
 }
 
 // Request to start a game

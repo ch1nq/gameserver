@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package spectator;
+
+// Browser-facing spectator service, exposed by the website over gRPC-Web.
+// The website relays frames from the current game host's GameHost.WatchGame
+// stream. Keeps the coordinator-only StartGame/GetStatus surface off the
+// public browser API.
+service Spectator {
+  rpc Watch(WatchRequest) returns (stream SpectatorFrame);
+}
+
+message WatchRequest {}
+
+// Mirrors gamehost.SpectatorFrame; the website copies it field-for-field.
+message SpectatorFrame {
+  uint64 tick = 1;
+  bool is_snapshot = 2;
+  bytes payload = 3;
+}
