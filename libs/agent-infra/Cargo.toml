@@ -10,8 +10,10 @@ path = "src/lib.rs"
 
 [dependencies]
 async-trait = { workspace = true }
+bollard = { workspace = true }
 common = { path = "../common" }
 containerd-client = { workspace = true }
+futures-util = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 tonic = { workspace = true }

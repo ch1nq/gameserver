@@ -3,6 +3,7 @@
 //! Provides abstractions for provisioning and managing agent machines
 //! for game matches. Supports multiple backends (Fly.io, Firecracker).
 
+pub mod docker;
 pub mod firecracker;
 mod fly_api;
 pub mod reaper;
@@ -19,6 +20,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 // Re-export key types
+pub use docker::{DockerMachineProvider, DockerMachineProviderConfig};
 pub use firecracker::{FirecrackerMachineProvider, FirecrackerMachineProviderConfig};
 pub use reaper::{Reaper, ReaperConfig};
 
