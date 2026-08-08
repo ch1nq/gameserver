@@ -128,11 +128,35 @@ Coordinator ──gRPC──► Game Host ──gRPC──► Agent containers
                        on each agent
 ```
 
-### gRPC-Web — Live Spectating (TODO)
+### gRPC-Web — Live Spectating
 
-The game host will stream game state updates back to the website, which will
-expose them to browser clients via gRPC-Web. This replaces the legacy WebSocket
-observer path. The exact proto definition for spectator streaming is TBD.
+The game host streams live game state to browsers, replacing the legacy
+WebSocket observer path:
+
+```
+Browser ──gRPC-Web──► Website ──gRPC stream──► Game Host
+ (Spectator.Watch)     (relay)     (GameHost.WatchGame)
+```
+
+- **`GameHost.WatchGame`** (`game_host.proto`) — a server-streaming RPC on the
+  existing game host. It first yields a full **snapshot**, then per-tick
+  **deltas**. The `SpectatorFrame.payload` is an opaque, game-specific proto so
+  the generic host stays game-agnostic; for Achtung it carries
+  `achtung_spectator.proto` messages (`SpectatorSnapshot` / `SpectatorDelta`,
+  trail blobs included). Snapshot-and-subscribe happen under one lock so a
+  joiner never misses a delta.
+- **`Spectator.Watch`** (`spectator.proto`) — the browser-facing service the
+  website exposes over gRPC-Web (via `tonic-web`, mounted on the existing
+  HTTP/1.1 Axum server). The coordinator publishes the current game host address
+  into a shared `SpectatorRegistry`; the website's relay dials that host's
+  `WatchGame` and forwards frames field-for-field.
+- **Browser** (`static/spectator.js`) — a dependency-free gRPC-Web client:
+  reads the streaming `fetch` response, parses gRPC-Web frames, decodes the
+  payload with protobuf.js, and renders the curve to a canvas. Reconnects
+  between games (relay returns `UNAVAILABLE` when idle).
+
+A local smoke test lives at `libs/game-host/examples/watch_smoke.rs` (run a
+game host + two `sample-agent`s, then drive StartGame + WatchGame).
 
 ### HTTP/REST — API & CLI
 
