@@ -7,10 +7,10 @@
 //! # Layout for a match with subnet 10.200.42.0/24
 //!
 //! ```text
-//! Host bridge: br-match-{id}  (10.200.42.254/24)
-//!   ├── tap-{id}-0  → game host microVM   (10.200.42.1)
-//!   ├── tap-{id}-1  → agent 1 microVM     (10.200.42.2)
-//!   ├── tap-{id}-2  → agent 2 microVM     (10.200.42.3)
+//! Host bridge: br-m-42  (10.200.42.254/24)
+//!   ├── tap-m-42-0  → game host microVM   (10.200.42.1)
+//!   ├── tap-m-42-1  → agent 1 microVM     (10.200.42.2)
+//!   ├── tap-m-42-2  → agent 2 microVM     (10.200.42.3)
 //!   └── ...
 //! ```
 //!
@@ -46,7 +46,8 @@ pub enum NetworkError {
 /// Per-match network context, created by `setup` and destroyed by `teardown`.
 #[derive(Debug, Clone)]
 pub struct MatchNetwork {
-    /// Short identifier derived from match_id (truncated to keep names ≤15 chars)
+    /// Short identifier derived from match_id, kept for logging/debugging.
+    /// (Interface names are keyed off the subnet octet, not this id.)
     pub id: String,
     /// The /24 subnet allocated for this match
     pub subnet: Ipv4Net,
@@ -68,25 +69,29 @@ impl MatchNetwork {
         Ipv4Addr::from(base + u32::from(slot) + 1)
     }
 
-    /// The TAP device name for a given slot (e.g., "tap-m-abc123-0")
+    /// The TAP device name for a given slot (e.g., "tap-m-42-0").
+    ///
+    /// Named off the subnet's third octet, which the subnet pool guarantees is
+    /// unique among concurrent matches, so TAP names never collide. Length is
+    /// bounded: "tap-m-" (6) + octet (≤3) + "-" (1) + slot (≤3) = ≤13 chars,
+    /// within the 15-char Linux interface-name limit.
     pub fn tap_name(&self, slot: u8) -> String {
-        // Max Linux interface name length is 15 chars
-        // "tap-m-" (6) + id (8) + "-" (1) + slot digit(s) = at most 16 for slot≤9
-        // We truncate id to 6 chars to stay within limit
-        format!(
-            "{}{}-{}",
-            TAP_PREFIX,
-            &self.id[..6.min(self.id.len())],
-            slot
-        )
+        format!("{}{}-{}", TAP_PREFIX, self.subnet_octet(), slot)
+    }
+
+    /// The subnet's third octet, a unique per-match id from the subnet pool.
+    fn subnet_octet(&self) -> u8 {
+        self.subnet.network().octets()[2]
     }
 }
 
 /// Set up the bridge and iptables rules for a new match.
 pub async fn setup(match_id: &str, subnet: Ipv4Net) -> Result<MatchNetwork, NetworkError> {
-    // Truncate match_id for use in interface names
+    // Interface names are keyed off the subnet's third octet, which the subnet
+    // pool guarantees is unique among concurrent matches (a truncated match_id
+    // prefix could collide and abort the second match on "File exists").
     let id = match_id[..8.min(match_id.len())].to_string();
-    let bridge_name = format!("{}{}", BRIDGE_PREFIX, &id[..5.min(id.len())]);
+    let bridge_name = format!("{}{}", BRIDGE_PREFIX, subnet.network().octets()[2]);
 
     let base = u32::from(subnet.network());
     let host_ip = Ipv4Addr::from(base + 254);
@@ -203,24 +208,15 @@ fn setup_iptables_rules(network: &MatchNetwork) -> Vec<Vec<String>> {
             "-j",
             "ACCEPT",
         ]),
-        // Allow coordinator (on host) → game host: routed through bridge
+        // Allow coordinator (on host) → game host: routed through bridge.
+        // Replies (game host → coordinator) are already covered by the
+        // "-i bridge -s game_host_ip ACCEPT" rule above.
         ipt(&[
             "-I",
             "FORWARD",
             "-o",
             bridge,
             "-d",
-            &game_host_ip,
-            "-j",
-            "ACCEPT",
-        ]),
-        // Allow game host replies back to coordinator
-        ipt(&[
-            "-I",
-            "FORWARD",
-            "-i",
-            bridge,
-            "-s",
             &game_host_ip,
             "-j",
             "ACCEPT",
