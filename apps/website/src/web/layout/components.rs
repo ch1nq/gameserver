@@ -113,10 +113,10 @@ impl Render for AchtungLive {
     fn render(&self) -> Markup {
         html! {
             div class="flex flex-col lg:flex-row gap-4" {
-                div class="border rounded-lg aspect-square overflow-hidden w-full max-w-lg dark:border-gray-700" {
-                    canvas id="achtung-canvas" width="1000" height="1000" class="max-h-full h-full max-w-full w-full";
-                    script src="/static/achtung-observer.js" {};
-                    script { "init_game('achtung-canvas');" };
+                div class="border rounded-lg overflow-hidden w-full max-w-lg dark:border-gray-700 bg-[#000033]" {
+                    canvas id="achtung-canvas" width="1000" height="200" class="max-w-full w-full";
+                    script src="/static/spectator.js" {};
+                    script { "init_spectator('achtung-canvas');" };
                 }
             }
         }

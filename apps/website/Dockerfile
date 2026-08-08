@@ -29,5 +29,8 @@ FROM debian:bookworm-slim AS runner
 RUN apt-get update && \
     apt-get install -y openssl ca-certificates skopeo && \
     rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 COPY --from=builder /app/target/release/website /usr/local/bin/
+# The server resolves ServeDir::new("static") relative to the working dir.
+COPY --from=builder /app/apps/website/static ./static
 ENTRYPOINT ["/usr/local/bin/website"]

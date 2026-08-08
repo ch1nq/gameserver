@@ -1,0 +1,46 @@
+# Fails if the committed gRPC-Web spectator client bundle
+# (apps/website/static/spectator.js) is out of date with the protos.
+name: Check spectator client is up to date
+
+on:
+  pull_request:
+    paths:
+      - 'protos/**'
+      - 'apps/website/spectator-client/**'
+      - 'apps/website/static/spectator.js'
+      - '.github/workflows/check-spectator-client.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'protos/**'
+      - 'apps/website/spectator-client/**'
+      - 'apps/website/static/spectator.js'
+      - '.github/workflows/check-spectator-client.yml'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Pinned to match the protoc used to produce the committed bundle
+      # (libprotoc 35.1). Bump both together when regenerating.
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: '35.1'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Regenerate the spectator client bundle
+        run: just gen-spectator-client
+
+      - name: Fail if the committed bundle is stale
+        run: git diff --exit-code -- apps/website/static/spectator.js

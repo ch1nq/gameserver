@@ -10,3 +10,7 @@
 CLAUDE.md
 .env
 *.pem
+
+# Spectator client codegen artifacts (only the built bundle is committed).
+node_modules/
+apps/website/spectator-client/gen/

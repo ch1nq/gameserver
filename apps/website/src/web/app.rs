@@ -9,8 +9,8 @@ use achtung_core::api_tokens::ApiTokenManager;
 use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
 use agent_infra::{
-    FirecrackerMachineProviderConfig, FlyMachineProviderConfig, FlyMachineProviderHost,
-    MachineProvider, Reaper, ReaperConfig,
+    DockerMachineProviderConfig, FirecrackerMachineProviderConfig, FlyMachineProviderConfig,
+    FlyMachineProviderHost, MachineProvider, Reaper, ReaperConfig,
 };
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
@@ -25,6 +25,7 @@ use sqlx::PgPool;
 use std::env;
 use std::sync::Arc;
 use time::Duration;
+use tower::ServiceExt;
 use tower_http::services::ServeDir;
 use tower_sessions_sqlx_store::PostgresStore;
 
@@ -101,6 +102,13 @@ impl App {
     }
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+        // Spectator target, shared between the coordinator (writer) and the
+        // gRPC-Web relay (reader). Created unconditionally so the browser
+        // endpoint exists even when the coordinator is disabled (it just
+        // returns UNAVAILABLE until a game is running).
+        let spectator_registry: coordinator::SpectatorRegistry =
+            Arc::new(tokio::sync::RwLock::new(None));
+
         if env::var("ENABLE_COORDINATOR").is_ok() {
             match env::var("MACHINE_PROVIDER").as_deref() {
                 Ok("firecracker") => {
@@ -111,16 +119,45 @@ impl App {
                             .expect("Failed to connect to containerd"),
                     );
                     // Firecracker containers are ids like "achtung-<id>-slot-N".
-                    self.spawn_coordinator_and_reaper(provider, "achtung-");
+                    self.spawn_coordinator_and_reaper(
+                        provider,
+                        "achtung-",
+                        spectator_registry.clone(),
+                    );
+                }
+                Ok("docker") => {
+                    let config = docker_config_from_env();
+                    let provider = Arc::new(
+                        agent_infra::DockerMachineProvider::new(config)
+                            .expect("Failed to connect to the Docker daemon"),
+                    );
+                    // Docker containers are named "achtung-<id>-slot-N".
+                    self.spawn_coordinator_and_reaper(
+                        provider,
+                        "achtung-",
+                        spectator_registry.clone(),
+                    );
                 }
                 _ => {
                     let config = fly_config_from_env();
                     let provider = Arc::new(agent_infra::FlyMachineProvider::new(config));
                     // Fly apps are named "achtung-match-<id>-app".
-                    self.spawn_coordinator_and_reaper(provider, "achtung-match-");
+                    self.spawn_coordinator_and_reaper(
+                        provider,
+                        "achtung-match-",
+                        spectator_registry.clone(),
+                    );
                 }
             }
         }
+
+        // Browser-facing spectator stream (gRPC-Web over the existing HTTP/1.1
+        // server). Convert tonic's response body into an axum body so the
+        // tonic service can be mounted as a plain route.
+        let spectator_grpc =
+            tonic_web::enable(coordinator::spectator_service(spectator_registry.clone()))
+                .map_request(|req: axum::extract::Request| req.map(tonic::body::boxed))
+                .map_response(|res: axum::http::Response<_>| res.map(axum::body::Body::new));
 
         // Static files service
         let static_service = ServeDir::new("static");
@@ -160,6 +197,7 @@ impl App {
             .layer(auth_layer);
 
         let app = axum::Router::new()
+            .route_service("/spectator.Spectator/Watch", spectator_grpc)
             .nest("/api/v1", api_router)
             .nest_service("/static", static_service)
             .fallback_service(fallback_service)
@@ -181,12 +219,17 @@ impl App {
         &self,
         provider: Arc<P>,
         reaper_prefix_default: &str,
+        spectator_registry: coordinator::SpectatorRegistry,
     ) {
-        self.spawn_coordinator(provider.clone());
+        self.spawn_coordinator(provider.clone(), spectator_registry);
         self.spawn_reaper(provider, reaper_prefix_default);
     }
 
-    fn spawn_coordinator<P: MachineProvider + 'static>(&self, provider: Arc<P>) {
+    fn spawn_coordinator<P: MachineProvider + 'static>(
+        &self,
+        provider: Arc<P>,
+        spectator_registry: coordinator::SpectatorRegistry,
+    ) {
         let game_host_image = env::var("GAME_HOST_IMAGE")
             .unwrap_or_else(|_| "ghcr.io/ch1nq/achtung-game-host:latest".to_string());
         let game_host_image =
@@ -218,6 +261,7 @@ impl App {
             provider,
             Box::new(self.state.agent_manager.clone()),
             Box::new(self.state.registry_token_manager.clone()),
+            spectator_registry,
         );
         coordinator.spawn();
 
@@ -272,6 +316,15 @@ fn fly_config_from_env() -> FlyMachineProviderConfig {
         },
         registry_url: env::var("REGISTRY_URL")
             .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string()),
+    }
+}
+
+fn docker_config_from_env() -> DockerMachineProviderConfig {
+    DockerMachineProviderConfig {
+        network: env::var("DOCKER_NETWORK")
+            .expect("DOCKER_NETWORK required when MACHINE_PROVIDER=docker"),
+        registry_pull_host: env::var("DOCKER_REGISTRY_PULL_HOST")
+            .unwrap_or_else(|_| "localhost:5001".to_string()),
     }
 }
 
