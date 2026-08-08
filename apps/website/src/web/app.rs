@@ -1,7 +1,7 @@
 use crate::web::layout::pages;
 use crate::{
     users::Backend,
-    web::{auth, oauth, protected, public},
+    web::{auth, oauth, protected, public, spectator},
 };
 use achtung_api::ApiState;
 use achtung_core::agents::manager::AgentManager;
@@ -25,7 +25,6 @@ use sqlx::PgPool;
 use std::env;
 use std::sync::Arc;
 use time::Duration;
-use tower::ServiceExt;
 use tower_http::services::ServeDir;
 use tower_sessions_sqlx_store::PostgresStore;
 
@@ -151,13 +150,11 @@ impl App {
             }
         }
 
-        // Browser-facing spectator stream (gRPC-Web over the existing HTTP/1.1
-        // server). Convert tonic's response body into an axum body so the
-        // tonic service can be mounted as a plain route.
-        let spectator_grpc =
-            tonic_web::enable(coordinator::spectator_service(spectator_registry.clone()))
-                .map_request(|req: axum::extract::Request| req.map(tonic::body::boxed))
-                .map_response(|res: axum::http::Response<_>| res.map(axum::body::Body::new));
+        // Browser-facing spectator stream, served as Server-Sent Events. Decodes
+        // the current game host's WatchGame stream and re-emits JSON, so the
+        // browser needs no protobuf/gRPC-Web runtime.
+        let spectator_router =
+            spectator::router(spectator::SpectatorState::new(spectator_registry.clone()));
 
         // Static files service
         let static_service = ServeDir::new("static");
@@ -197,7 +194,7 @@ impl App {
             .layer(auth_layer);
 
         let app = axum::Router::new()
-            .route_service("/spectator.Spectator/Watch", spectator_grpc)
+            .merge(spectator_router)
             .nest("/api/v1", api_router)
             .nest_service("/static", static_service)
             .fallback_service(fallback_service)

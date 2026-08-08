@@ -1,17 +1,12 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use agent_infra::{ContainerImage, MachineError, MachineHandle, MachineProvider, SpawnConfig};
 use common::{AgentId, AgentInfo, AgentRepository, ContainerImageUrl, DeployTokenProvider};
 use game_host::game_host_client::GameHostClient;
-use game_host::{
-    AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest, WatchGameRequest,
-};
+use game_host::{AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
-use tokio_stream::Stream;
-use tonic::{Request, Response, Status};
 
 // Re-export types for public API
 pub use common::ImageUrl;
@@ -21,19 +16,11 @@ pub mod game_host {
     tonic::include_proto!("gamehost");
 }
 
-// Generated from protos/spectator.proto (browser-facing service).
-pub mod spectator {
-    tonic::include_proto!("spectator");
-}
-
-// Shared frame message produced by the game host and forwarded by the relay.
+// Shared frame message produced by the game host. The browser-facing SSE handler
+// (in the website) reuses this to decode the WatchGame stream it relays.
 pub mod spectator_frame {
     tonic::include_proto!("spectator_frame");
 }
-
-use spectator::WatchRequest;
-use spectator::spectator_server::{Spectator, SpectatorServer};
-use spectator_frame::SpectatorFrame;
 
 /// The gRPC URL of the game host currently hosting a match, or `None` between
 /// games. Written by the coordinator, read by the spectator relay. One game
@@ -71,45 +58,6 @@ impl Drop for SpectatorRegistryGuard {
             }
         });
     }
-}
-
-/// Browser-facing spectator relay. Dials the current game host's
-/// `GameHost.WatchGame` stream and forwards each frame over gRPC-Web.
-#[derive(Clone)]
-pub struct SpectatorRelay {
-    registry: SpectatorRegistry,
-}
-
-#[tonic::async_trait]
-impl Spectator for SpectatorRelay {
-    type WatchStream = Pin<Box<dyn Stream<Item = Result<SpectatorFrame, Status>> + Send>>;
-
-    async fn watch(
-        &self,
-        _request: Request<WatchRequest>,
-    ) -> Result<Response<Self::WatchStream>, Status> {
-        let url = self
-            .registry
-            .read()
-            .await
-            .clone()
-            .ok_or_else(|| Status::unavailable("no active game"))?;
-
-        let mut client = GameHostClient::connect(url)
-            .await
-            .map_err(|e| Status::unavailable(format!("game host unreachable: {e}")))?;
-
-        let upstream = client.watch_game(WatchGameRequest {}).await?.into_inner();
-
-        // Upstream and downstream share spectator_frame.SpectatorFrame, so the
-        // relay just forwards frames through — no re-mapping.
-        Ok(Response::new(Box::pin(upstream)))
-    }
-}
-
-/// Build the browser-facing spectator gRPC service backed by `registry`.
-pub fn spectator_service(registry: SpectatorRegistry) -> SpectatorServer<SpectatorRelay> {
-    SpectatorServer::new(SpectatorRelay { registry })
 }
 
 /// Configuration for the game coordinator
