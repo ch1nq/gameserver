@@ -93,11 +93,38 @@ function init_spectator(canvasId) {
         draw();
     }
 
+    // At most one active stream and one pending reconnect at a time. A failed
+    // gRPC-Web RPC emits both `error` and `end`, so without this the reconnect
+    // would fan out (1 → 2 → 4 …). Overlapping streams share `state`, and each
+    // reconnect resets it to null, which would strand a live game on
+    // "Waiting for a game…" once a stale stream nulls the state the live one
+    // relies on (the host snapshots only once, at subscribe time).
+    let stream = null;
+    let reconnectTimer = null;
+
+    function scheduleReconnect() {
+        if (reconnectTimer) return; // collapse the error+end double-fire
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+        }, RECONNECT_MS);
+    }
+
     function connect() {
+        if (stream) {
+            try {
+                stream.cancel();
+            } catch (_) {
+                // already closed
+            }
+            stream = null;
+        }
         state = null;
         drawMessage("Waiting for a game…");
-        const stream = client.watch(new WatchRequest(), {});
-        stream.on("data", (frame) => {
+        const s = client.watch(new WatchRequest(), {});
+        stream = s;
+        s.on("data", (frame) => {
+            if (s !== stream) return; // ignore a superseded stream
             const payload = frame.getPayload_asU8();
             if (frame.getIsSnapshot()) {
                 applySnapshot(SpectatorSnapshot.deserializeBinary(payload));
@@ -107,8 +134,16 @@ function init_spectator(canvasId) {
         });
         // Between games the relay returns UNAVAILABLE and the stream ends
         // quickly; reconnect so the next game is picked up.
-        stream.on("error", () => setTimeout(connect, RECONNECT_MS));
-        stream.on("end", () => setTimeout(connect, RECONNECT_MS));
+        s.on("error", () => {
+            if (s !== stream) return;
+            stream = null;
+            scheduleReconnect();
+        });
+        s.on("end", () => {
+            if (s !== stream) return;
+            stream = null;
+            scheduleReconnect();
+        });
     }
 
     connect();

@@ -5986,11 +5986,29 @@
       }
       draw();
     }
+    let stream = null;
+    let reconnectTimer = null;
+    function scheduleReconnect() {
+      if (reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, RECONNECT_MS);
+    }
     function connect() {
+      if (stream) {
+        try {
+          stream.cancel();
+        } catch (_) {
+        }
+        stream = null;
+      }
       state = null;
       drawMessage("Waiting for a game\u2026");
-      const stream = client.watch(new WatchRequest(), {});
-      stream.on("data", (frame) => {
+      const s = client.watch(new WatchRequest(), {});
+      stream = s;
+      s.on("data", (frame) => {
+        if (s !== stream) return;
         const payload = frame.getPayload_asU8();
         if (frame.getIsSnapshot()) {
           applySnapshot(SpectatorSnapshot.deserializeBinary(payload));
@@ -5998,8 +6016,16 @@
           applyDelta(SpectatorDelta.deserializeBinary(payload));
         }
       });
-      stream.on("error", () => setTimeout(connect, RECONNECT_MS));
-      stream.on("end", () => setTimeout(connect, RECONNECT_MS));
+      s.on("error", () => {
+        if (s !== stream) return;
+        stream = null;
+        scheduleReconnect();
+      });
+      s.on("end", () => {
+        if (s !== stream) return;
+        stream = null;
+        scheduleReconnect();
+      });
     }
     connect();
   }
