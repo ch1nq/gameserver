@@ -16,6 +16,9 @@ impl<'a> Render for Base<'a> {
                     title { (self.title) }
                     link href="https://cdn.jsdelivr.net/npm/flowbite@4.0.1/dist/flowbite.min.css" rel="stylesheet";
                     script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4" {}
+                    link rel="preconnect" href="https://fonts.googleapis.com" {}
+                    link rel="preconnect" href="https://fonts.gstatic.com" crossorigin {}
+                    link href="https://fonts.googleapis.com/css2?family=Geologica:wght,CRSV@100..900,0&display=swap" rel="stylesheet" {}
                 }
                 body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white" {
                     (self.content)
