@@ -1,10 +1,11 @@
 //! Browser-facing spectator stream, served as Server-Sent Events.
 //!
-//! Replaces the old gRPC-Web relay. The game host still produces a
-//! `spectator_frame.SpectatorFrame` stream (a full snapshot followed by
-//! per-tick deltas); this handler dials that stream, decodes the achtung
-//! payload, and re-emits each frame as a JSON SSE event. The browser uses a
-//! native `EventSource` (auto-reconnecting), so it needs no protobuf runtime.
+//! One background task maintains a single gRPC `WatchGame` stream to the
+//! current game host and fans every `SpectatorFrame` out to all connected SSE
+//! clients via a `tokio::sync::broadcast` channel. Late-joining clients receive
+//! the full frame history buffered since the last snapshot, then switch to the
+//! live broadcast — so they get a consistent view without the game host ever
+//! opening more than one outbound stream to the website.
 
 use std::convert::Infallible;
 use std::pin::Pin;
@@ -20,68 +21,136 @@ use axum::{
 use coordinator::SpectatorRegistry;
 use coordinator::game_host::WatchGameRequest;
 use coordinator::game_host::game_host_client::GameHostClient;
+use coordinator::spectator_frame::SpectatorFrame;
 use prost::Message;
-use tokio::sync::Mutex;
-use tokio_stream::{Stream, StreamExt};
-use tonic::transport::Channel;
+use tokio::sync::broadcast;
+use tokio::time::sleep;
+use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
 
-/// Reconnect delay (`retry:`) handed to the browser's `EventSource`. Between
-/// games each connection ends immediately, so this paces the re-poll.
+/// Reconnect delay (`retry:`) handed to the browser's `EventSource`.
 const RECONNECT_MS: u64 = 1500;
+
+/// Broadcast buffer: must be large enough to hold a full game's frames so that
+/// slow subscribers are not lagged off mid-game.
+const BROADCAST_BUFFER: usize = 4096;
 
 type EventStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
 
-/// `(address, client)` for the currently-cached game host, if any.
-type CachedClient = Arc<Mutex<Option<(String, GameHostClient<Channel>)>>>;
-
-// Decoded achtung spectator payloads (SpectatorSnapshot / SpectatorDelta),
-// with `serde::Serialize` derived in build.rs so they can be emitted as JSON.
+// Decoded achtung spectator payloads with `serde::Serialize` derived in build.rs.
 mod achtung {
     tonic::include_proto!("achtung.spectator");
 }
 
-/// Shared state for the spectator SSE route: the registry pointing at the
-/// current game host, and a cached client so consecutive spectators of the same
-/// game reuse one multiplexed HTTP/2 connection instead of dialing per browser.
+/// In-process hub that holds the frame history for the current game and a live
+/// broadcast channel. All SSE clients subscribe here rather than each opening
+/// their own gRPC stream.
+struct SpectatorHub {
+    /// Every frame from the current game, for clients that connect mid-game.
+    history: Vec<SpectatorFrame>,
+    /// `Some(frame)` during a game; `None` is the game-over sentinel.
+    sender: broadcast::Sender<Option<SpectatorFrame>>,
+    /// True while the background task is actively receiving frames from the
+    /// game host. Checked atomically with `sender.subscribe()` so a tab that
+    /// connects in the gap between "game over sentinel sent" and "registry
+    /// guard clears" doesn't get stuck waiting on a broadcast that will never
+    /// deliver.
+    game_active: bool,
+}
+
+impl SpectatorHub {
+    fn new() -> Self {
+        let (sender, _) = broadcast::channel(BROADCAST_BUFFER);
+        Self {
+            history: Vec::new(),
+            sender,
+            game_active: false,
+        }
+    }
+}
+
+/// Shared state for the spectator SSE route.
 #[derive(Clone)]
 pub struct SpectatorState {
     registry: SpectatorRegistry,
-    client: CachedClient,
+    hub: Arc<std::sync::Mutex<SpectatorHub>>,
 }
 
 impl SpectatorState {
     pub fn new(registry: SpectatorRegistry) -> Self {
-        Self {
-            registry,
-            client: Arc::new(Mutex::new(None)),
-        }
+        let hub = Arc::new(std::sync::Mutex::new(SpectatorHub::new()));
+        let state = Self { registry, hub };
+        tokio::spawn(run_broadcaster(state.clone()));
+        state
     }
+}
 
-    /// A `GameHostClient` for the current game host, reusing the cached
-    /// connection when the address is unchanged. `None` when no game is running.
-    async fn client(&self) -> Option<GameHostClient<Channel>> {
-        let addr = self.registry.read().await.clone()?;
+/// Background task: opens exactly one gRPC stream per game and broadcasts every
+/// frame to the hub. Polls the registry every 100 ms between games.
+async fn run_broadcaster(state: SpectatorState) {
+    loop {
+        // Wait for a game to start.
+        let addr = loop {
+            if let Some(addr) = state.registry.read().await.clone() {
+                break addr;
+            }
+            sleep(Duration::from_millis(100)).await;
+        };
 
-        let mut cached = self.client.lock().await;
-        if let Some((cached_addr, client)) = cached.as_ref()
-            && cached_addr == &addr
-        {
-            // Cloning a tonic client clones its Channel, which multiplexes new
-            // streams over the one existing HTTP/2 connection.
-            return Some(client.clone());
+        let mut client = match GameHostClient::connect(addr.clone()).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("spectator broadcaster: cannot connect to {addr}: {e}");
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+
+        let stream = match client.watch_game(WatchGameRequest {}).await {
+            Ok(r) => r.into_inner(),
+            Err(e) => {
+                tracing::warn!("spectator broadcaster: watch_game failed: {e}");
+                sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+
+        state.hub.lock().unwrap().game_active = true;
+
+        tokio::pin!(stream);
+        while let Some(result) = stream.next().await {
+            let frame = match result {
+                Ok(f) => f,
+                Err(e) => {
+                    tracing::warn!("spectator broadcaster: stream error: {e}");
+                    break;
+                }
+            };
+            // Lock, push to history, and broadcast atomically so that a
+            // subscriber who calls hub.lock() between these two steps never
+            // sees a gap — the same guarantee grpc.rs achieves for gRPC clients.
+            let mut hub = state.hub.lock().unwrap();
+            if frame.is_snapshot {
+                hub.history.clear();
+            }
+            hub.history.push(frame.clone());
+            let _ = hub.sender.send(Some(frame));
         }
 
-        // Address changed (new game) or first connect: dial and cache.
-        match GameHostClient::connect(addr.clone()).await {
-            Ok(client) => {
-                *cached = Some((addr, client.clone()));
-                Some(client)
-            }
-            Err(e) => {
-                tracing::warn!("spectator: game host unreachable at {addr}: {e}");
-                *cached = None;
-                None
-            }
+        // Game over: mark inactive, signal waiting SSE clients, and reset.
+        // Setting game_active = false happens atomically with the sentinel
+        // send, so any subscriber who calls hub.lock() after this point sees
+        // the correct state.
+        {
+            let mut hub = state.hub.lock().unwrap();
+            hub.game_active = false;
+            hub.history.clear();
+            let _ = hub.sender.send(None);
+        }
+
+        // Wait until the registry clears (or moves to a new address) so the
+        // outer loop doesn't immediately reconnect to the same ended game.
+        while state.registry.read().await.as_deref() == Some(addr.as_str()) {
+            sleep(Duration::from_millis(100)).await;
         }
     }
 }
@@ -95,51 +164,53 @@ pub fn router(state: SpectatorState) -> Router {
 
 /// `GET /spectator/watch` — streams spectator frames as JSON SSE events.
 ///
-/// Always responds `200 text/event-stream` so the browser's `EventSource`
-/// auto-reconnects when the stream ends (a native EventSource does *not* retry
-/// after an HTTP error status). Between games the stream carries a single
-/// `waiting` event and ends; during a game it carries `snapshot` then `delta`
-/// events with a JSON `data:` payload (decoded achtung
-/// `SpectatorSnapshot` / `SpectatorDelta`). A leading `retry:` paces reconnects.
+/// Emits a leading `retry:` directive, then either a `waiting` event (no game
+/// running) or a sequence of `snapshot` / `delta` events sourced from the
+/// in-process hub. The stream ends when the game ends; the browser's `EventSource`
+/// reconnects automatically after the `retry:` delay.
 async fn watch(
     State(state): State<SpectatorState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    // Lead with a `retry:` directive so the reconnect interval is known even
-    // when a game is running (the browser reuses it after the game ends).
     let retry = Event::default().retry(Duration::from_millis(RECONNECT_MS));
     let lead = tokio_stream::once(Ok(retry));
 
-    let body: EventStream = match state.client().await {
-        Some(mut client) => match client.watch_game(WatchGameRequest {}).await {
-            Ok(resp) => {
-                // Transcode each frame to a JSON SSE event. On any upstream error
-                // or a payload that fails to decode, end the stream; the browser
-                // reconnects and (mid-game) gets a fresh snapshot from the host.
-                let events = resp
-                    .into_inner()
-                    .map_while(|frame| frame.ok().and_then(frame_to_event).map(Ok));
-                Box::pin(events)
-            }
-            Err(e) => {
-                tracing::warn!("spectator: watch_game failed: {e}");
-                Box::pin(waiting())
-            }
-        },
-        None => Box::pin(waiting()),
+    // Subscribe, clone history, and read game_active under the same lock.
+    // This ensures a tab that connects just after the game-over sentinel is
+    // sent sees game_active=false and emits "waiting" instead of hanging on a
+    // broadcast that will never deliver (the sentinel was sent before subscribe).
+    let (history, receiver, game_active) = {
+        let hub = state.hub.lock().unwrap();
+        (hub.history.clone(), hub.sender.subscribe(), hub.game_active)
+    };
+    // receiver is only used in the else branch; drop it early when waiting.
+    let body: EventStream = if !game_active {
+        drop(receiver);
+        Box::pin(waiting())
+    } else {
+        let history_events = tokio_stream::iter(
+            history
+                .into_iter()
+                .filter_map(|f| frame_to_event(f).map(Ok)),
+        );
+        // `None` sentinel or a lag error both end the stream so the browser
+        // reconnects and picks up a fresh history from the next game.
+        let live = BroadcastStream::new(receiver).map_while(|r| match r {
+            Ok(Some(frame)) => frame_to_event(frame).map(Ok),
+            _ => None,
+        });
+        Box::pin(history_events.chain(live))
     };
 
     Sse::new(lead.chain(body)).keep_alive(KeepAlive::default())
 }
 
-/// A one-shot stream that tells the browser no game is running, then ends so
-/// the `EventSource` reconnects after the `retry:` delay.
+/// One-shot stream that tells the browser no game is running.
 fn waiting() -> impl Stream<Item = Result<Event, Infallible>> {
     tokio_stream::once(Ok(Event::default().event("waiting").data("{}")))
 }
 
-/// Decode one `SpectatorFrame` into an SSE event, or `None` if its payload does
-/// not decode (which ends the stream).
-fn frame_to_event(frame: coordinator::spectator_frame::SpectatorFrame) -> Option<Event> {
+/// Decode one `SpectatorFrame` into an SSE event, or `None` on payload error.
+fn frame_to_event(frame: SpectatorFrame) -> Option<Event> {
     let payload = frame.payload.as_slice();
     let (name, json) = if frame.is_snapshot {
         let snap = achtung::SpectatorSnapshot::decode(payload).ok()?;
