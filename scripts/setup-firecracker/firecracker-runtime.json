@@ -6,5 +6,9 @@
   "root_drive": "/var/lib/firecracker-containerd/runtime/default-rootfs.img",
   "cpu_template": "T2",
   "log_levels": ["debug"],
-  "default_network_interfaces": []
+  "default_network_interfaces": [],
+  "jailer": {
+    "runc_binary_path": "/usr/bin/runc",
+    "runc_config_path": "/etc/containerd/firecracker-runc-config.json"
+  }
 }

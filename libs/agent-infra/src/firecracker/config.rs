@@ -50,6 +50,18 @@ pub struct FirecrackerMachineProviderConfig {
     /// host network. Defaults to `10.200.0.0/16`, giving up to 256 concurrent
     /// matches.
     pub subnet_pool: Ipv4Net,
+
+    /// UID the jailed Firecracker VMM process runs as (via firecracker-containerd's
+    /// runc jailer). The VMM process is the host's security boundary if a guest
+    /// finds a VMM escape, so it must not run as root.
+    ///
+    /// Set to `0` to disable jailing entirely (VMM runs as root — local
+    /// testing only, never in production). Defaults to `52525`; install.sh
+    /// creates a matching `fc-jailer` system user on the host.
+    pub jailer_uid: u32,
+
+    /// GID the jailed Firecracker VMM process runs as. See [`Self::jailer_uid`].
+    pub jailer_gid: u32,
 }
 
 impl Default for FirecrackerMachineProviderConfig {
@@ -63,6 +75,8 @@ impl Default for FirecrackerMachineProviderConfig {
             mem_size_mib: 512,
             registry_url: "http://localhost:5001".into(),
             subnet_pool: "10.200.0.0/16".parse().expect("valid default subnet"),
+            jailer_uid: 52525,
+            jailer_gid: 52525,
         }
     }
 }

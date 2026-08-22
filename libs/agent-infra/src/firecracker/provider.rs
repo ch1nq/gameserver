@@ -30,7 +30,7 @@ use prost::Message as _;
 
 use super::fccontrol::{
     CreateVmRequest, FirecrackerMachineConfiguration, FirecrackerNetworkInterface, IpConfiguration,
-    StaticNetworkConfiguration, StopVmRequest,
+    JailerConfig, StaticNetworkConfiguration, StopVmRequest,
 };
 
 /// containerd's namespace header key for ttrpc requests (mirrors
@@ -210,9 +210,26 @@ impl FirecrackerMachineProvider {
             ..Default::default()
         };
 
+        // Jail the VMM as an unprivileged user (runc jailer). A VMM escape
+        // from a guest then lands in an unprivileged process instead of root.
+        // uid 0 disables jailing (local testing only).
+        //
+        // The jail must join the host network namespace: the per-slot TAP is
+        // created there, and the capability-less VMM can only attach to it
+        // because the TAP's owner matches its uid (see `network::create_tap`).
+        // With an empty NetNS the runc spec would give the jail a fresh netns
+        // where the TAP doesn't exist.
+        let jailer_config = (self.config.jailer_uid != 0).then(|| JailerConfig {
+            uid: self.config.jailer_uid,
+            gid: self.config.jailer_gid,
+            net_ns: "/proc/1/ns/net".to_string(),
+            ..Default::default()
+        });
+
         // Kernel image, boot args and the VM agent rootfs come from the
         // firecracker-containerd runtime config (firecracker-runtime.json)
-        // defaults; here we only pin the VM id, machine size, and networking.
+        // defaults; here we only pin the VM id, machine size, networking, and
+        // the jailer identity.
         let req = CreateVmRequest {
             vmid: vmid.to_string(),
             machine_cfg: Some(FirecrackerMachineConfiguration {
@@ -221,6 +238,7 @@ impl FirecrackerMachineProvider {
                 ..Default::default()
             }),
             network_interfaces: vec![network],
+            jailer_config,
             ..Default::default()
         };
 
@@ -425,9 +443,14 @@ impl MachineProvider for FirecrackerMachineProvider {
         self.pull_image(&image_ref, token.as_deref(), plain_http)
             .await?;
 
-        let tap_name = network::create_tap(&ctx.network, slot)
-            .await
-            .map_err(|e| MachineError::MachineCreation(e.to_string()))?;
+        let tap_name = network::create_tap(
+            &ctx.network,
+            slot,
+            self.config.jailer_uid,
+            self.config.jailer_gid,
+        )
+        .await
+        .map_err(|e| MachineError::MachineCreation(e.to_string()))?;
 
         // Container ID doubles as the VM ID; it encodes match prefix and slot.
         let id_prefix = &ctx.match_id[..8.min(ctx.match_id.len())];

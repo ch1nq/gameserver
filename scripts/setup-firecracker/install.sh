@@ -117,15 +117,34 @@ systemctl daemon-reload
 # ── bridge netfilter (REQUIRED for agent isolation) ───────────────────────────
 # Agent<->agent DROP rules are iptables FORWARD rules. Intra-bridge traffic only
 # traverses FORWARD when br_netfilter is loaded and bridge-nf-call-iptables=1.
-# Without this the isolation guarantee silently fails open.
-log "Enabling br_netfilter + bridge-nf-call-iptables..."
+# Without this the isolation guarantee silently fails open. ip6tables likewise:
+# the coordinator installs IPv6 DROP rules per match bridge, and they only see
+# bridged traffic with bridge-nf-call-ip6tables=1.
+log "Enabling br_netfilter + bridge-nf-call-ip{,6}tables..."
 modprobe br_netfilter || true
 echo "br_netfilter" > /etc/modules-load.d/br_netfilter.conf
 cat > /etc/sysctl.d/99-firecracker-bridge.conf <<'EOF'
 net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward = 1
 EOF
 sysctl -p /etc/sysctl.d/99-firecracker-bridge.conf || true
+
+# ── jailer identity ───────────────────────────────────────────────────────────
+# The coordinator asks firecracker-containerd to jail each VMM via its runc
+# jailer, running the firecracker process as this unprivileged uid/gid
+# (FirecrackerMachineProviderConfig::jailer_uid, default 52525). The numeric id
+# is what matters; the passwd entry just keeps it visible in ps/audit output.
+if ! getent passwd fc-jailer >/dev/null; then
+    log "Creating fc-jailer system user (uid/gid 52525)..."
+    groupadd --system --gid 52525 fc-jailer
+    useradd --system --uid 52525 --gid 52525 --no-create-home \
+        --shell /usr/sbin/nologin fc-jailer
+fi
+# The jailed (non-root) VMM must be able to read the shared kernel image and
+# the VM agent rootfs.
+chmod 0644 "${FIRECRACKER_RUNTIME_DIR}/default-vmlinux.bin" \
+           "${FIRECRACKER_RUNTIME_DIR}/default-rootfs.img" || true
 
 # ── devmapper thin-pool ───────────────────────────────────────────────────────
 log "Setting up devmapper thin-pool..."

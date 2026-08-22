@@ -328,5 +328,13 @@ fn firecracker_config_from_env() -> FirecrackerMachineProviderConfig {
             .ok()
             .and_then(|s| s.parse::<Ipv4Net>().ok())
             .unwrap_or(defaults.subnet_pool),
+        jailer_uid: env::var("FIRECRACKER_JAILER_UID")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(defaults.jailer_uid),
+        jailer_gid: env::var("FIRECRACKER_JAILER_GID")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(defaults.jailer_gid),
     }
 }

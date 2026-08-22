@@ -1,25 +1,46 @@
 //! Linux network setup for firecracker microVM matches.
 //!
 //! Each game match gets its own Linux bridge and per-machine TAP devices.
-//! iptables rules enforce isolation: agents may only communicate with the
-//! game host, not with each other, and have no internet access.
+//! Isolation is enforced in two layers, because guests are untrusted (agents
+//! run user-submitted code as root inside their VM and fully control their own
+//! network stack — they can change their IP/MAC, use IPv6 link-local addresses,
+//! or emit raw Ethernet frames):
+//!
+//! - **L2 (bridge port isolation):** agent TAPs are `isolated` bridge ports.
+//!   Isolated ports cannot exchange *any* frames with each other, regardless
+//!   of protocol or what addresses the guest claims. Only the game-host TAP
+//!   (slot 0) is non-isolated, so agent↔game-host traffic still flows.
+//! - **L3 (iptables/ip6tables):** default-drop FORWARD on the bridge with
+//!   game-host-only exceptions, default-drop INPUT from the bridge so guests
+//!   cannot reach host services, and a wholesale IPv6 drop (matches are
+//!   IPv4-only). Requires `br_netfilter` with `bridge-nf-call-iptables` and
+//!   `bridge-nf-call-ip6tables` enabled (install.sh does this).
 //!
 //! # Layout for a match with subnet 10.200.42.0/24
 //!
 //! ```text
 //! Host bridge: br-m-42  (10.200.42.254/24)
 //!   ├── tap-m-42-0  → game host microVM   (10.200.42.1)
-//!   ├── tap-m-42-1  → agent 1 microVM     (10.200.42.2)
-//!   ├── tap-m-42-2  → agent 2 microVM     (10.200.42.3)
+//!   ├── tap-m-42-1  → agent 1 microVM     (10.200.42.2)  [isolated port]
+//!   ├── tap-m-42-2  → agent 2 microVM     (10.200.42.3)  [isolated port]
 //!   └── ...
 //! ```
 //!
-//! # iptables rules
+//! # Firewall rules
 //!
 //! - All forwarding on the bridge is dropped by default.
-//! - Game host (.1) may send to and receive from any IP on the bridge.
+//! - Game host (.1) may send to and receive from any IP **on its own bridge**.
 //! - Agents (.2+) may only send to the game host (.1) and receive from it.
+//! - Guests may not initiate connections to the host; only replies to
+//!   host-initiated connections (coordinator → game host gRPC) are accepted.
+//! - All IPv6 to/from the bridge is dropped.
 //! - No NAT or masquerading → no internet access.
+//!
+//! Residual risk (accepted): an agent can still ARP-spoof toward the game
+//! host and MITM *game-host↔agent* traffic within its own match. The game
+//! host is trusted, admin-controlled code, so this only affects match
+//! integrity for the attacking agent's own match, not other users' matches
+//! or the host.
 
 use std::net::Ipv4Addr;
 
@@ -129,18 +150,47 @@ pub async fn setup(match_id: &str, subnet: Ipv4Net) -> Result<MatchNetwork, Netw
 
 /// Create a TAP device for a microVM slot and attach it to the match bridge.
 ///
+/// `owner_uid`/`owner_gid` is the identity the jailed Firecracker VMM runs as:
+/// the jailed process has no capabilities, so it can only attach to a TAP whose
+/// owner matches. Pass 0 (root) only when jailing is disabled.
+///
 /// Returns the TAP device name.
-pub async fn create_tap(network: &MatchNetwork, slot: u8) -> Result<String, NetworkError> {
+pub async fn create_tap(
+    network: &MatchNetwork,
+    slot: u8,
+    owner_uid: u32,
+    owner_gid: u32,
+) -> Result<String, NetworkError> {
     let tap_name = network.tap_name(slot);
 
-    // Create TAP device
-    run("ip", &["tuntap", "add", &tap_name, "mode", "tap"]).await?;
+    // Create TAP device, owned by the jailer identity
+    let uid = owner_uid.to_string();
+    let gid = owner_gid.to_string();
+    let mut add_args = vec!["tuntap", "add", tap_name.as_str(), "mode", "tap"];
+    if owner_uid != 0 {
+        add_args.extend(["user", &uid, "group", &gid]);
+    }
+    run("ip", &add_args).await?;
     // Attach to the match bridge
     run(
         "ip",
         &["link", "set", &tap_name, "master", &network.bridge_name],
     )
     .await?;
+    // Agent TAPs become *isolated* bridge ports: isolated ports cannot
+    // exchange any frames with other isolated ports, blocking agent↔agent
+    // traffic at L2 (IPv4, IPv6 link-local, ARP spoofing, raw ethertypes
+    // alike) no matter what addresses the guest assigns itself. The
+    // game-host TAP (slot 0) stays non-isolated so agents can reach it,
+    // and the bridge device itself is not a port, so host↔guest traffic
+    // is unaffected.
+    if slot != 0 {
+        run(
+            "bridge",
+            &["link", "set", "dev", &tap_name, "isolated", "on"],
+        )
+        .await?;
+    }
     // Bring it up
     run("ip", &["link", "set", &tap_name, "up"]).await?;
 
@@ -169,65 +219,113 @@ pub async fn teardown(network: &MatchNetwork) -> Result<(), NetworkError> {
     Ok(())
 }
 
-/// Install iptables rules for match isolation.
+/// A firewall rule: the binary to invoke plus its arguments.
+type FirewallRule = (&'static str, Vec<String>);
+
+/// Firewall rules for match isolation (see module docs for the full policy).
 ///
-/// Policy:
-/// - Default DROP on the bridge for forwarding
-/// - Game host ↔ any IP on the bridge: ACCEPT
-/// - Agent → game host: ACCEPT (for gRPC replies)
-/// - Agent → agent: DROP (enforced by absence of an ACCEPT rule)
-/// - No NAT → no internet access
-fn setup_iptables_rules(network: &MatchNetwork) -> Vec<Vec<String>> {
+/// Rules are installed with `-I` (insert at head) in list order, so **later
+/// entries end up earlier in the chain**: keep DROPs first and their ACCEPT
+/// exceptions after them.
+fn setup_iptables_rules(network: &MatchNetwork) -> Vec<FirewallRule> {
     let bridge = &network.bridge_name;
     let game_host_ip = network.game_host_ip.to_string();
 
     vec![
         // Drop all forwarding into the bridge by default
-        ipt(&["-I", "FORWARD", "-o", bridge, "-j", "DROP"]),
+        (
+            "iptables",
+            ipt(&["-I", "FORWARD", "-o", bridge, "-j", "DROP"]),
+        ),
         // Drop all forwarding out of the bridge by default
-        ipt(&["-I", "FORWARD", "-i", bridge, "-j", "DROP"]),
-        // Allow game host to send to anyone on the bridge
-        ipt(&[
-            "-I",
-            "FORWARD",
-            "-i",
-            bridge,
-            "-s",
-            &game_host_ip,
-            "-j",
-            "ACCEPT",
-        ]),
-        // Allow anyone on the bridge to send to game host
-        ipt(&[
-            "-I",
-            "FORWARD",
-            "-i",
-            bridge,
-            "-d",
-            &game_host_ip,
-            "-j",
-            "ACCEPT",
-        ]),
-        // Allow coordinator (on host) → game host: routed through bridge.
-        // Replies (game host → coordinator) are already covered by the
-        // "-i bridge -s game_host_ip ACCEPT" rule above.
-        ipt(&[
-            "-I",
-            "FORWARD",
-            "-o",
-            bridge,
-            "-d",
-            &game_host_ip,
-            "-j",
-            "ACCEPT",
-        ]),
+        (
+            "iptables",
+            ipt(&["-I", "FORWARD", "-i", bridge, "-j", "DROP"]),
+        ),
+        // Allow game host to send to anyone on its own bridge. The `-o bridge`
+        // match is load-bearing: without it the game host could route out to
+        // other matches' bridges or the host's other networks.
+        (
+            "iptables",
+            ipt(&[
+                "-I",
+                "FORWARD",
+                "-i",
+                bridge,
+                "-o",
+                bridge,
+                "-s",
+                &game_host_ip,
+                "-j",
+                "ACCEPT",
+            ]),
+        ),
+        // Allow anyone on the bridge to send to the game host (same bridge only)
+        (
+            "iptables",
+            ipt(&[
+                "-I",
+                "FORWARD",
+                "-i",
+                bridge,
+                "-o",
+                bridge,
+                "-d",
+                &game_host_ip,
+                "-j",
+                "ACCEPT",
+            ]),
+        ),
+        // NOTE: no FORWARD rule is needed for coordinator → game host. The
+        // coordinator runs on the host itself, and host-originated traffic
+        // traverses OUTPUT, never FORWARD. (An earlier unrestricted
+        // "-o bridge -d game_host ACCEPT" rule here let VMs of *other*
+        // matches reach this match's game host cross-bridge.)
+        //
+        // Guests may not initiate connections to host services (registry,
+        // SSH, coordinator, …). Only replies to host-initiated connections
+        // (coordinator → game host gRPC) are allowed back in.
+        (
+            "iptables",
+            ipt(&["-I", "INPUT", "-i", bridge, "-j", "DROP"]),
+        ),
+        (
+            "iptables",
+            ipt(&[
+                "-I",
+                "INPUT",
+                "-i",
+                bridge,
+                "-m",
+                "conntrack",
+                "--ctstate",
+                "RELATED,ESTABLISHED",
+                "-j",
+                "ACCEPT",
+            ]),
+        ),
+        // Matches are IPv4-only: drop IPv6 wholesale so guests can't bypass
+        // the IPv4 rules via link-local addresses. Only effective with
+        // net.bridge.bridge-nf-call-ip6tables=1 (set by install.sh).
+        (
+            "ip6tables",
+            ipt(&["-I", "FORWARD", "-o", bridge, "-j", "DROP"]),
+        ),
+        (
+            "ip6tables",
+            ipt(&["-I", "FORWARD", "-i", bridge, "-j", "DROP"]),
+        ),
+        (
+            "ip6tables",
+            ipt(&["-I", "INPUT", "-i", bridge, "-j", "DROP"]),
+        ),
     ]
 }
 
 async fn setup_iptables(network: &MatchNetwork) -> Result<(), NetworkError> {
-    for args in setup_iptables_rules(network) {
+    for (program, args) in setup_iptables_rules(network) {
         run(
-            "iptables",
+            program,
             &args.iter().map(String::as_str).collect::<Vec<_>>(),
         )
         .await?;
@@ -237,19 +335,19 @@ async fn setup_iptables(network: &MatchNetwork) -> Result<(), NetworkError> {
 
 async fn teardown_iptables(network: &MatchNetwork) -> Result<(), NetworkError> {
     // Mirror of setup_iptables_rules but with -D (delete) instead of -I (insert)
-    for mut args in setup_iptables_rules(network) {
+    for (program, mut args) in setup_iptables_rules(network) {
         // Replace "-I" with "-D"
         if let Some(flag) = args.iter_mut().find(|a| a.as_str() == "-I") {
             *flag = "-D".to_string();
         }
         // Best-effort: log failures but don't abort
         if let Err(e) = run(
-            "iptables",
+            program,
             &args.iter().map(String::as_str).collect::<Vec<_>>(),
         )
         .await
         {
-            tracing::warn!(error = %e, "Failed to remove iptables rule (may have already been removed)");
+            tracing::warn!(error = %e, "Failed to remove firewall rule (may have already been removed)");
         }
     }
     Ok(())

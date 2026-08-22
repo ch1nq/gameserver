@@ -42,8 +42,7 @@ mod achtung {
 }
 
 /// In-process hub that holds the frame history for the current game and a live
-/// broadcast channel. All SSE clients subscribe here rather than each opening
-/// their own gRPC stream.
+/// broadcast channel. All SSE clients subscribe here.
 struct SpectatorHub {
     /// Every frame from the current game, for clients that connect mid-game.
     history: Vec<SpectatorFrame>,

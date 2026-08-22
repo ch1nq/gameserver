@@ -100,15 +100,32 @@ Host (coordinator)
         └── tap-m-{match}-2  →  agent 2 microVM    (10.200.X.3)
 ```
 
-**Isolation rules (enforced by iptables on the bridge FORWARD chain):**
-- Game host may communicate with all agents
-- Agents may only communicate with the game host
-- Agent-to-agent traffic is blocked
+**Isolation (two layers, because agents are untrusted and control their own
+network stack inside the VM):**
+
+L2 — bridge port isolation: every agent TAP is an `isolated` bridge port, so
+agents cannot exchange *any* frames with each other (IPv4, IPv6 link-local,
+ARP tricks, raw ethertypes), regardless of what addresses a guest assigns
+itself. The game-host TAP (slot 0) is non-isolated, so agent↔game-host
+traffic flows normally.
+
+L3 — iptables/ip6tables per match bridge:
+- FORWARD default-drops the bridge; game host ↔ agents is allowed **within the
+  bridge only** (no cross-match, no host-LAN reach)
+- INPUT from the bridge is dropped: guests cannot reach host services
+  (registry, SSH, coordinator). Replies to host-initiated connections
+  (coordinator → game host gRPC) are allowed via conntrack
+- All IPv6 on the bridge is dropped (matches are IPv4-only)
 - No NAT is configured → microVMs have no internet access
 
-> **Critical:** these rules only take effect for intra-bridge traffic when
-> `br_netfilter` is loaded and `net.bridge.bridge-nf-call-iptables=1`. `install.sh`
-> configures this; verify with `sysctl net.bridge.bridge-nf-call-iptables`.
+Each VMM process runs jailed as the unprivileged `fc-jailer` user (uid 52525)
+via firecracker-containerd's runc jailer, so a VMM escape does not land as
+root. Set `FIRECRACKER_JAILER_UID=0` to disable (local testing only).
+
+> **Critical:** the L3 rules only take effect for intra-bridge traffic when
+> `br_netfilter` is loaded and `net.bridge.bridge-nf-call-iptables=1` /
+> `net.bridge.bridge-nf-call-ip6tables=1`. `install.sh` configures this;
+> verify with `sysctl net.bridge.bridge-nf-call-iptables`.
 
 ## Agent images
 
