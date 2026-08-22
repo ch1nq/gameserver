@@ -9,8 +9,7 @@ use achtung_core::api_tokens::ApiTokenManager;
 use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
 use agent_infra::{
-    DockerIsolation, DockerMachineProviderConfig, FirecrackerMachineProviderConfig,
-    MachineProvider, Reaper, ReaperConfig,
+    DockerIsolation, DockerMachineProviderConfig, MachineProvider, Reaper, ReaperConfig,
 };
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
@@ -18,7 +17,6 @@ use axum_login::{
     tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite},
 };
 use coordinator::{CoordinatorConfig, GameCoordinator, ImageUrl};
-use ipnet::Ipv4Net;
 use oauth2::{AuthUrl, ClientId, ClientSecret, TokenUrl, basic::BasicClient};
 use registry_auth::RegistryAuthConfig;
 use sqlx::PgPool;
@@ -109,23 +107,9 @@ impl App {
             Arc::new(tokio::sync::RwLock::new(None));
 
         if env::var("ENABLE_COORDINATOR").is_ok() {
-            // Defaults to firecracker (the production backend) when unset.
-            let provider = env::var("MACHINE_PROVIDER").unwrap_or_else(|_| "firecracker".into());
+            // Defaults to the production gVisor backend when unset.
+            let provider = env::var("MACHINE_PROVIDER").unwrap_or_else(|_| "gvisor".into());
             match provider.as_str() {
-                "firecracker" => {
-                    let config = firecracker_config_from_env();
-                    let provider = Arc::new(
-                        agent_infra::FirecrackerMachineProvider::new(config)
-                            .await
-                            .expect("Failed to connect to containerd"),
-                    );
-                    // Firecracker containers are ids like "achtung-<id>-slot-N".
-                    self.spawn_coordinator_and_reaper(
-                        provider,
-                        "achtung-",
-                        spectator_registry.clone(),
-                    );
-                }
                 "docker" => {
                     let config = docker_config_from_env();
                     let provider = Arc::new(
@@ -152,9 +136,9 @@ impl App {
                         spectator_registry.clone(),
                     );
                 }
-                other => panic!(
-                    "Unknown MACHINE_PROVIDER={other:?} (expected \"firecracker\", \"gvisor\" or \"docker\")"
-                ),
+                other => {
+                    panic!("Unknown MACHINE_PROVIDER={other:?} (expected \"gvisor\" or \"docker\")")
+                }
             }
         }
 
@@ -346,38 +330,5 @@ fn gvisor_config_from_env() -> DockerMachineProviderConfig {
         },
         registry_pull_host: env::var("DOCKER_REGISTRY_PULL_HOST")
             .unwrap_or_else(|_| "localhost:5001".to_string()),
-    }
-}
-
-fn firecracker_config_from_env() -> FirecrackerMachineProviderConfig {
-    let defaults = FirecrackerMachineProviderConfig::default();
-    FirecrackerMachineProviderConfig {
-        containerd_socket: env::var("CONTAINERD_SOCKET").unwrap_or(defaults.containerd_socket),
-        containerd_namespace: env::var("CONTAINERD_NAMESPACE")
-            .unwrap_or(defaults.containerd_namespace),
-        runtime: env::var("FIRECRACKER_RUNTIME").unwrap_or(defaults.runtime),
-        kernel_path: env::var("FIRECRACKER_KERNEL")
-            .expect("FIRECRACKER_KERNEL required when MACHINE_PROVIDER=firecracker"),
-        vcpu_count: env::var("FIRECRACKER_VCPU_COUNT")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(defaults.vcpu_count),
-        mem_size_mib: env::var("FIRECRACKER_MEM_SIZE_MIB")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(defaults.mem_size_mib),
-        registry_url: env::var("REGISTRY_URL").unwrap_or(defaults.registry_url),
-        subnet_pool: env::var("FIRECRACKER_SUBNET_POOL")
-            .ok()
-            .and_then(|s| s.parse::<Ipv4Net>().ok())
-            .unwrap_or(defaults.subnet_pool),
-        jailer_uid: env::var("FIRECRACKER_JAILER_UID")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(defaults.jailer_uid),
-        jailer_gid: env::var("FIRECRACKER_JAILER_GID")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(defaults.jailer_gid),
     }
 }

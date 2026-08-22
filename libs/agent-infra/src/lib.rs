@@ -4,7 +4,6 @@
 //! for game matches. Supports multiple backends (Docker, Firecracker).
 
 pub mod docker;
-pub mod firecracker;
 pub mod reaper;
 
 use std::collections::HashMap;
@@ -15,7 +14,6 @@ use rand::{Rng, distr::Alphanumeric};
 
 // Re-export key types
 pub use docker::{DockerIsolation, DockerMachineProvider, DockerMachineProviderConfig};
-pub use firecracker::{FirecrackerMachineProvider, FirecrackerMachineProviderConfig};
 pub use reaper::{Reaper, ReaperConfig};
 
 #[derive(Debug, Clone)]

@@ -12,7 +12,6 @@ agent-infra = { path = "../../libs/agent-infra", package = "achtung-agent-infra"
 coordinator = { path = "../../libs/coordinator" }
 registry-auth = { path = "../../libs/registry-auth" }
 async-trait = { workspace = true }
-ipnet = { workspace = true }
 axum = { workspace = true }
 axum-login = { workspace = true }
 maud = { workspace = true }
