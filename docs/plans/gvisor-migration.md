@@ -1,6 +1,6 @@
 # Plan: replace the Firecracker backend with gVisor on Docker
 
-Status: **in progress** — keep the checkboxes below up to date as phases land.
+Status: **provider + migration done; runsc/prod validation pending** — keep the checkboxes below up to date as phases land.
 Branch: `gvisor` (based on `grpc`). PR should target `grpc` until `grpc` merges to `main`, then retarget.
 
 ## Why
@@ -131,13 +131,13 @@ Isolation properties and how they are enforced:
       egress, agent-subnet scan, host SSH/Postgres connect, fork bomb; reports over its normal
       agent gRPC port so a match with it completes. Keep as a permanent smoke test.
 
-### Phase 5 — remove Firecracker
-- [ ] Delete `libs/agent-infra/src/firecracker/`, `subnet_pool.rs` usage, vendored protos
+### Phase 5 — remove Firecracker — DONE
+- [x] Delete `libs/agent-infra/src/firecracker/`, `subnet_pool.rs` usage, vendored protos
       (`libs/agent-infra/proto/`), `scripts/vendor-agent-infra-protos.sh`,
       `scripts/setup-firecracker/`, ttrpc/containerd-client/prost-build deps from Cargo.toml,
       the `firecracker` arm in `app.rs`, `FIRECRACKER_*` from `.env.example`.
-- [ ] `cargo check` clean, no unused deps (`cargo machete` or review).
-- [ ] Update memory/docs that call Firecracker the production backend.
+- [x] `cargo check` clean, no unused deps (`cargo machete` or review).
+- [x] Update memory/docs that call Firecracker the production backend.
 
 ### Phase 6 — production cutover (Hetzner box, `ssh hetzner-fc`)
 - [ ] Re-run Phase 0 verification on the box.
