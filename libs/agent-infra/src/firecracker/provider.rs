@@ -47,7 +47,8 @@ use super::{
     subnet_pool::SubnetPool,
 };
 use crate::{
-    ContainerImage, MachineError, MachineHandle, MachineProvider, OrphanedResource, SpawnConfig,
+    ContainerImage, MachineError, MachineHandle, MachineProvider, OrphanKind, OrphanedResource,
+    SpawnConfig,
 };
 
 /// OCI annotation key read by the firecracker-containerd shim to place a
@@ -386,7 +387,13 @@ impl FirecrackerMachineProvider {
 impl MachineProvider for FirecrackerMachineProvider {
     type MatchContext = FirecrackerMatchContext;
 
-    async fn init_match(&self, match_id: &str) -> Result<FirecrackerMatchContext, MachineError> {
+    async fn init_match(
+        &self,
+        match_id: &str,
+        // Slot IPs are derived deterministically within the /24; nothing is
+        // allocated per slot up front.
+        _num_slots: u8,
+    ) -> Result<FirecrackerMatchContext, MachineError> {
         let subnet = self
             .subnet_pool
             .allocate()
@@ -565,6 +572,7 @@ impl MachineProvider for FirecrackerMachineProvider {
                         id: container.id.clone(),
                         name: container.id,
                         created_at,
+                        kind: OrphanKind::Machine,
                     });
                 }
             }

@@ -9,8 +9,8 @@ use achtung_core::api_tokens::ApiTokenManager;
 use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
 use agent_infra::{
-    DockerMachineProviderConfig, FirecrackerMachineProviderConfig, MachineProvider, Reaper,
-    ReaperConfig,
+    DockerIsolation, DockerMachineProviderConfig, FirecrackerMachineProviderConfig,
+    MachineProvider, Reaper, ReaperConfig,
 };
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
@@ -139,8 +139,21 @@ impl App {
                         spectator_registry.clone(),
                     );
                 }
+                "gvisor" => {
+                    let config = gvisor_config_from_env();
+                    let provider = Arc::new(
+                        agent_infra::DockerMachineProvider::new(config)
+                            .expect("Failed to connect to the Docker daemon"),
+                    );
+                    // Containers "achtung-<id>-slot-N" and networks "achtung-<id>-sN".
+                    self.spawn_coordinator_and_reaper(
+                        provider,
+                        "achtung-",
+                        spectator_registry.clone(),
+                    );
+                }
                 other => panic!(
-                    "Unknown MACHINE_PROVIDER={other:?} (expected \"firecracker\" or \"docker\")"
+                    "Unknown MACHINE_PROVIDER={other:?} (expected \"firecracker\", \"gvisor\" or \"docker\")"
                 ),
             }
         }
@@ -299,8 +312,38 @@ impl App {
 
 fn docker_config_from_env() -> DockerMachineProviderConfig {
     DockerMachineProviderConfig {
-        network: env::var("DOCKER_NETWORK")
-            .expect("DOCKER_NETWORK required when MACHINE_PROVIDER=docker"),
+        isolation: DockerIsolation::SharedNetwork {
+            network: env::var("DOCKER_NETWORK")
+                .expect("DOCKER_NETWORK required when MACHINE_PROVIDER=docker"),
+        },
+        registry_pull_host: env::var("DOCKER_REGISTRY_PULL_HOST")
+            .unwrap_or_else(|_| "localhost:5001".to_string()),
+    }
+}
+
+/// gVisor mode: the Docker provider with per-match internal networks and the
+/// `runsc` runtime. `GVISOR_RUNTIME=runc` lets the network topology be tested
+/// on a host without gVisor installed.
+fn gvisor_config_from_env() -> DockerMachineProviderConfig {
+    let cpus: f64 = env::var("MACHINE_CPUS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
+    let mem_mib: i64 = env::var("MACHINE_MEM_MIB")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(512);
+    let pids: i64 = env::var("MACHINE_PIDS_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(256);
+    DockerMachineProviderConfig {
+        isolation: DockerIsolation::PerMatchNetworks {
+            runtime: env::var("GVISOR_RUNTIME").unwrap_or_else(|_| "runsc".to_string()),
+            nano_cpus: (cpus * 1_000_000_000.0) as i64,
+            memory_bytes: mem_mib * 1024 * 1024,
+            pids_limit: pids,
+        },
         registry_pull_host: env::var("DOCKER_REGISTRY_PULL_HOST")
             .unwrap_or_else(|_| "localhost:5001".to_string()),
     }

@@ -166,11 +166,13 @@ impl<P: MachineProvider> GameCoordinator<P> {
 
         tracing::info!("Starting game with {} agents", agents.len());
 
-        // 2. Initialize match infrastructure (network, bridge, etc.)
+        // 2. Initialize match infrastructure (network, bridge, etc.).
+        // Slots: game host (slot 0) + one per agent.
         let match_id = agent_infra::generate_id();
+        let num_slots = (self.config.agents_per_game + 1) as u8;
         let ctx = self
             .machine_provider
-            .init_match(&match_id)
+            .init_match(&match_id, num_slots)
             .await
             .map_err(CoordinatorError::MachineSpawn)?;
 

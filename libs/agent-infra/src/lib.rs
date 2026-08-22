@@ -14,7 +14,7 @@ use common::{ImageUrl, RegistryToken};
 use rand::{Rng, distr::Alphanumeric};
 
 // Re-export key types
-pub use docker::{DockerMachineProvider, DockerMachineProviderConfig};
+pub use docker::{DockerIsolation, DockerMachineProvider, DockerMachineProviderConfig};
 pub use firecracker::{FirecrackerMachineProvider, FirecrackerMachineProviderConfig};
 pub use reaper::{Reaper, ReaperConfig};
 
@@ -82,6 +82,16 @@ pub struct MachineHandle {
     pub private_ip: String,
 }
 
+/// What kind of resource an [`OrphanedResource`] refers to, so
+/// `destroy_orphaned` knows which API to delete it with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrphanKind {
+    /// A machine (container / microVM).
+    Machine,
+    /// Per-match network infrastructure (e.g., a Docker network).
+    Network,
+}
+
 /// Information about orphaned resources to be reaped
 #[derive(Debug, Clone)]
 pub struct OrphanedResource {
@@ -91,6 +101,8 @@ pub struct OrphanedResource {
     pub name: String,
     /// When the resource was created
     pub created_at: SystemTime,
+    /// What kind of resource this is
+    pub kind: OrphanKind,
 }
 
 /// Errors that can occur during machine operations
@@ -136,8 +148,15 @@ pub trait MachineProvider: Send + Sync + 'static {
     /// Initialize shared resources for a match.
     ///
     /// Called once before any `spawn` calls. Sets up networking and other
-    /// shared infrastructure for the match.
-    async fn init_match(&self, match_id: &str) -> Result<Self::MatchContext, MachineError>;
+    /// shared infrastructure for the match. `num_slots` is the total number of
+    /// machines the match will spawn (game host + agents); backends that
+    /// allocate per-slot resources up front (e.g. one network per slot) need
+    /// it because resources cannot always be attached after machines start.
+    async fn init_match(
+        &self,
+        match_id: &str,
+        num_slots: u8,
+    ) -> Result<Self::MatchContext, MachineError>;
 
     /// Spawn a single machine within an initialized match.
     ///

@@ -120,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let match_id = agent_infra::generate_id();
     println!("\n[init_match] match_id={match_id}");
-    let ctx = provider.init_match(&match_id).await?;
+    let ctx = provider.init_match(&match_id, machines).await?;
 
     let mut handles: Vec<MachineHandle> = Vec::new();
     let mut spawn_err = None;
