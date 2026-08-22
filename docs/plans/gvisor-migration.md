@@ -82,14 +82,14 @@ Isolation properties and how they are enforced:
 - [x] Two internal networks: containers on different networks cannot reach each other.
 - [x] Record Docker version + results in this file under "Verification log".
 
-### Phase 1 — provider changes (`libs/agent-infra`)
-- [ ] `lib.rs`: `MachineProvider::init_match(&self, match_id: &str, num_slots: u8)` (breaking
+### Phase 1 — provider changes (`libs/agent-infra`) — DONE
+- [x] `lib.rs`: `MachineProvider::init_match(&self, match_id: &str, num_slots: u8)` (breaking
       trait change; update docker, firecracker, and coordinator call sites — firecracker ignores
       the new arg until Phase 5 deletes it).
-- [ ] `docker.rs`: add `DockerIsolation` enum to `DockerMachineProviderConfig`:
+- [x] `docker.rs`: add `DockerIsolation` enum to `DockerMachineProviderConfig`:
       `SharedNetwork { network: String }` (existing behavior, unchanged) and
       `PerMatchNetworks { runtime: String, nano_cpus: i64, memory_bytes: i64, pids_limit: i64 }`.
-- [ ] `PerMatchNetworks` mode:
+- [x] `PerMatchNetworks` mode:
       - `init_match`: create `num_slots` networks `achtung-{match}-s{n}`, `internal: true`,
         labels `achtung.match={match_id}`, `achtung.created_at={unix}`. Context carries the list.
       - `spawn` slot 0: create on net s0 → connect to s1..sN → start → inspect → IP of s0.
@@ -98,23 +98,24 @@ Isolation properties and how they are enforced:
         tmpfs `/tmp` (e.g. 64m). Keep container labels/names identical to today
         (`achtung-{match}-slot-{n}`) so the reaper prefix is unchanged.
       - `cleanup_match`: remove the match networks (containers already destroyed).
-- [ ] Reaper: sweep orphaned networks by label/name-prefix + age (decision 5).
-- [ ] `cargo check` + existing tests pass; new unit tests where logic is pure.
+- [x] Reaper: sweep orphaned networks by label/name-prefix + age (decision 5).
+- [x] `cargo check` + existing tests pass; new unit tests where logic is pure.
 
-### Phase 2 — wiring (`apps/website`, `libs/coordinator`)
-- [ ] Coordinator passes `agents_per_game + 1` to `init_match`.
-- [ ] `app.rs`: `MACHINE_PROVIDER=gvisor` selects Docker provider in `PerMatchNetworks` mode
+### Phase 2 — wiring (`apps/website`, `libs/coordinator`) — DONE
+- [x] Coordinator passes `agents_per_game + 1` to `init_match`.
+- [x] `app.rs`: `MACHINE_PROVIDER=gvisor` selects Docker provider in `PerMatchNetworks` mode
       with `runtime=runsc` (env overrides: `GVISOR_RUNTIME`, `MACHINE_CPUS`, `MACHINE_MEM_MIB`).
       `MACHINE_PROVIDER=docker` keeps the existing shared-network behavior. `firecracker`
       keeps working until Phase 5.
-- [ ] `.env.example` updated.
+- [x] `.env.example` updated.
 
 ### Phase 3 — local validation (this machine)
-- [ ] Integration example `libs/agent-infra/examples/gvisor_smoke.rs`: init_match(3 slots),
+- [x] Integration example `libs/agent-infra/examples/gvisor_smoke.rs`: init_match(3 slots),
       spawn 3 alpine/netshoot containers, assert: host↔slot0 TCP works; agent→game-host works;
       agent→agent fails; agent→1.1.1.1 fails; agent→host-gateway NEW connection fails once the
       INPUT rules are installed (skip that assert if rules absent, print a warning).
-- [ ] Run the smoke example with `runtime=runc` first (topology only), then with `runsc`.
+- [x] Run the smoke example with `runtime=runc` (topology only): ALL PASS, see log below.
+- [ ] Re-run the smoke example with `runsc` once installed.
 - [ ] Install runsc locally (official release binary → `/usr/local/bin`, `runsc install`,
       restart dockerd). Needs sudo — coordinate with the user.
 - [ ] Full local match: `MACHINE_PROVIDER=gvisor` + registry + real agent images
@@ -152,3 +153,8 @@ Isolation properties and how they are enforced:
   timeout): blocked. cross-network container→container ICMP: blocked. container→its own
   gateway IP: reachable (expected — static INPUT rules are a Phase 4 deliverable).
   Design decision 6 confirmed on this Docker version.
+- **2026-08-22, dev machine, Phase 3 (partial):** `gvisor_smoke` example with
+  `runtime=runc`: full isolation matrix PASS (host→gh, agent→gh, gh→agent open;
+  agent→agent, agent→internet blocked; gateway:22 probe blocked — note sshd may
+  simply not be listening locally, so the gateway check stays a canary, not proof).
+  runsc run pending install.
