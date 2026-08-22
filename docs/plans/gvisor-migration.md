@@ -78,9 +78,9 @@ Isolation properties and how they are enforced:
 ## Phases
 
 ### Phase 0 — environment verification (this dev machine, then repeat on prod host)
-- [ ] `docker network create --internal x` + container on it: host can reach container IP; container cannot reach 1.1.1.1 or the host's LAN.
-- [ ] Two internal networks: containers on different networks cannot reach each other.
-- [ ] Record Docker version + results in this file under "Verification log".
+- [x] `docker network create --internal x` + container on it: host can reach container IP; container cannot reach 1.1.1.1 or the host's LAN.
+- [x] Two internal networks: containers on different networks cannot reach each other.
+- [x] Record Docker version + results in this file under "Verification log".
 
 ### Phase 1 — provider changes (`libs/agent-infra`)
 - [ ] `lib.rs`: `MachineProvider::init_match(&self, match_id: &str, num_slots: u8)` (breaking
@@ -147,4 +147,8 @@ Isolation properties and how they are enforced:
 
 ## Verification log
 
-(append dated entries here as phases complete)
+- **2026-08-22, dev machine (Arch, Docker 29.6.2), Phase 0:** two `--internal` networks,
+  one alpine container each. host→container ICMP + TCP: OK. container→1.1.1.1 (wget, 3s
+  timeout): blocked. cross-network container→container ICMP: blocked. container→its own
+  gateway IP: reachable (expected — static INPUT rules are a Phase 4 deliverable).
+  Design decision 6 confirmed on this Docker version.
