@@ -82,11 +82,24 @@ pub struct CoordinatorConfig {
     /// How often to poll game status
     pub poll_interval: Duration,
 
-    /// gRPC port that the game host listens on
+    /// gRPC port that the game host listens on *inside* its machine.
+    ///
+    /// Also the fallback dial port when a backend does not relay through a
+    /// published host port (see [`MachineHandle::grpc_port`]).
     pub game_host_grpc_port: u16,
 
-    /// gRPC port that agents listen on
+    /// gRPC port that agents listen on *inside* their machines. Same fallback
+    /// role as [`Self::game_host_grpc_port`].
     pub agent_grpc_port: u16,
+
+    /// How long to keep retrying the initial connection to a freshly spawned
+    /// game host before giving up.
+    ///
+    /// Boot time varies by orders of magnitude across backends — a container
+    /// start versus a microVM boot plus an image pull — so this is a deadline on
+    /// a retry loop rather than a fixed sleep. A single guessed sleep is either
+    /// too short (spurious failures) or too slow (wasted on every match).
+    pub game_host_connect_timeout: Duration,
 }
 
 /// The game coordinator that orchestrates matches
@@ -246,6 +259,7 @@ impl<P: MachineProvider> GameCoordinator<P> {
         let config = SpawnConfig::new(
             ContainerImage::Public(self.config.game_host_image.clone()),
             0,
+            self.config.game_host_grpc_port,
         )
         .env("NUM_PLAYERS", self.config.agents_per_game.to_string())
         .env("TICK_RATE_MS", self.config.tick_rate_ms.to_string());
@@ -273,7 +287,7 @@ impl<P: MachineProvider> GameCoordinator<P> {
             registry_token,
         };
 
-        let config = SpawnConfig::new(container_image, slot);
+        let config = SpawnConfig::new(container_image, slot, self.config.agent_grpc_port);
 
         self.machine_provider
             .spawn(ctx, config)
@@ -287,23 +301,30 @@ impl<P: MachineProvider> GameCoordinator<P> {
         game_host: &MachineHandle,
         agents: &[(AgentId, MachineHandle)],
     ) -> Result<GameResult, CoordinatorError> {
-        // Wait for the game host to start up
-        tokio::time::sleep(Duration::from_secs(5)).await;
-
+        // A backend that relays through a published host port reports the port
+        // to dial; otherwise the machine is addressed directly on the port its
+        // workload listens on.
         let game_host_addr = format!(
             "http://{}:{}",
-            game_host.private_ip, self.config.game_host_grpc_port
+            game_host.private_ip,
+            game_host
+                .grpc_port
+                .unwrap_or(self.config.game_host_grpc_port)
         );
 
-        let mut client = GameHostClient::connect(game_host_addr.clone())
-            .await
-            .map_err(|e| CoordinatorError::Connection(e.to_string()))?;
+        let mut client = self.connect_game_host(&game_host_addr).await?;
 
         let agent_endpoints: Vec<AgentEndpoint> = agents
             .iter()
             .map(|(id, handle)| AgentEndpoint {
                 agent_id: *id,
-                address: format!("{}:{}", handle.private_ip, self.config.agent_grpc_port),
+                // Consumed by the game host, which dials agents itself and
+                // retries while they boot.
+                address: format!(
+                    "{}:{}",
+                    handle.private_ip,
+                    handle.grpc_port.unwrap_or(self.config.agent_grpc_port)
+                ),
             })
             .collect();
 
@@ -330,6 +351,45 @@ impl<P: MachineProvider> GameCoordinator<P> {
 
         // Poll until the game ends.
         self.poll_until_done(&mut client).await
+    }
+
+    /// Dial the game host, retrying until it answers or
+    /// [`CoordinatorConfig::game_host_connect_timeout`] elapses.
+    ///
+    /// The wait is unavoidable — the machine has to boot and the workload has to
+    /// bind its listener — but its length is backend-dependent (a container
+    /// start versus a microVM boot plus an image pull), so retrying until
+    /// success both starts as soon as possible and tolerates a slow boot. This
+    /// mirrors what the game host already does when dialing agents.
+    async fn connect_game_host(
+        &self,
+        addr: &str,
+    ) -> Result<GameHostClient<tonic::transport::Channel>, CoordinatorError> {
+        const RETRY_INTERVAL: Duration = Duration::from_millis(500);
+
+        let deadline = tokio::time::Instant::now() + self.config.game_host_connect_timeout;
+        let mut attempts = 0u32;
+        loop {
+            attempts += 1;
+            match GameHostClient::connect(addr.to_string()).await {
+                Ok(client) => {
+                    tracing::info!(addr, attempts, "Connected to game host");
+                    return Ok(client);
+                }
+                Err(e) => {
+                    if tokio::time::Instant::now() + RETRY_INTERVAL >= deadline {
+                        // Report the spent budget: the usual cause is a workload
+                        // that never bound its port, not a slow boot.
+                        return Err(CoordinatorError::Connection(format!(
+                            "game host at {addr} unreachable after {attempts} attempts over {:?}: {e}",
+                            self.config.game_host_connect_timeout
+                        )));
+                    }
+                    tracing::debug!(addr, attempts, error = %e, "Game host not up yet; retrying");
+                    tokio::time::sleep(RETRY_INTERVAL).await;
+                }
+            }
+        }
     }
 
     /// Poll `GetStatus` on `poll_interval` until the game finishes or fails.

@@ -55,18 +55,30 @@ services:
       REGISTRY_PRIVATE_KEY: ${REGISTRY_PRIVATE_KEY}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
-      # Local match backend: the coordinator runs matches on the host Docker
-      # daemon (game host + agent containers) instead of Fly/Firecracker.
-      MACHINE_PROVIDER: docker
-      DOCKER_NETWORK: gameserver_default
-      DOCKER_REGISTRY_PULL_HOST: localhost:5001
+      # Local match backend: every machine is a real microVM (own guest kernel),
+      # so agent isolation does not rest on the host kernel. Requires /dev/kvm.
+      MACHINE_PROVIDER: microsandbox
+      # Match traffic relays through published host ports: slot 0 (game host) on
+      # 51000, agents on 51001+. No allocator — one match runs at a time.
+      MSB_HOST_PORT_BASE: "51000"
+      # The local registry speaks plain HTTP.
+      MSB_REGISTRY_INSECURE: "true"
+      # Reached over the compose network, not via the host's published port.
+      DOCKER_REGISTRY_PULL_HOST: registry:5001
+      # msb keeps its own image cache and cannot see the Docker daemon's images:
+      # run `just load-game-host` to put this tag there.
       GAME_HOST_IMAGE: achtung-game-host:local
       AGENTS_PER_GAME: "2"
     ports:
       - "3000:3000"
+    devices:
+      # microVMs need hardware virtualization. Docker Desktop only passes this
+      # through if its Linux VM exposes nested virtualization.
+      - /dev/kvm:/dev/kvm
     volumes:
-      # Lets the coordinator drive containers on the host daemon.
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Persists the msb image cache and sandbox database across restarts, so
+      # `just load-game-host` survives a recreate.
+      - microsandbox_data:/root/.microsandbox
     # depends_on:
     #   postgres:
     #     condition: service_healthy
@@ -83,3 +95,4 @@ services:
 volumes:
   postgres_data:
   registry_data:
+  microsandbox_data:

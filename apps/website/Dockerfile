@@ -12,7 +12,9 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
-RUN apt-get update && apt-get install -y protobuf-compiler
+# libcap-ng-dev: the microsandbox runtime links against libcap-ng, and only the
+# runtime package ships the versioned .so — linking needs the unversioned symlink.
+RUN apt-get update && apt-get install -y protobuf-compiler libcap-ng-dev
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo chef cook --release --recipe-path recipe.json
@@ -26,8 +28,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 
 FROM debian:bookworm-slim AS runner
+# libcap-ng0 is needed at runtime by the microsandbox backend (MACHINE_PROVIDER=
+# microsandbox), which also requires /dev/kvm to be passed into the container and
+# downloads `msb` + libkrunfw into ~/.microsandbox on first start.
 RUN apt-get update && \
-    apt-get install -y openssl ca-certificates skopeo && \
+    apt-get install -y openssl ca-certificates skopeo libcap-ng0 && \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/target/release/website /usr/local/bin/

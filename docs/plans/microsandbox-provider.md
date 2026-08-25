@@ -1,7 +1,11 @@
 # Plan: microsandbox `MachineProvider`
 
-Status: **not started** — Phase 0 verification is a go/no-go gate; keep the
-checkboxes below up to date as phases land.
+Status: **implemented, unvalidated against a real match.** Code for every phase is
+landed and unit-tested; none of it has been exercised against a booted microVM.
+Phase 0 was folded into implementation rather than run as a separate spike — the
+SDK reference settled most of it statically, and the rest is settled by running a
+real match. See "Deviations from this plan" and "Validation status" at the bottom
+for what is confirmed versus still open.
 
 ## Why
 
@@ -161,66 +165,102 @@ spawn. Phase 0 settles this first because it is cheap and reshapes the plan.
 
 ## Phases
 
-### Phase 0 — verification (go/no-go, before any provider code)
+### Phase 0 — verification (superseded)
 
-Throwaway example, deleted afterwards. Ordered cheapest-and-most-decisive first.
-Items 2, 3 and 4 are independent kill switches.
+Run as a throwaway spike was **dropped**. Items 1, 5 and 6 were answerable from
+the SDK source and the host; items 2, 3 and 4 are answerable only by booting a
+real VM, which a real match does better than a synthetic probe. Outcomes:
 
-- [ ] 1. `/dev/kvm` present; `setup::is_installed()` / `setup::install()` works.
-- [ ] 2. **Private pull**: `Basic system:<deploy-jwt>` + `registry(|r| r.insecure())`
-      reaches our realm and pulls from `localhost:5001`. Confirms the challenge
-      scope matches what `get_system_deploy_token_for` mints (`repository()` on
-      `AgentImageUrl` yields `user-{id}/{repo}`, no tag — the correct Docker
-      scope form).
-- [ ] 3. **Workload actually runs**: `create()` then `exec_default()` starts a
-      listener on a published port, reachable from the host. Confirms decision 2.
-- [ ] 4. **Relay topology**: sandbox A with `.port(hostA, 50051)` and egress deny
-      + DNS + host; sandbox B with `.port(hostB, 50052)` and egress deny, no
-      rules. Assert: host -> `127.0.0.1:hostA` open; A ->
-      `host.microsandbox.internal:hostB` open; **B ->
-      `host.microsandbox.internal:hostA` blocked**; B -> `1.1.1.1:443` blocked.
-- [ ] 5. Confirm published ports require `default_ingress: Allow`.
-- [ ] 6. Check whether the gateway IP can be resolved numerically at spawn time,
-      so slot 0 might not need DNS egress at all.
-- [ ] 7. Record msb version, kernel version and all results in the Verification
-      log below.
+- [x] 1. `/dev/kvm` present (`crw-rw----+ root:kvm`), `~/.microsandbox/{bin,lib}`
+      populated, `msb 0.6.15`. `setup::is_installed()` / `install()` confirmed
+      present in the SDK and wired into `app.rs`.
+- [ ] 2. **Private pull** — still open. Whether msb's `microsandbox-image` client
+      follows the `WWW-Authenticate` realm to exchange Basic for a bearer token
+      is undocumented, and the code path is only reachable with a real agent
+      image. Phase 2 is implemented on the assumption that it does; if it does
+      not, the fallback is `msb load` and Phase 2 becomes dead code (it is
+      additive and harmless either way).
+- [x] 3. **Workload actually runs** — confirmed *by construction*: the docs state
+      "Sandbox creation is boot-only: configuring an image, ENTRYPOINT, or CMD
+      does not execute that workload", and `exec_default_stream` resolves the
+      effective ENTRYPOINT + CMD. `apps/achtung-host/Dockerfile` sets an
+      ENTRYPOINT, so `NoDefaultCommand` cannot fire for the game host. Whether
+      the listener is *reachable* is item 4.
+- [ ] 4. **Relay topology** — still open, and still the design's kill switch.
+      Settled by the first real match rather than a probe. Mitigated rather than
+      verified: `MSB_HOST_BIND` switches the agent relay from `127.0.0.1` to
+      `0.0.0.0` without a code change, in case a guest cannot reach a
+      loopback-bound published port.
+- [x] 5. Published ports need `default_ingress: Allow` — confirmed in the SDK.
+      `NetworkPolicyBuilder::default_deny()` sets *both* directions, and
+      `from_profiles` documents "Ingress defaults to allow, preserving
+      published-port behavior". `policy_for_slot` sets the two defaults
+      separately; a unit test asserts it.
+- [x] 6. Numeric gateway IP instead of DNS — **not viable, and unnecessary.**
+      `Rule::allow_dns()`'s doc explains why: under deny-by-default a DNS query
+      has no resolved IP yet, so only the `Group::Host` destination is honored at
+      DNS-decision time. Slot 0 therefore gets `allow_dns()` (gateway-scoped
+      UDP/TCP 53) and nothing wider. Agents get no DNS at all.
 
-Two ways item 4 kills the design: if a guest cannot reach a host `127.0.0.1`
-listener through `host.microsandbox.internal` there is no relay; if an
-egress-denied sandbox *can* reach it anyway, agent isolation is gone with no
-second lever available.
+Two ways item 4 still kills the design: if a guest cannot reach a host
+`127.0.0.1` listener through `host.microsandbox.internal` there is no relay (see
+`MSB_HOST_BIND`); if an egress-denied sandbox *can* reach it anyway, agent
+isolation is gone with no second lever available.
 
 ### Phase 1 — trait + coordinator
 
-- [ ] `SpawnConfig` gains `grpc_port: u16` — the port the process listens on
+- [x] `SpawnConfig` gains `grpc_port: u16` — the port the process listens on
       *inside* the machine. Docker ignores it; microsandbox needs it for
-      `port(host, guest)`.
-- [ ] `MachineHandle` gains `grpc_port: Option<u16>`. Docker sets `None`;
+      `port(host, guest)`. Made a **required** `new()` argument rather than a
+      defaulted builder method: a wrong value surfaces as a connection timeout
+      minutes later, far from its cause.
+- [x] `MachineHandle` gains `grpc_port: Option<u16>`. Docker sets `None`;
       microsandbox sets `Some(base + slot)`.
-- [ ] Coordinator passes the ports into `SpawnConfig`, and at the two dial sites
+- [x] Coordinator passes the ports into `SpawnConfig`, and at the two dial sites
       uses `handle.grpc_port.unwrap_or(config.game_host_grpc_port)` /
       `.unwrap_or(config.agent_grpc_port)`.
-- [ ] Doc comment on `private_ip` per decision 6.
-- [ ] Update `docker.rs` and `examples/gvisor_smoke.rs` for the new fields.
-- [ ] `cargo check` + existing tests pass.
+- [x] Doc comment on `private_ip` per decision 6.
+- [x] Update `docker.rs` and `examples/gvisor_smoke.rs` for the new fields.
+- [x] `cargo check` + existing tests pass.
+- [x] **Added, not in the original plan:** replaced the coordinator's flat
+      `sleep(5s)`-then-dial with a retry loop bounded by
+      `game_host_connect_timeout` (`GAME_HOST_CONNECT_TIMEOUT_SECS`, default
+      60s, 500ms interval). A microVM boot plus a cold image pull is not a
+      container start, and a single guessed sleep is either too short (spurious
+      failures) or wasted on every match. The game host already does this when
+      dialing agents (`achtung_grpc.rs`: 30 attempts, 1s apart), so agent boot
+      latency was already absorbed — the coordinator's own dial was the only
+      unprotected hop.
 
 ### Phase 2 — registry system principal
 
-- [ ] `RegistryPrincipal { System, User(UserId) }` as `RegistryAuth::UserId`.
-- [ ] `parse_user_id`: `"system"` -> `System`; `user-N` -> `User(N)`; else `None`.
-- [ ] `is_valid_token`: `System` -> verify RS256 signature, `aud`, `iss`, `exp`;
+- [x] `RegistryPrincipal { System, User(UserId) }` as `RegistryAuth::UserId`.
+- [x] `parse_user_id`: `"system"` -> `System`; `user-N` -> `User(N)`; else `None`.
+- [x] `is_valid_token`: `System` -> verify RS256 signature, `aud`, `iss`, `exp`;
       `User` -> existing bcrypt path, untouched.
-- [ ] `user_has_access`: `System` -> `false` (decision 5); `User` -> existing
+- [x] `user_has_access`: `System` -> `false` (decision 5); `User` -> existing
       namespace check, untouched.
-- [ ] Additive `passthrough` trait method with a `None` default, so
+- [x] Additive `passthrough` trait method with a `None` default, so
       `TestRegistryAuth` needs no change. `RegistryTokenManager` returns the
-      verified JWT for `System`.
-- [ ] `RegistryAuthConfig` caches the public key PEM at construction, next to
+      verified JWT for `System`. Returns `RegistryJwtToken` rather than a bare
+      string, so `expires_in` can be derived from the token's real `exp`.
+- [x] `RegistryAuthConfig` caches the public key PEM at construction, next to
       `signing_key` (`key_id_from_pem` already derives it).
-- [ ] `token_handler` consults `passthrough` after `is_valid_token`, before scope
+- [x] `token_handler` consults `passthrough` after `is_valid_token`, before scope
       parsing; `expires_in` from the JWT's own `exp`.
-- [ ] Tests: valid deploy JWT passes through with scope intact; expired rejected;
-      foreign-signed rejected; `System` mints nothing; user path unregressed.
+- [x] Tests: valid deploy JWT passes through with scope intact; expired rejected;
+      foreign-signed rejected; wrong-`aud` rejected; `System` mints nothing;
+      user path unregressed.
+- [x] **Unplanned, and a live landmine:** `jsonwebtoken` 10 selects its crypto
+      backend from crate features and installs `panic!` stubs when it cannot
+      decide. Adding the microsandbox dependency pulls in `oci-client`, which
+      enables `jsonwebtoken/aws_lc_rs` while this crate enables `rust_crypto` —
+      feature unification then enables both, and *every* mint and verify aborts
+      at runtime. `ensure_crypto_provider()` installs `rust_crypto` explicitly
+      before any encode/decode. Caught only because the new verification tests
+      exercise the path; the pre-existing code had no test that signed a token,
+      so this would otherwise have surfaced as a production panic on the first
+      registry pull.
 
 No new env vars, no compose changes.
 
@@ -229,81 +269,124 @@ No new env vars, no compose changes.
 New `libs/agent-infra/src/microsandbox.rs`, re-exported from `lib.rs`.
 Deliberately mirrors `docker.rs` structure so the two read the same way.
 
+Named `MicrosandboxMachineProviderConfig` to match `DockerMachineProviderConfig`,
+and with one field added beyond the plan (`host_bind`):
+
 ```rust
-pub struct MicrosandboxProviderConfig {
+pub struct MicrosandboxMachineProviderConfig {
     pub cpus: u8,
     pub memory_mib: u32,
     pub host_port_base: u16,
+    pub host_bind: IpAddr,          // added; see below
     pub registry_pull_host: String,
     pub registry_insecure: bool,
     pub max_duration_secs: Option<u64>,
 }
 ```
 
-- [ ] `MatchContext { match_id: String }`. `init_match` records the id and runs
-      the pre-flight sweep (decision 4).
-- [ ] `spawn`: `Sandbox::builder("achtung-{match}-slot-{n}")` + image (prefixed
-      with `registry_pull_host` for `Private`) + `registry(|r| r.auth(Basic{
-      username: "system", password: token }).insecure())` +
-      `pull_policy(IfMissing)` + `cpus` / `memory` + env from `SpawnConfig` +
-      labels `achtung.match` / `achtung.created_at` + `port(base + slot,
-      config.grpc_port)` + slot-dependent network policy + `max_duration` +
-      `.replace()` + `.detached(true)` + `.create()`, then `detach()`.
-- [ ] `spawn` then calls `exec_default` **without blocking** (decision 2):
-      `exec_default_stream()` and drop the handle, or a detached task. Return
-      once the workload is launched, not when it exits. A `NoDefaultCommand`
-      error maps to `MachineError::MachineCreation`.
-- [ ] `policy_for_slot`: slot 0 gets `default_deny` + DNS +
-      `allow_host()` **narrowed to the agent relay port range**
-      (`egress(|e| e.tcp().ports(..).allow_host())`) so the game host cannot
-      reach Postgres, the registry or `/registry/token`. Slots 1+ get
-      `default_deny` with no rules and `default_ingress: Allow` for the
-      published port.
-- [ ] `destroy`: `Sandbox::get(name)` -> `stop()` -> `remove()`, tolerating
-      not-found (same shape as `is_not_found` in `docker.rs`).
-- [ ] `cleanup_match`: no shared resources; log and return `Ok`.
-- [ ] `list_orphaned`: paginate `Sandbox::list_with(|l| l.label("achtung.match",
-      ..))`, filter on `name().starts_with(prefix)` and `created_at()` older than
-      `max_age`. Only ever `OrphanKind::Machine` — this backend has no networks.
-- [ ] `destroy_orphaned`: stop + remove by name.
-- [ ] Errors map onto existing `MachineError` variants: image -> `ImageCopy`,
+- [x] `MatchContext { match_id, num_slots }`. `num_slots` added: slot 0's egress
+      policy needs the full relay port range, which is only known up front.
+      `init_match` records both and runs the pre-flight sweep (decision 4).
+- [x] `spawn`: as planned, except the `achtung.created_at` label is unnecessary —
+      `SandboxHandle::created_at()` already reports it, so only
+      `achtung.managed` / `achtung.match` are set (see `list_orphaned` below).
+- [x] `spawn` then calls `exec_default_stream` **without blocking** (decision 2).
+      The handle is *drained into `tracing`* by a spawned task rather than
+      dropped: whether dropping signals the guest process is undocumented, and
+      draining surfaces guest stdout/stderr — the only window into a workload
+      that dies during startup. `NoDefaultCommand` maps to `MachineCreation`
+      with a message naming the image.
+- [x] `policy_for_slot`, with one **correction to the plan**: `default_deny()`
+      sets *both* directions to `Deny`, which silently kills the published port.
+      Egress and ingress are set separately —
+      `default_egress(Deny) + default_ingress(Allow)` — for every slot. Slot 0
+      additionally gets `Rule::allow_dns()` plus
+      `egress(|e| e.tcp().port_range(base+1, base+n).allow_host())`. Slots 1+ get
+      zero rules.
+- [x] `destroy`: `Sandbox::get(name)` -> `stop()` -> `remove()`, tolerating
+      `SandboxNotFound` (the `is_not_found` analogue) and also
+      `SandboxNotRunning`, since a crashed sandbox still needs removing.
+- [x] `cleanup_match`: no shared resources; log and return `Ok`.
+- [x] `list_orphaned`, **reworked**: the planned
+      `list_with(|l| l.label("achtung.match", ..))` cannot work.
+      `SandboxListBuilder::label` matches an exact key/value pair and the reaper
+      has no match id to supply, while `SandboxHandle` exposes **no label
+      accessor** and `SandboxConfig` carries no labels field — so a listed
+      sandbox's match id cannot be read back either. Fixed with a constant
+      marker label `achtung.managed = "1"` to filter on, then narrowing in Rust
+      on `name().starts_with(prefix)` and `created_at()`. Paginates on
+      `next_cursor`. Only ever `OrphanKind::Machine`.
+- [x] `destroy_orphaned`: stop + remove by name (shares `destroy`'s helper).
+- [x] Errors map onto existing `MachineError` variants: image -> `ImageCopy`,
       create -> `MachineCreation`, stop/remove -> `Destruction`.
-- [ ] Dependency: `microsandbox = { version = "0.6", default-features = false,
-      features = ["net", "prebuilt"] }`. Dropping default `keyring` keeps `dbus`
-      out of the server image. It has a build script and prebuilt runtime
-      artifacts, so confirm a clean `cargo build` early rather than at the end.
+- [x] Dependency: `microsandbox = { version = "0.6.15", default-features = false,
+      features = ["net", "prebuilt"] }`. Builds clean. Two surprises: it links
+      against **libcap-ng** (so the website image needs `libcap-ng-dev` to build
+      and `libcap-ng0` to run), and `PullPolicy` is re-exported from
+      `microsandbox::sandbox`, not the crate root.
+
+**Added beyond the plan — `host_bind` (`MSB_HOST_BIND`, default `127.0.0.1`).**
+`.port()` binds loopback, and whether msb's netstack forwards a *guest*
+connection to a loopback-bound published port is undocumented — Phase 0 item 4,
+the one open question that can sink the relay. Rather than hardcode a guess, the
+agent relay bind is configurable, so a failure is one env var away from `0.0.0.0`
+instead of a code change. Slot 0 always binds loopback: its consumer is the
+coordinator, a host process, so widening it would add exposure for no gain.
 
 `achtung.` label keys are safe; microsandbox reserves only `sandbox.`,
-`microsandbox.` and `service.`.
+`microsandbox.` and `service.`. Note it also **imports the image's own OCI
+labels** at create time, ours winning on collision — so a hostile image setting
+`achtung.managed=1` can only make itself more reapable, not less.
 
 ### Phase 4 — wiring
 
-- [ ] `app.rs`: `"microsandbox"` arm plus `microsandbox_config_from_env()`,
+- [x] `app.rs`: `"microsandbox"` arm plus `microsandbox_config_from_env()`,
       reusing `MACHINE_CPUS` / `MACHINE_MEM_MIB` and adding
-      `MSB_HOST_PORT_BASE`, `MSB_REGISTRY_INSECURE`. Reaper prefix `"achtung-"`,
-      same as the other two backends.
-- [ ] Guard provider construction on `is_installed()` so a missing runtime fails
-      at startup rather than mid-match.
-- [ ] `.env.example` section documenting the `/dev/kvm` requirement and that
-      images come from the msb cache or a registry.
-- [ ] Decide the compose story: running this from the website container needs
-      `/dev/kvm` passthrough *and* the msb runtime in that image, versus today's
-      mounted Docker socket. Recommendation: keep `MACHINE_PROVIDER=docker` in
-      `docker-compose.yml` for local dev and drive this backend from a host-run
-      website process. Decide before wiring so it is not bolted on late.
+      `MSB_HOST_PORT_BASE`, `MSB_HOST_BIND`, `MSB_REGISTRY_INSECURE`,
+      `MSB_MAX_DURATION_SECS`. Reaper prefix `"achtung-"`, same as the other two
+      backends.
+- [x] Guard provider construction on `is_installed()` so a missing runtime fails
+      at startup rather than mid-match. Wrapped as
+      `agent_infra::ensure_runtime_installed()`, which also *installs* when
+      absent (idempotent), so callers need no dependency on the `microsandbox`
+      crate.
+- [x] `.env.example` section documenting the `/dev/kvm` requirement, the relay
+      topology, and that images come from msb's own cache.
+- [x] Compose story — **decided against the plan's recommendation.** The plan
+      suggested keeping `MACHINE_PROVIDER=docker` in compose and driving
+      microsandbox from a host-run process; instead compose now runs
+      `MACHINE_PROVIDER=microsandbox`, so local dev exercises the same backend
+      as production rather than leaving it untested by default. This required:
+      `devices: [/dev/kvm]`, dropping the `docker.sock` mount, a
+      `microsandbox_data` volume for the image cache and sandbox database, and
+      `libcap-ng0` in the website runner image.
+- [x] **Added:** `DOCKER_REGISTRY_PULL_HOST` changed to `registry:5001` in
+      compose. The pull now happens from the website container's own network
+      namespace, so `localhost:5001` would resolve to the container itself.
+- [x] **Added:** `just load-game-host` recipe. msb keeps its own image cache and
+      cannot see the Docker daemon's images, so a locally-built game host has to
+      be handed over with `docker save | msb load`. Also `msb-images`,
+      `msb-sandboxes`, `msb-clean` for inspecting state while debugging.
 
 ### Phase 5 — validation
 
-- [ ] Unit tests on the pure parts: sandbox/label naming, `host_port(slot)`,
-      `policy_for_slot(0)` vs `policy_for_slot(n)` shape, image-ref construction.
-- [ ] `libs/agent-infra/examples/microsandbox_smoke.rs`, reusing the `Checks`
-      struct and isolation matrix from `gvisor_smoke.rs`, probing via
-      `Sandbox::get(name)` + `exec` instead of `docker exec`.
-- [ ] Real local match: game host image into the local registry (or `docker save
-      | msb load`), `MACHINE_PROVIDER=microsandbox`, spectator stream visible at
-      `localhost:3000`.
+- [x] Unit tests on the pure parts (8 in `microsandbox.rs`): sandbox/label
+      naming, `host_port(slot)`, `policy_for_slot` shape for slot 0 / agents /
+      single-slot, image-ref construction for public and private. Plus 4 new JWT
+      verification tests in `registry-auth`.
+- [~] `microsandbox_smoke.rs` — **dropped deliberately.** It would assert the
+      isolation matrix against sandboxes it constructs itself, not against the
+      ones the provider builds, so it can pass while the provider is wrong. The
+      real match below exercises the same paths for real. If the matrix needs
+      machine-checking later, the right shape is a test that drives
+      `MicrosandboxMachineProvider` itself and probes via `Sandbox::get` +
+      `exec`, gated behind a feature or `#[ignore]` so it does not need KVM in
+      CI.
+- [ ] Real local match: `just load-game-host`, `docker compose up`, spectator
+      stream visible at `localhost:3000`. **This is the remaining gate** — it is
+      what settles Phase 0 items 2 and 4.
 - [ ] Hostile-agent image from `gvisor-migration.md` Phase 4 re-run against this
-      backend once it exists.
+      backend.
 
 ## Hardening (deferred, deliberately)
 
@@ -335,7 +418,67 @@ Recorded so these are choices rather than oversights.
   `registry_insecure`, so the deploy JWT crosses the wire in cleartext. Fine on a
   laptop; a real consideration if that config ever escapes.
 
-## Verification log
+## Deviations from this plan
 
-(Phase 0 results go here: msb version, kernel version, and each assertion's
-outcome. Follow the format used in `gvisor-migration.md`.)
+Summarised in one place; each is argued at its phase above.
+
+1. **`default_deny()` would have broken the relay silently.** It sets *both*
+   directions to `Deny`, closing the published port. Egress and ingress are set
+   separately instead. A unit test pins this.
+2. **`list_orphaned` could not be written as specified.** `SandboxHandle` has no
+   label accessor and `list_with(...).label(k, v)` needs a concrete value, so a
+   constant `achtung.managed = "1"` marker label was added to filter on, with the
+   match-id narrowing done in Rust.
+3. **`host_bind` / `MSB_HOST_BIND` added.** Turns the plan's single open risk
+   (guest reaching a loopback-bound published port) into a config switch instead
+   of a code change.
+4. **`achtung.created_at` label dropped.** `SandboxHandle::created_at()` already
+   provides it; Docker needs the label only because its API does not.
+5. **The `ExecHandle` is drained, not dropped.** Dropping has undocumented
+   effects on the guest process, and draining is what surfaces a workload that
+   dies on startup.
+6. **Coordinator dial retry added** (not in the plan). See Phase 1.
+7. **Compose runs microsandbox**, against the plan's recommendation, so the
+   production backend is what local dev exercises.
+8. **`jsonwebtoken` crypto provider must be installed explicitly.** Adding this
+   dependency silently turned every JWT mint into a runtime panic; see Phase 2.
+9. **`microsandbox_smoke.rs` dropped.** It would test sandboxes it builds itself
+   rather than the provider's, so it could pass while the provider is broken.
+
+## Validation status
+
+Environment: `msb 0.6.15`, kernel `6.14.0-33-generic` x86_64, `/dev/kvm` present
+(`crw-rw----+ root:kvm`), runtime already installed at `~/.microsandbox`.
+
+Confirmed statically (SDK source / docs / host):
+
+- KVM and runtime availability; `is_installed()` / `install()` wired in.
+- Creation is boot-only, so `exec_default_stream` is mandatory; the game host's
+  Dockerfile sets an ENTRYPOINT, so `NoDefaultCommand` cannot fire for slot 0.
+- Published ports require ingress `Allow`.
+- DNS under deny-by-default must go through `Group::Host`; a numeric gateway IP
+  is not a viable substitute.
+- `RegistryAuth` has only a `Basic` variant, forcing the `system:<jwt>` shape.
+- Clean `cargo build`; 8 provider unit tests and 4 JWT tests pass; whole
+  workspace checks and tests clean.
+
+Still unproven — needs one real match:
+
+- **The relay.** Whether the game host inside a guest can reach
+  `host.microsandbox.internal:{base+n}` when that port is bound on the host's
+  loopback. Fallback: `MSB_HOST_BIND=0.0.0.0`.
+- **Agent isolation in practice.** That an egress-denied sandbox genuinely cannot
+  reach a sibling's relay port. Asserted structurally (zero rules) and by unit
+  test, but not observed.
+- **Private agent pulls.** Whether msb's image client follows the
+  `WWW-Authenticate` realm, which is what makes the Phase 2 passthrough
+  reachable at all.
+- **Timing.** Whether a microVM boot plus a cold pull fits in the default 60s
+  connect budget.
+
+A build-time note that will bite in CI before any of the above: linking now
+requires the **libcap-ng development symlink** (`libcap-ng.so`). Only the
+versioned `.so.0` ships in the runtime package, so a host with just `libcap-ng0`
+fails at link time with `unable to find library -lcap-ng`. The website Dockerfile
+installs `libcap-ng-dev` for the build stage and `libcap-ng0` for the runner; a
+bare-metal build needs `libcap-ng-dev` too.

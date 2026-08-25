@@ -1,9 +1,10 @@
 //! Agent infrastructure management library.
 //!
 //! Provides abstractions for provisioning and managing agent machines
-//! for game matches. Supports multiple backends (Docker, Firecracker).
+//! for game matches. Supports multiple backends (Docker/gVisor, microsandbox).
 
 pub mod docker;
+pub mod microsandbox;
 pub mod reaper;
 
 use std::collections::HashMap;
@@ -14,6 +15,9 @@ use rand::{Rng, distr::Alphanumeric};
 
 // Re-export key types
 pub use docker::{DockerIsolation, DockerMachineProvider, DockerMachineProviderConfig};
+pub use microsandbox::{
+    MicrosandboxMachineProvider, MicrosandboxMachineProviderConfig, ensure_runtime_installed,
+};
 pub use reaper::{Reaper, ReaperConfig};
 
 #[derive(Debug, Clone)]
@@ -41,18 +45,29 @@ pub struct SpawnConfig {
     pub env: HashMap<String, String>,
     /// Slot index: 0 = game host, 1+ = agents.
     ///
-    /// Used by the firecracker backend to assign deterministic IPs within the
-    /// match subnet.
+    /// Used by backends that assign addresses deterministically per slot.
     pub slot: u8,
+    /// Port the workload listens on *inside* the machine.
+    ///
+    /// Docker/gVisor ignore this — containers are addressed directly, so the
+    /// consumer already knows the port. microsandbox needs it to publish a host
+    /// port (`port(host, guest)`), since a microVM's own address is not
+    /// reachable from outside its `/30`.
+    ///
+    /// Required rather than defaulted: a wrong value here surfaces as a
+    /// connection timeout minutes later, far from its cause.
+    pub grpc_port: u16,
 }
 
 impl SpawnConfig {
-    /// Create a new SpawnConfig with the given container image and slot
-    pub fn new(container_image: ContainerImage, slot: u8) -> Self {
+    /// Create a new SpawnConfig with the given container image, slot, and
+    /// in-machine listen port.
+    pub fn new(container_image: ContainerImage, slot: u8, grpc_port: u16) -> Self {
         Self {
             container_image,
             env: HashMap::new(),
             slot,
+            grpc_port,
         }
     }
 
@@ -76,8 +91,26 @@ pub struct MachineHandle {
     pub app_name: String,
     /// Backend-specific machine identifier (e.g., container ID)
     pub machine_id: String,
-    /// IP address for gRPC communication (without brackets)
+    /// Address by which *this machine's consumer* reaches it — **not**
+    /// necessarily the machine's own IP.
+    ///
+    /// Who the consumer is depends on the slot: the coordinator (a host
+    /// process) dials the game host, and the game host (inside a guest) dials
+    /// the agents. Backends are free to return whatever each consumer needs:
+    ///
+    /// - Docker `SharedNetwork`: the container name, resolved by Docker DNS.
+    /// - Docker `PerMatchNetworks`: the container's IP on its slot network.
+    /// - microsandbox: `127.0.0.1` for the game host (published port, read on
+    ///   the host) and `host.microsandbox.internal` for agents (the guest-side
+    ///   name for the host relay).
     pub private_ip: String,
+    /// Port the consumer should dial on [`Self::private_ip`], when it differs
+    /// from the port the workload listens on inside the machine.
+    ///
+    /// `None` means "dial the in-machine port directly" (Docker/gVisor).
+    /// microsandbox sets `Some(published_host_port)` because traffic is
+    /// relayed through a host port rather than sent to the guest directly.
+    pub grpc_port: Option<u16>,
 }
 
 /// What kind of resource an [`OrphanedResource`] refers to, so
