@@ -27,6 +27,8 @@ use bollard::image::CreateImageOptions;
 use bollard::models::HostConfig;
 use futures_util::StreamExt;
 
+use common::ImageUrl;
+
 use crate::{
     ContainerImage, MachineError, MachineHandle, MachineProvider, OrphanedResource, SpawnConfig,
 };
@@ -93,15 +95,15 @@ impl DockerMachineProvider {
 
     /// Resolve `config.container_image` to a locally-available image ref,
     /// pulling as needed. Returns the ref to run.
-    async fn ensure_image(&self, image: &ContainerImage) -> Result<String, MachineError> {
+    async fn ensure_image(&self, image: &ContainerImage) -> Result<ImageUrl, MachineError> {
         match image {
             // Public/local: pull only if absent, so a locally-built tag works.
             ContainerImage::Public(url) => {
-                let reference = url.as_ref().to_string();
-                if self.docker.inspect_image(&reference).await.is_err() {
-                    self.pull(&reference, None).await?;
+                let reference = url.as_ref();
+                if self.docker.inspect_image(reference).await.is_err() {
+                    self.pull(reference, None).await?;
                 }
-                Ok(reference)
+                Ok(url.clone())
             }
             // Private agent: pull from the registry with the deploy token as a
             // bearer credential (X-Registry-Auth registrytoken).
@@ -116,7 +118,7 @@ impl DockerMachineProvider {
                     ..Default::default()
                 };
                 self.pull(&reference, Some(credentials)).await?;
-                Ok(reference)
+                Ok(ImageUrl::from(reference))
             }
         }
     }
@@ -158,7 +160,7 @@ impl MachineProvider for DockerMachineProvider {
         let env: Vec<String> = config.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
 
         let container_config = Config {
-            image: Some(image.clone()),
+            image: Some(image.as_ref().to_string()),
             env: Some(env),
             host_config: Some(HostConfig {
                 network_mode: Some(self.config.network.clone()),
@@ -186,7 +188,7 @@ impl MachineProvider for DockerMachineProvider {
         tracing::info!(
             match_id = ctx.match_id,
             container = name,
-            image,
+            image = %image,
             slot = config.slot,
             "Spawned Docker container"
         );
