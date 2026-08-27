@@ -15,3 +15,7 @@ tracing = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tracing-subscriber = { workspace = true }

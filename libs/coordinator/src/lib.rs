@@ -12,7 +12,7 @@ pub use common::ImageUrl;
 
 // Generated from protos/game_host.proto
 pub mod game_host {
-    tonic::include_proto!("achtung.gamehost");
+    tonic::include_proto!("gamehost");
 }
 
 /// Configuration for the game coordinator
@@ -30,10 +30,6 @@ pub struct CoordinatorConfig {
 
     /// Game tick rate in milliseconds
     pub tick_rate_ms: u64,
-
-    /// Arena dimensions
-    pub arena_width: u32,
-    pub arena_height: u32,
 
     /// How long to wait between games
     pub game_interval: Duration,
@@ -206,7 +202,6 @@ impl<P: MachineProvider> GameCoordinator<P> {
             0,
         )
         .env("NUM_PLAYERS", self.config.agents_per_game.to_string())
-        .env("GAME", "achtung")
         .env("TICK_RATE_MS", self.config.tick_rate_ms.to_string());
 
         self.machine_provider
@@ -269,27 +264,22 @@ impl<P: MachineProvider> GameCoordinator<P> {
             agents: agent_endpoints,
             config: Some(GameConfig {
                 tick_rate_ms: self.config.tick_rate_ms,
-                arena_width: self.config.arena_width,
-                arena_height: self.config.arena_height,
             }),
         };
 
-        let start_response = client
+        client
             .start_game(start_request)
             .await
             .map_err(|e| CoordinatorError::GameHost(e.to_string()))?;
 
-        let game_id = start_response.into_inner().game_id;
-        tracing::info!("Game started: {}", game_id);
+        tracing::info!("Game started");
 
         // Poll until the game ends
         loop {
             tokio::time::sleep(self.config.poll_interval).await;
 
             let status = client
-                .get_status(GetStatusRequest {
-                    game_id: game_id.clone(),
-                })
+                .get_status(GetStatusRequest {})
                 .await
                 .map_err(|e| CoordinatorError::GameHost(e.to_string()))?
                 .into_inner();
