@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package achtung.gamehost;
+package gamehost;
 
 // GameHost service - used by the coordinator to control game execution
 service GameHost {
@@ -33,20 +33,11 @@ message AgentEndpoint {
 message GameConfig {
   // Tick rate in milliseconds (how often the game updates)
   uint64 tick_rate_ms = 1;
-
-  // Arena dimensions
-  uint32 arena_width = 2;
-  uint32 arena_height = 3;
 }
 
-message StartGameResponse {
-  // Unique identifier for this game session
-  string game_id = 1;
-}
+message StartGameResponse {}
 
-message GetStatusRequest {
-  string game_id = 1;
-}
+message GetStatusRequest {}
 
 // Current status of the game
 message GameStatus {

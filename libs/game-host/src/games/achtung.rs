@@ -313,7 +313,41 @@ impl game::GameState for Achtung {
     }
 }
 
+/// Read-only view of a player's externally-observable state, for headless
+/// drivers (e.g. the gRPC game host) that need to expose state to agents.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlayerView {
+    pub player_id: PlayerId,
+    pub x: f32,
+    pub y: f32,
+    /// Heading in radians.
+    pub direction: f32,
+    pub alive: bool,
+}
+
 impl Achtung {
+    /// Current tick (timestep) counter.
+    pub fn tick(&self) -> u64 {
+        self.timestep
+    }
+
+    /// Snapshot of every player's observable state, ordered by player id.
+    pub fn player_views(&self) -> Vec<PlayerView> {
+        let mut views: Vec<PlayerView> = self
+            .players
+            .iter()
+            .map(|(&player_id, p)| PlayerView {
+                player_id,
+                x: p.head.position.x,
+                y: p.head.position.y,
+                direction: p.direction.radians,
+                alive: p.is_alive,
+            })
+            .collect();
+        views.sort_by_key(|v| v.player_id);
+        views
+    }
+
     fn kill_player(&mut self, player_id: PlayerId) {
         log::info!("player {} died", player_id);
         self.players

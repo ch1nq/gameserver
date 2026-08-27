@@ -8,9 +8,6 @@ service Agent {
 
   // Called each tick to get the agent's action
   rpc GetAction(GameState) returns (AgentAction);
-
-  // Called when the game ends
-  rpc GameOver(GameOverNotification) returns (GameOverResponse);
 }
 
 message InitializeRequest {
@@ -65,10 +62,3 @@ enum Direction {
 message AgentAction {
   Direction direction = 1;
 }
-
-message GameOverNotification {
-  // Final placement (1 = first place)
-  uint32 placement = 2;
-}
-
-message GameOverResponse {}
