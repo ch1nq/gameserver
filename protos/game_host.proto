@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package gamehost;
 
+import "spectator_frame.proto";
+
 // GameHost service - used by the coordinator to control game execution
 service GameHost {
   // Start a new game with the specified agents
@@ -9,7 +11,16 @@ service GameHost {
 
   // Get the current status of the game
   rpc GetStatus(GetStatusRequest) returns (GameStatus);
+
+  // Stream live game state for spectators. The stream first yields a full
+  // snapshot of the current state, then per-tick deltas. The `payload` is a
+  // game-specific encoded message, opaque to this generic service. Frames use
+  // the shared spectator_frame.SpectatorFrame so the website's Spectator relay
+  // can forward them without re-mapping.
+  rpc WatchGame(WatchGameRequest) returns (stream spectator_frame.SpectatorFrame);
 }
+
+message WatchGameRequest {}
 
 // Request to start a game
 message StartGameRequest {

@@ -5,16 +5,22 @@
 //! maps the proto `Direction` reply onto [`GameAction`], and carries the arena
 //! `Config` (default 1000², overridable via `ARENA_WIDTH`/`ARENA_HEIGHT`).
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
+use prost::Message as _;
 use tonic::transport::Channel;
 
 use crate::game::GameState as _;
-use crate::games::achtung::{Achtung, AchtungConfig, GameAction, PlayerId};
+use crate::games::achtung::{Achtung, AchtungConfig, BlobView, GameAction, PlayerId};
 use crate::grpc::GameAdapter;
 
 pub mod agentpb {
     tonic::include_proto!("achtung.agent");
+}
+
+pub mod spectpb {
+    tonic::include_proto!("achtung.spectator");
 }
 
 use agentpb::agent_client::AgentClient;
@@ -71,13 +77,122 @@ fn build_state(engine: &Achtung) -> agentpb::GameState {
     }
 }
 
+fn to_blob(b: &BlobView) -> spectpb::Blob {
+    spectpb::Blob {
+        x: b.x,
+        y: b.y,
+        size: b.size,
+    }
+}
+
+/// One player's accumulated spectator state (mirrors the engine's append-only
+/// trail so snapshots are cheap and deltas are just the newly appended blobs).
+struct SpectatorPlayer {
+    alive: bool,
+    head: BlobView,
+    body: Vec<BlobView>,
+}
+
+/// Accumulated spectator state for the whole game.
+pub struct AchtungSpectator {
+    tick: u64,
+    arena: (u32, u32),
+    players: BTreeMap<PlayerId, SpectatorPlayer>,
+}
+
+impl AchtungSpectator {
+    fn from_engine(engine: &Achtung) -> Self {
+        let players = engine
+            .spectator_view()
+            .into_iter()
+            .map(|v| {
+                (
+                    v.player_id,
+                    SpectatorPlayer {
+                        alive: v.alive,
+                        head: v.head,
+                        body: v.body,
+                    },
+                )
+            })
+            .collect();
+        Self {
+            tick: engine.tick(),
+            arena: engine.arena(),
+            players,
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl GameAdapter for AchtungGrpc {
     type Engine = Achtung;
     type Client = AgentClient<Channel>;
+    type Spectator = AchtungSpectator;
 
     fn init_engine(&self, num_players: usize) -> Achtung {
         Achtung::init_game(&self.config, num_players)
+    }
+
+    fn init_spectator(&self, engine: &Achtung) -> AchtungSpectator {
+        AchtungSpectator::from_engine(engine)
+    }
+
+    fn tick_spectator(&self, spec: &mut AchtungSpectator, engine: &Achtung) -> Vec<u8> {
+        spec.tick = engine.tick();
+        let players = engine
+            .spectator_view()
+            .into_iter()
+            .map(|v| {
+                let acc = spec.players.entry(v.player_id).or_insert(SpectatorPlayer {
+                    alive: v.alive,
+                    head: v.head,
+                    body: Vec::new(),
+                });
+                // The trail is append-only, so new blobs are whatever the engine
+                // has beyond what we've already sent.
+                let new_body: Vec<spectpb::Blob> = v.body[acc.body.len().min(v.body.len())..]
+                    .iter()
+                    .map(to_blob)
+                    .collect();
+                acc.body = v.body;
+                acc.alive = v.alive;
+                acc.head = v.head;
+                spectpb::PlayerDelta {
+                    player_id: v.player_id as u32,
+                    alive: v.alive,
+                    head: Some(to_blob(&v.head)),
+                    new_body,
+                }
+            })
+            .collect();
+        spectpb::SpectatorDelta {
+            tick: spec.tick,
+            players,
+        }
+        .encode_to_vec()
+    }
+
+    fn encode_snapshot(&self, spec: &AchtungSpectator) -> Vec<u8> {
+        let players = spec
+            .players
+            .iter()
+            .map(|(&player_id, p)| spectpb::PlayerBody {
+                player_id: player_id as u32,
+                alive: p.alive,
+                head: Some(to_blob(&p.head)),
+                body: p.body.iter().map(to_blob).collect(),
+            })
+            .collect();
+        spectpb::SpectatorSnapshot {
+            tick: spec.tick,
+            arena: Some(spectpb::ArenaConfig {
+                width: spec.arena.0,
+                height: spec.arena.1,
+            }),
+            players,
+        }
+        .encode_to_vec()
     }
 
     fn active_players(&self, engine: &Achtung) -> Vec<PlayerId> {

@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package spectator_frame;
+
+// One frame of a spectator stream: a full snapshot or a per-tick delta.
+//
+// Shared by GameHost.WatchGame (the game host produces frames) and the
+// browser-facing Spectator.Watch service (the website relays them), so the
+// relay can forward frames as-is instead of re-mapping a duplicate message.
+message SpectatorFrame {
+  uint64 tick = 1;
+
+  // true  => `payload` is a full snapshot of the current state
+  // false => `payload` is a delta relative to previously sent frames
+  bool is_snapshot = 2;
+
+  // Game-specific encoded state (e.g. achtung.spectator.SpectatorSnapshot /
+  // SpectatorDelta). Opaque to the generic transport.
+  bytes payload = 3;
+}
