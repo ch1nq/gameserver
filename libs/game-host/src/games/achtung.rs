@@ -325,10 +325,56 @@ pub struct PlayerView {
     pub alive: bool,
 }
 
+/// A single drawable circle (head or trail segment), for spectators.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlobView {
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+}
+
+/// Full spectator view of a player: head plus the entire trail. Unlike
+/// [`PlayerView`] (agent-facing, head only) this carries the body so the
+/// browser can render the curve.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerSpectatorView {
+    pub player_id: PlayerId,
+    pub alive: bool,
+    pub head: BlobView,
+    pub body: Vec<BlobView>,
+}
+
 impl Achtung {
     /// Current tick (timestep) counter.
     pub fn tick(&self) -> u64 {
         self.timestep
+    }
+
+    /// Arena dimensions `(width, height)`.
+    pub fn arena(&self) -> (u32, u32) {
+        (self.config.arena_width, self.config.arena_height)
+    }
+
+    /// Full spectator snapshot: every player's head and trail, ordered by id.
+    /// The body is append-only, so consumers can diff by trailing length.
+    pub fn spectator_view(&self) -> Vec<PlayerSpectatorView> {
+        let blob = |b: &Blob| BlobView {
+            x: b.position.x,
+            y: b.position.y,
+            size: b.size,
+        };
+        let mut views: Vec<PlayerSpectatorView> = self
+            .players
+            .iter()
+            .map(|(&player_id, p)| PlayerSpectatorView {
+                player_id,
+                alive: p.is_alive,
+                head: blob(&p.head),
+                body: p.body.iter().map(blob).collect(),
+            })
+            .collect();
+        views.sort_by_key(|v| v.player_id);
+        views
     }
 
     /// Snapshot of every player's observable state, ordered by player id.
