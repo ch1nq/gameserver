@@ -1,7 +1,7 @@
 //! Agent infrastructure management library.
 //!
 //! Provides abstractions for provisioning and managing agent machines
-//! for game matches.
+//! for game matches. Supports multiple backends (Docker, gVisor).
 
 pub mod docker;
 pub mod reaper;
@@ -13,7 +13,7 @@ use common::{ImageUrl, RegistryToken};
 use rand::{Rng, distr::Alphanumeric};
 
 // Re-export key types
-pub use docker::{DockerMachineProvider, DockerMachineProviderConfig};
+pub use docker::{DockerIsolation, DockerMachineProvider, DockerMachineProviderConfig};
 pub use reaper::{Reaper, ReaperConfig};
 
 #[derive(Debug, Clone)]
@@ -80,9 +80,23 @@ pub struct MachineHandle {
     ///
     /// Who the consumer is depends on the slot: the coordinator dials the game
     /// host, and the game host dials the agents. Backends are free to return
-    /// whatever each consumer needs — for Docker on a shared network, that is
-    /// the container name, resolved by Docker's embedded DNS.
+    /// whatever each consumer needs:
+    ///
+    /// - Docker [`DockerIsolation::SharedNetwork`]: the container name, resolved
+    ///   by Docker's embedded DNS.
+    /// - Docker [`DockerIsolation::PerMatchNetworks`]: the container's IP on its
+    ///   slot network, since the coordinator runs outside Docker DNS.
     pub private_ip: String,
+}
+
+/// What kind of resource an [`OrphanedResource`] refers to, so
+/// `destroy_orphaned` knows which API to delete it with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrphanKind {
+    /// A machine (container / microVM).
+    Machine,
+    /// Per-match network infrastructure (e.g., a Docker network).
+    Network,
 }
 
 /// Information about orphaned resources to be reaped
@@ -94,6 +108,8 @@ pub struct OrphanedResource {
     pub name: String,
     /// When the resource was created
     pub created_at: SystemTime,
+    /// What kind of resource this is, so the reaper deletes it with the right API
+    pub kind: OrphanKind,
 }
 
 /// Errors that can occur during machine operations
@@ -126,8 +142,8 @@ pub enum MachineError {
 /// 4. `cleanup_match` — release shared resources
 ///
 /// The associated `MatchContext` type carries backend-specific per-match state
-/// (e.g., the container name prefix for docker), so no shared mutable state is
-/// needed to correlate the four phases.
+/// (e.g., the slot networks for docker), so no shared mutable state is needed to
+/// correlate the four phases.
 #[async_trait::async_trait]
 pub trait MachineProvider: Send + Sync + 'static {
     /// Backend-specific per-match context produced by `init_match` and
@@ -137,8 +153,15 @@ pub trait MachineProvider: Send + Sync + 'static {
     /// Initialize shared resources for a match.
     ///
     /// Called once before any `spawn` calls. Sets up networking and other
-    /// shared infrastructure for the match.
-    async fn init_match(&self, match_id: &str) -> Result<Self::MatchContext, MachineError>;
+    /// shared infrastructure for the match. `num_slots` is the total number of
+    /// machines the match will spawn (game host + agents); backends that
+    /// allocate per-slot resources up front (e.g. one network per slot) need
+    /// it because resources cannot always be attached after machines start.
+    async fn init_match(
+        &self,
+        match_id: &str,
+        num_slots: u8,
+    ) -> Result<Self::MatchContext, MachineError>;
 
     /// Spawn a single machine within an initialized match.
     ///
