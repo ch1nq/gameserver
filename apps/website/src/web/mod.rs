@@ -6,3 +6,4 @@ mod layout;
 mod oauth;
 mod protected;
 mod public;
+mod spectator;

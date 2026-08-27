@@ -5,6 +5,7 @@ use agent_infra::{ContainerImage, MachineError, MachineHandle, MachineProvider, 
 use common::{AgentId, AgentInfo, AgentRepository, ContainerImageUrl, DeployTokenProvider};
 use game_host::game_host_client::GameHostClient;
 use game_host::{AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest};
+use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 // Re-export types for public API
@@ -13,6 +14,50 @@ pub use common::ImageUrl;
 // Generated from protos/game_host.proto
 pub mod game_host {
     tonic::include_proto!("gamehost");
+}
+
+// Shared frame message produced by the game host. The browser-facing SSE handler
+// (in the website) reuses this to decode the WatchGame stream it relays.
+pub mod spectator_frame {
+    tonic::include_proto!("spectator_frame");
+}
+
+/// The gRPC URL of the game host currently hosting a match, or `None` between
+/// games. Written by the coordinator, read by the spectator relay. One game
+/// runs at a time, so a single slot suffices.
+pub type SpectatorRegistry = Arc<RwLock<Option<String>>>;
+
+/// Publishes a game host to the [`SpectatorRegistry`] for its lifetime and
+/// clears it on drop, so a cancelled or panicking match never leaves a stale
+/// address pointing at a destroyed host. Clearing an explicit `None` at the end
+/// of the happy path is not enough: match tasks can be cancelled (e.g. a match
+/// timeout) between publish and clear.
+struct SpectatorRegistryGuard {
+    registry: SpectatorRegistry,
+    addr: String,
+}
+
+impl SpectatorRegistryGuard {
+    /// Publish `addr` and return a guard that clears it on drop.
+    async fn publish(registry: SpectatorRegistry, addr: String) -> Self {
+        *registry.write().await = Some(addr.clone());
+        Self { registry, addr }
+    }
+}
+
+impl Drop for SpectatorRegistryGuard {
+    fn drop(&mut self) {
+        // Drop can't await, so hand the clear to the runtime. Only clear if we
+        // are still the published address, so a newer game isn't clobbered.
+        let registry = self.registry.clone();
+        let addr = std::mem::take(&mut self.addr);
+        tokio::spawn(async move {
+            let mut slot = registry.write().await;
+            if slot.as_deref() == Some(addr.as_str()) {
+                *slot = None;
+            }
+        });
+    }
 }
 
 /// Configuration for the game coordinator
@@ -54,6 +99,8 @@ pub struct GameCoordinator<P: MachineProvider> {
     machine_provider: Arc<P>,
     agent_repo: Box<dyn AgentRepository>,
     token_provider: Box<dyn DeployTokenProvider>,
+    /// Publishes the current game host address for the spectator relay.
+    spectator_registry: SpectatorRegistry,
 }
 
 impl<P: MachineProvider> GameCoordinator<P> {
@@ -62,12 +109,14 @@ impl<P: MachineProvider> GameCoordinator<P> {
         machine_provider: Arc<P>,
         agent_repo: Box<dyn AgentRepository>,
         token_provider: Box<dyn DeployTokenProvider>,
+        spectator_registry: SpectatorRegistry,
     ) -> Self {
         Self {
             config,
             machine_provider,
             agent_repo,
             token_provider,
+            spectator_registry,
         }
     }
 
@@ -248,7 +297,7 @@ impl<P: MachineProvider> GameCoordinator<P> {
             game_host.private_ip, self.config.game_host_grpc_port
         );
 
-        let mut client = GameHostClient::connect(game_host_addr)
+        let mut client = GameHostClient::connect(game_host_addr.clone())
             .await
             .map_err(|e| CoordinatorError::Connection(e.to_string()))?;
 
@@ -274,7 +323,22 @@ impl<P: MachineProvider> GameCoordinator<P> {
 
         tracing::info!("Game started");
 
-        // Poll until the game ends
+        // Publish the game host so the website's spectator relay can stream it.
+        // The guard clears the registry when it drops — on normal completion,
+        // early return, cancellation, or panic — so a stale game host never
+        // lingers between games. Reuse the exact address form used to dial above.
+        let _registry_guard =
+            SpectatorRegistryGuard::publish(self.spectator_registry.clone(), game_host_addr).await;
+
+        // Poll until the game ends.
+        self.poll_until_done(&mut client).await
+    }
+
+    /// Poll `GetStatus` on `poll_interval` until the game finishes or fails.
+    async fn poll_until_done(
+        &self,
+        client: &mut GameHostClient<tonic::transport::Channel>,
+    ) -> Result<GameResult, CoordinatorError> {
         loop {
             tokio::time::sleep(self.config.poll_interval).await;
 

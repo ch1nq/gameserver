@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package achtung.spectator;
+
+// Payload carried inside gamehost/spectator SpectatorFrame.payload for Achtung.
+// The browser decodes SpectatorSnapshot when is_snapshot is true, and
+// SpectatorDelta otherwise.
+
+message Blob {
+  float x = 1;
+  float y = 2;
+  float size = 3;
+}
+
+message ArenaConfig {
+  uint32 width = 1;
+  uint32 height = 2;
+}
+
+// Full state sent once when a spectator joins.
+message SpectatorSnapshot {
+  uint64 tick = 1;
+  ArenaConfig arena = 2;
+  repeated PlayerBody players = 3;
+}
+
+message PlayerBody {
+  uint32 player_id = 1;
+  bool alive = 2;
+  Blob head = 3;
+  repeated Blob body = 4; // full trail
+}
+
+// Per-tick change applied on top of the last known state.
+message SpectatorDelta {
+  uint64 tick = 1;
+  repeated PlayerDelta players = 2;
+}
+
+message PlayerDelta {
+  uint32 player_id = 1;
+  bool alive = 2; // full value every tick (cheap, avoids presence tracking)
+  Blob head = 3;
+  repeated Blob new_body = 4; // blobs appended to the trail this tick
+}

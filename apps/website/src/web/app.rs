@@ -1,7 +1,7 @@
 use crate::web::layout::pages;
 use crate::{
     users::Backend,
-    web::{auth, oauth, protected, public},
+    web::{auth, oauth, protected, public, spectator},
 };
 use achtung_api::ApiState;
 use achtung_core::agents::manager::AgentManager;
@@ -98,6 +98,13 @@ impl App {
     }
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+        // Spectator target, shared between the coordinator (writer) and the SSE
+        // relay (reader). Created unconditionally so the browser endpoint exists
+        // even when the coordinator is disabled (it just returns UNAVAILABLE
+        // until a game is running).
+        let spectator_registry: coordinator::SpectatorRegistry =
+            Arc::new(tokio::sync::RwLock::new(None));
+
         if env::var("ENABLE_COORDINATOR").is_ok() {
             let config = docker_config_from_env();
             let provider = Arc::new(
@@ -105,8 +112,14 @@ impl App {
                     .expect("Failed to connect to the Docker daemon"),
             );
             // Docker containers are named "achtung-<id>-slot-N".
-            self.spawn_coordinator_and_reaper(provider, "achtung-");
+            self.spawn_coordinator_and_reaper(provider, "achtung-", spectator_registry.clone());
         }
+
+        // Browser-facing spectator stream, served as Server-Sent Events. Decodes
+        // the current game host's WatchGame stream and re-emits JSON, so the
+        // browser needs no protobuf/gRPC runtime.
+        let spectator_router =
+            spectator::router(spectator::SpectatorState::new(spectator_registry.clone()));
 
         // Static files service
         let static_service = ServeDir::new("static");
@@ -146,6 +159,7 @@ impl App {
             .layer(auth_layer);
 
         let app = axum::Router::new()
+            .merge(spectator_router)
             .nest("/api/v1", api_router)
             .nest_service("/static", static_service)
             .fallback_service(fallback_service)
@@ -167,12 +181,17 @@ impl App {
         &self,
         provider: Arc<P>,
         reaper_prefix_default: &str,
+        spectator_registry: coordinator::SpectatorRegistry,
     ) {
-        self.spawn_coordinator(provider.clone());
+        self.spawn_coordinator(provider.clone(), spectator_registry);
         self.spawn_reaper(provider, reaper_prefix_default);
     }
 
-    fn spawn_coordinator<P: MachineProvider + 'static>(&self, provider: Arc<P>) {
+    fn spawn_coordinator<P: MachineProvider + 'static>(
+        &self,
+        provider: Arc<P>,
+        spectator_registry: coordinator::SpectatorRegistry,
+    ) {
         let game_host_image = env::var("GAME_HOST_IMAGE")
             .unwrap_or_else(|_| "ghcr.io/ch1nq/achtung-game-host:latest".to_string());
         let game_host_image =
@@ -204,6 +223,7 @@ impl App {
             provider,
             Box::new(self.state.agent_manager.clone()),
             Box::new(self.state.registry_token_manager.clone()),
+            spectator_registry,
         );
         coordinator.spawn();
 

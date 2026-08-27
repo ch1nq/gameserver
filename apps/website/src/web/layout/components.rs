@@ -92,7 +92,7 @@ impl<'a> Render for Navbar<'a> {
         html! {
             nav class="bg-white py-2 px-10 border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700" {
                 div class="container flex justify-between items-center" {
-                    a href="/" class="text-2xl font-bold text-gray-900 dark:text-white font-[Geologica] tracking-tighter" { "Achtung battle" }
+                    a href="/" class="text-2xl font-semibold text-gray-900 dark:text-white" { "Achtung battle" }
                     div class="flex items-center gap-4" {
                         @if let Some(user) = &self.session.user {
                             (UserDropdown { user });
@@ -113,8 +113,8 @@ impl Render for AchtungLive {
     fn render(&self) -> Markup {
         html! {
             div class="flex flex-col lg:flex-row gap-4" {
-                div class="border rounded-lg aspect-square overflow-hidden w-full max-w-lg dark:border-gray-700" {
-                    canvas id="achtung-canvas" width="1000" height="1000" class="max-h-full h-full max-w-full w-full";
+                div class="border rounded-lg overflow-hidden w-full max-w-lg dark:border-gray-700 bg-[#000033]" {
+                    canvas id="achtung-canvas" width="1000" height="200" class="max-w-full w-full";
                     script src="/static/spectator.js" {};
                     script { "init_spectator('achtung-canvas');" };
                 }
