@@ -4,7 +4,7 @@
 //! shared user-defined network so the coordinator (running in the website
 //! container) can reach them by container name via Docker's embedded DNS.
 //!
-//! Addressing: each container is named `achtung-{match}-slot-{n}` and that name
+//! Addressing: each container is named `{prefix}{match}-slot-{n}` and that name
 //! is used as its `private_ip`, so the coordinator dials `http://{name}:50051`
 //! (game host) / `{name}:50052` (agents), resolved on the shared network.
 //!
@@ -43,6 +43,9 @@ pub struct DockerMachineProviderConfig {
     /// Docker daemon (e.g. `localhost:5001`, which the daemon treats as
     /// insecure automatically).
     pub registry_pull_host: String,
+    /// Prefix for container names (e.g. `achtung-`). Shared with the reaper's
+    /// match prefix so spawned names and reaped names stay in lock-step.
+    pub name_prefix: String,
 }
 
 /// Per-match context. Docker needs no shared per-match resources (containers
@@ -135,8 +138,8 @@ impl DockerMachineProvider {
     }
 }
 
-fn container_name(match_id: &str, slot: u8) -> String {
-    format!("achtung-{match_id}-slot-{slot}")
+fn container_name(prefix: &str, match_id: &str, slot: u8) -> String {
+    format!("{prefix}{match_id}-slot-{slot}")
 }
 
 #[async_trait::async_trait]
@@ -154,7 +157,7 @@ impl MachineProvider for DockerMachineProvider {
         ctx: &DockerMatchContext,
         config: SpawnConfig,
     ) -> Result<MachineHandle, MachineError> {
-        let name = container_name(&ctx.match_id, config.slot);
+        let name = container_name(&self.config.name_prefix, &ctx.match_id, config.slot);
         let image = self.ensure_image(&config.container_image).await?;
 
         let env: Vec<String> = config.env.iter().map(|(k, v)| format!("{k}={v}")).collect();

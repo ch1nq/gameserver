@@ -99,13 +99,14 @@ impl App {
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         if env::var("ENABLE_COORDINATOR").is_ok() {
-            let config = docker_config_from_env();
+            let name_prefix = agent_name_prefix();
+            let config = docker_config_from_env(name_prefix.clone());
             let provider = Arc::new(
                 agent_infra::DockerMachineProvider::new(config)
-                    .expect("Failed to connect to the Docker daemon"),
+                    .map_err(|e| format!("Failed to create docker machine provider: {e}"))?,
             );
-            // Docker containers are named "achtung-<id>-slot-N".
-            self.spawn_coordinator_and_reaper(provider, "achtung-");
+            self.spawn_coordinator(provider.clone());
+            self.spawn_reaper(provider, &name_prefix);
         }
 
         // Static files service
@@ -157,19 +158,6 @@ impl App {
         axum::serve(listener, app.into_make_service()).await?;
 
         Ok(())
-    }
-
-    /// Spawn coordinator and reaper sharing a single `Arc<P>` provider.
-    ///
-    /// `reaper_prefix_default` is the backend-specific default used to match this
-    /// provider's resources when `REAPER_PREFIX` is not set in the environment.
-    fn spawn_coordinator_and_reaper<P: MachineProvider + 'static>(
-        &self,
-        provider: Arc<P>,
-        reaper_prefix_default: &str,
-    ) {
-        self.spawn_coordinator(provider.clone());
-        self.spawn_reaper(provider, reaper_prefix_default);
     }
 
     fn spawn_coordinator<P: MachineProvider + 'static>(&self, provider: Arc<P>) {
@@ -249,11 +237,23 @@ impl App {
     }
 }
 
-fn docker_config_from_env() -> DockerMachineProviderConfig {
+fn docker_config_from_env(name_prefix: String) -> DockerMachineProviderConfig {
     DockerMachineProviderConfig {
         network: env::var("DOCKER_NETWORK")
             .expect("DOCKER_NETWORK required when the coordinator is enabled"),
         registry_pull_host: env::var("DOCKER_REGISTRY_PULL_HOST")
             .unwrap_or_else(|_| "localhost:5001".to_string()),
+        name_prefix,
     }
+}
+
+/// Prefix applied to spawned match/agent container names, and also used as the
+/// reaper's default match prefix. Sourced from one place so the naming and the
+/// reaping cannot drift apart. Override with `AGENT_NAME_PREFIX`.
+fn agent_name_prefix() -> String {
+    env::var("AGENT_NAME_PREFIX").unwrap_or_else(|_| agent_name_prefix_default().to_string())
+}
+
+fn agent_name_prefix_default() -> &'static str {
+    "achtung-"
 }
