@@ -8,7 +8,7 @@ use achtung_core::agents::manager::AgentManager;
 use achtung_core::api_tokens::ApiTokenManager;
 use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
-use agent_infra::FlyMachineProviderConfig;
+use agent_infra::{DockerMachineProviderConfig, MachineProvider, Reaper, ReaperConfig};
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
     AuthManagerLayerBuilder, login_required,
@@ -20,6 +20,7 @@ use oauth2::{AuthUrl, ClientId, ClientSecret, TokenUrl, basic::BasicClient};
 use registry_auth::RegistryAuthConfig;
 use sqlx::PgPool;
 use std::env;
+use std::sync::Arc;
 use time::Duration;
 use tower_http::services::ServeDir;
 use tower_sessions_sqlx_store::PostgresStore;
@@ -98,24 +99,14 @@ impl App {
 
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
         if env::var("ENABLE_COORDINATOR").is_ok() {
-            let fly_config = FlyMachineProviderConfig {
-                fly_token: env::var("FLY_TOKEN").expect("FLY_TOKEN required for coordinator"),
-                fly_org: env::var("FLY_ORG").expect("FLY_ORG required for coordinator"),
-                fly_host: match env::var("FLY_HOST").as_deref() {
-                    Ok("internal") => agent_infra::FlyMachineProviderHost::Internal,
-                    Ok("public") => agent_infra::FlyMachineProviderHost::Public,
-                    Ok(_) => panic!("unknown FLY_HOST value"),
-                    Err(_) => agent_infra::FlyMachineProviderHost::Internal,
-                },
-                registry_url: env::var("REGISTRY_URL")
-                    .unwrap_or_else(|_| "https://achtung-registry.fly.dev".to_string()),
-            };
-
-            let coordinator_provider = agent_infra::FlyMachineProvider::new(fly_config.clone());
-            let reaper_provider = agent_infra::FlyMachineProvider::new(fly_config);
-
-            self.spawn_coordinator(Box::new(coordinator_provider));
-            self.spawn_reaper(reaper_provider);
+            let name_prefix = agent_name_prefix();
+            let config = docker_config_from_env(name_prefix.clone());
+            let provider = Arc::new(
+                agent_infra::DockerMachineProvider::new(config)
+                    .map_err(|e| format!("Failed to create docker machine provider: {e}"))?,
+            );
+            self.spawn_coordinator(provider.clone());
+            self.spawn_reaper(provider, &name_prefix);
         }
 
         // Static files service
@@ -169,7 +160,7 @@ impl App {
         Ok(())
     }
 
-    fn spawn_coordinator(&self, machine_provider: Box<dyn agent_infra::MachineProvider>) {
+    fn spawn_coordinator<P: MachineProvider + 'static>(&self, provider: Arc<P>) {
         let game_host_image = env::var("GAME_HOST_IMAGE")
             .unwrap_or_else(|_| "ghcr.io/ch1nq/achtung-game-host:latest".to_string());
         let game_host_image =
@@ -200,7 +191,7 @@ impl App {
 
         let coordinator = GameCoordinator::new(
             config,
-            machine_provider,
+            provider,
             Box::new(self.state.agent_manager.clone()),
             Box::new(self.state.registry_token_manager.clone()),
         );
@@ -209,28 +200,32 @@ impl App {
         tracing::info!("Game coordinator spawned");
     }
 
-    fn spawn_reaper<P: agent_infra::MachineProvider + 'static>(&self, machine_provider: P) {
-        let reaper_config = agent_infra::ReaperConfig {
+    fn spawn_reaper<P: MachineProvider + 'static>(
+        &self,
+        provider: Arc<P>,
+        reaper_prefix_default: &str,
+    ) {
+        let reaper_config = ReaperConfig {
             interval: std::time::Duration::from_secs(
                 env::var("REAPER_INTERVAL_SECS")
                     .ok()
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(300), // Default: 5 minutes
+                    .unwrap_or(300),
             ),
             max_age: std::time::Duration::from_secs(
                 env::var("REAPER_MAX_AGE_SECS")
                     .ok()
                     .and_then(|s| s.parse().ok())
-                    .unwrap_or(3600), // Default: 1 hour
+                    .unwrap_or(3600),
             ),
-            prefix: env::var("REAPER_PREFIX").unwrap_or_else(|_| "achtung-match-".to_string()),
+            prefix: env::var("REAPER_PREFIX").unwrap_or_else(|_| reaper_prefix_default.to_string()),
         };
 
         let interval = reaper_config.interval;
         let max_age = reaper_config.max_age;
         let prefix = reaper_config.prefix.clone();
 
-        let reaper = agent_infra::Reaper::new(machine_provider, reaper_config);
+        let reaper = Reaper::new(provider, reaper_config);
         reaper.spawn();
 
         tracing::info!(
@@ -240,4 +235,25 @@ impl App {
             prefix
         );
     }
+}
+
+fn docker_config_from_env(name_prefix: String) -> DockerMachineProviderConfig {
+    DockerMachineProviderConfig {
+        network: env::var("DOCKER_NETWORK")
+            .expect("DOCKER_NETWORK required when the coordinator is enabled"),
+        registry_pull_host: env::var("DOCKER_REGISTRY_PULL_HOST")
+            .unwrap_or_else(|_| "localhost:5001".to_string()),
+        name_prefix,
+    }
+}
+
+/// Prefix applied to spawned match/agent container names, and also used as the
+/// reaper's default match prefix. Sourced from one place so the naming and the
+/// reaping cannot drift apart. Override with `AGENT_NAME_PREFIX`.
+fn agent_name_prefix() -> String {
+    env::var("AGENT_NAME_PREFIX").unwrap_or_else(|_| agent_name_prefix_default().to_string())
+}
+
+fn agent_name_prefix_default() -> &'static str {
+    "achtung-"
 }
