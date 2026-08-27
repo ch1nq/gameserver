@@ -448,6 +448,9 @@ impl MachineProvider for DockerMachineProvider {
             app_name: ctx.match_id.clone(),
             machine_id: name,
             private_ip,
+            // Containers are addressed directly, so the consumer dials the
+            // in-machine port it already knows. No host relay involved.
+            grpc_port: None,
         })
     }
 

@@ -67,5 +67,9 @@ pretty_env_logger = "0.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Docker backend
+# Docker backend (also drives the gVisor/runsc runtime)
 bollard = "0.18"
+
+# microsandbox backend (real microVMs; requires KVM). Default features drop
+# `keyring`, which would pull dbus/libsecret into the server image.
+microsandbox = { version = "0.6.15", default-features = false, features = ["net", "prebuilt"] }

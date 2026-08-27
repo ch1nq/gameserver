@@ -4,7 +4,7 @@
 //! <https://docs.docker.com/registry/spec/auth/token/>
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rsa::{RsaPublicKey, pkcs8::DecodePrivateKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,6 +25,11 @@ pub struct RegistryAuthConfig {
     pub registry_service: String,
     /// Key ID for JWT header (derived from public key)
     signing_key: String,
+    /// Public key in PEM format, derived from the private key at construction.
+    ///
+    /// Cached because [`verify_docker_jwt`] needs it per request, and deriving it
+    /// means parsing the private key and re-encoding SPKI every time otherwise.
+    public_key_pem: String,
 }
 
 impl RegistryAuthConfig {
@@ -33,12 +38,22 @@ impl RegistryAuthConfig {
         registry_service: String,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let signing_key = key_id_from_pem(&private_key_pem)?;
+        let public_key_pem = public_key_pem_from_private(&private_key_pem)?;
         Ok(Self {
             private_key_pem,
             registry_service,
             signing_key,
+            public_key_pem,
         })
     }
+}
+
+/// Derive the SPKI public key PEM from a PKCS#8 private key PEM.
+fn public_key_pem_from_private(pem: &str) -> Result<String, Box<dyn std::error::Error>> {
+    use rsa::pkcs8::{EncodePublicKey, LineEnding};
+    let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(pem)?;
+    let public_key = RsaPublicKey::from(&private_key);
+    Ok(public_key.to_public_key_pem(LineEnding::LF)?)
 }
 
 /// Error type for token storage operations
@@ -85,6 +100,29 @@ pub trait RegistryAuth {
 
     /// Validate a user's token
     async fn is_valid_token(&self, user_id: &Self::UserId, token: &Self::Token) -> bool;
+
+    /// Return the presented token verbatim instead of minting a new one.
+    ///
+    /// For principals that already hold a valid, correctly-scoped registry JWT —
+    /// the coordinator's deploy token being the only case today — the right
+    /// answer is to hand it straight back. Minting a fresh token from a
+    /// requested scope would put scope authority in two places and create the
+    /// possibility of amplifying it; echoing makes amplification structurally
+    /// impossible, because nothing is minted. The registry still enforces the
+    /// JWT's own `access` claim, exactly as it does when the token is used
+    /// directly.
+    ///
+    /// Returning `Some` bypasses scope parsing and `user_has_access` entirely,
+    /// so implementations MUST verify the token's signature first.
+    ///
+    /// Defaults to `None`, i.e. mint as usual.
+    async fn passthrough(
+        &self,
+        _user_id: &Self::UserId,
+        _token: &Self::Token,
+    ) -> Option<RegistryJwtToken> {
+        None
+    }
 }
 
 /// Docker registry JWT token with metadata
@@ -127,26 +165,50 @@ pub struct TokenResponse {
     issued_at: Option<String>,
 }
 
+/// Issuer stamped into every token we mint, and required of every token we
+/// verify.
+const TOKEN_ISSUER: &str = "registry-auth";
+
+/// Pin the JWT crypto backend for this process.
+///
+/// `jsonwebtoken` selects a backend from its crate features and **panics** if it
+/// cannot decide — which is exactly what happens here through feature
+/// unification: this crate asks for `rust_crypto`, while `oci-client` (pulled in
+/// by the microsandbox machine backend) asks for `aws_lc_rs`. With both enabled
+/// the default provider's signer and verifier are `panic!` stubs, so *every*
+/// mint and verify would abort at runtime.
+///
+/// Installing one explicitly makes the choice ours rather than the resolver's.
+/// Must be called before any `encode`/`decode`; idempotent, and a lost race is
+/// harmless because every caller installs the same provider.
+fn ensure_crypto_provider() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        // Errs only if something already installed a provider, which is fine.
+        let _ = jsonwebtoken::crypto::rust_crypto::DEFAULT_PROVIDER.install_default();
+    });
+}
+
 /// JWT claims for Docker registry token
 /// <https://docs.docker.com/registry/spec/auth/token/#token-format>
 #[derive(Debug, Serialize, Deserialize)]
-struct Claims {
+pub struct Claims {
     /// Issuer
-    iss: String,
+    pub iss: String,
     /// Subject (username)
-    sub: String,
+    pub sub: String,
     /// Audience (service)
-    aud: String,
+    pub aud: String,
     /// Expiration time (unix timestamp)
-    exp: i64,
+    pub exp: i64,
     /// Not before (unix timestamp)
-    nbf: i64,
+    pub nbf: i64,
     /// Issued at (unix timestamp)
-    iat: i64,
+    pub iat: i64,
     /// JWT ID
-    jti: String,
+    pub jti: String,
     /// Access permissions
-    access: Vec<Access>,
+    pub access: Vec<Access>,
 }
 
 /// Access grant for a Docker registry resource
@@ -241,6 +303,8 @@ pub fn generate_docker_jwt<R: RegistryAuth>(
     service: String,
     config: &RegistryAuthConfig,
 ) -> Result<RegistryJwtToken, RegistryAuthError> {
+    ensure_crypto_provider();
+
     let now = OffsetDateTime::now_utc();
     let exp = now + Duration::minutes(30);
 
@@ -248,7 +312,7 @@ pub fn generate_docker_jwt<R: RegistryAuth>(
 
     // https://distribution.github.io/distribution/spec/auth/jwt/
     let claims = Claims {
-        iss: "registry-auth".to_string(),
+        iss: TOKEN_ISSUER.to_string(),
         sub: username.to_string(),
         aud: service,
         exp: exp.unix_timestamp(),
@@ -276,6 +340,38 @@ pub fn generate_docker_jwt<R: RegistryAuth>(
         issued_at: now,
         expires_at: exp,
     })
+}
+
+/// Verify a JWT we previously issued and return its claims.
+///
+/// Checks the RS256 signature against our own public key plus `aud`, `iss` and
+/// `exp`. Used by the passthrough path: even though the token is only echoed
+/// back, verifying it here means the endpoint 401s at the auth layer instead of
+/// handing an unvalidated string to a registry client.
+pub fn verify_docker_jwt(
+    token: &str,
+    config: &RegistryAuthConfig,
+) -> Result<Claims, RegistryAuthError> {
+    ensure_crypto_provider();
+
+    let decoding_key = DecodingKey::from_rsa_pem(config.public_key_pem.as_bytes()).map_err(|e| {
+        error!("Failed to load RSA public key: {}", e);
+        RegistryAuthError::TokenGeneration
+    })?;
+
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_audience(&[config.registry_service.as_str()]);
+    validation.set_issuer(&[TOKEN_ISSUER]);
+    // `exp` is validated by default; require it (and `aud`/`iss`) to be present
+    // so a token omitting a claim cannot skip the corresponding check.
+    validation.set_required_spec_claims(&["exp", "aud", "iss"]);
+
+    decode::<Claims>(token, &decoding_key, &validation)
+        .map(|data| data.claims)
+        .map_err(|e| {
+            warn!("JWT verification failed: {}", e);
+            RegistryAuthError::InvalidCredentials
+        })
 }
 
 /// Extract Basic auth credentials from Authorization header
@@ -307,8 +403,12 @@ fn extract_basic_auth(
 }
 
 /// Token auth handler for axum
+///
+/// `Sync` is required because [`RegistryAuth::passthrough`] has a default body,
+/// which `async_trait` desugars into a future holding `&self` across an await.
+/// [`router`] already demands it.
 #[cfg(feature = "axum-integration")]
-pub async fn token_handler<R: RegistryAuth>(
+pub async fn token_handler<R: RegistryAuth + Sync>(
     axum::extract::State((registry_auth, config)): axum::extract::State<(R, RegistryAuthConfig)>,
     axum_extra::extract::Query(params): axum_extra::extract::Query<TokenRequest>,
     headers: axum::http::HeaderMap,
@@ -338,13 +438,28 @@ pub async fn token_handler<R: RegistryAuth>(
         return Err(RegistryAuthError::InvalidCredentials);
     }
 
-    let scope_str = params.scope.join(" ");
-    let reqeusted_access = RequestedAccess::parse_scopes(&scope_str)?;
-    let access_grants = reqeusted_access.validate_for_user::<R>(&user_id);
+    // A principal that already holds a valid, correctly-scoped registry JWT gets
+    // it back unchanged. Checked before scope parsing: the requested scope plays
+    // no part, because nothing is minted from it.
+    let jwt = match registry_auth.passthrough(&user_id, &token).await {
+        Some(jwt) => {
+            info!("Returning presented token unchanged for {}", &username);
+            jwt
+        }
+        None => {
+            let scope_str = params.scope.join(" ");
+            let reqeusted_access = RequestedAccess::parse_scopes(&scope_str)?;
+            let access_grants = reqeusted_access.validate_for_user::<R>(&user_id);
+            generate_docker_jwt::<R>(username, access_grants, params.service, &config)?
+        }
+    };
 
-    let jwt = generate_docker_jwt::<R>(username, access_grants, params.service, &config)?;
     let token = jwt.value.clone();
-    let expires_in_secs = (jwt.expires_at - jwt.issued_at).as_seconds_f32() as i64;
+    // Derived from the token's own lifetime rather than a fixed window, so a
+    // passed-through token is not cached by the client past its real `exp`.
+    let expires_in_secs = (jwt.expires_at - OffsetDateTime::now_utc())
+        .as_seconds_f32()
+        .max(0.0) as i64;
     let issued_at = jwt
         .issued_at
         .format(&time::format_description::well_known::Rfc3339)
@@ -418,6 +533,211 @@ fn key_id_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test RSA key standing in for `REGISTRY_PRIVATE_KEY`.
+    const TEST_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC2RrLNE/QKgneY
+QpyNcFuEkIpdMWOHMPXAbPZc0ypBY1COCU7Dx3rVT0Sn7UsZE/fwYImxTMUtp6sz
+5MTPr6QpmwZbAJyYUbId2SbxT2jORKYSdtqc1aySAdrUdsQxaB/xhmIwkWRk6ZTI
+tw6Uf6lktaLBS2QL3/+z55k1iMs+w+FlKu1TfLArPT6UllzWzOgSvaxOTnWw5IPl
+c77MiDm+YF3eO9FKHkC4l2ftZEEM2lXxuFwFrHqNm7BKjuwkzWHm1ARLghBH0KQZ
+N8p3ysExS1dyziOJKBdAZNplaK9zGRJLaUU71nNNQKjFbwtMd/KqER9RTZYfKEMJ
+pveg4OYPAgMBAAECggEAHNcj3Fn/X5hUFvXXMnPoLxn1opg5cL8Y60jyVC6fPXha
+2xZy7XxHHbAso0ti+gVUUibcMn78peQlLRFR6LCYT3L1dvmqTVmDzsA4rq7LXPO0
+uTAwF+ehJfsAJmTiVxTsFPmX2KpwkZz5yyZXurxWT5aDuYTVwCFBorQO5E8QJY5w
+/D/7qvdkMgmdyXjW+d6eApBmj8Wue/hq3QXCVVsTgA/FDVPPUfH52vx/O8ABhT5+
+VtTRZqiQYCkuVrGIJ0qStp/W99XOeHAn02/UIoMh1a4G2LkZY+VP8wttE6KrZ1VW
+hBTbvBWwMqAPP7gIYecScbPjXclW3GbmtzaASmr4lQKBgQDw3Y5lmPoxpAmHaGbA
+n/IZRTTh1qMXWX1+s+FXhfsuGEdrt48aUfEPs3erIcSXD/ExCx8pDq8tB6GQe+ZO
+bKUsONh+f0gZxM+37V9K/bvp0MtGAXzcDuvcBPB79N+8F9pwdZNa2UG44kEMgzyd
+E1mzReCe0+Phywb0XHAyP6gM7QKBgQDBurQfFAndoJLHuTyMQsOnVcBcKH1bQ5fI
+Y5xq+dX9NyTUjEsCWOiG/wRzuc4378B05L4zSUymBgTTj+fO6gVTYvFTBePrH+da
+ERFmyv2Dpyj+YKRpm8TFYFQvdQv3vQoTWgqz3Q8ZPGsqdA8y1pcfcEc8107zmPQD
+wjrxcxCbawKBgQCDs/HX1dUAbbyUIN8Gdq7PaIso7c8RxmobbMpLrEQTCU2MNbt2
+3dVdC3nkxjsTirEMaxNnxNK+YYzTTxw4R6ntS0v9pyVKidY2sQHJJIKqr/NmXQvj
+2/jVvpGshdIMrFJR6chgBamtKXH+IIh1Lw5+Ozg+QIg7f2NXHHBw2WPPZQKBgDR1
+K+Tmdi1vF4/BVuXcBkK/c5EA3cDisqzuXCKTeCBS2EQ9oOoHzR8Q2tHDVFXNM93z
+OpWEmZ6zLodjBi//KmYD+riydZ7rSqgWyxF8kd0eXHlVDfAS39taVDFtjkoNBDdt
+QEyn5Ti+JX6fYqYveUhoDMIqwxQvLJP/+hn7QFn1AoGBAOcyh1axbKVGvQfN5LUL
+Ub7SGmN8Bo8nweJQwVN++HkuJgA1qeFSAmHkTb5SWvlLo5SGnCggJOBHS2YdsWBI
+6kQxb6WosnoGl3DIp3QlWTJ0KTc5zgH5ufDzUsjCf6Kixm46T00gNXxAL4394uB2
+hgvjlUMEsLIcj8xxegi/k4iQ
+-----END PRIVATE KEY-----"#;
+
+    /// A different RSA key, used to prove a token signed by someone else is
+    /// rejected rather than merely parsed.
+    const FOREIGN_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDmtRli54T5csg3
+FJTHsb9U2dZd8cOt/pOmhZuWcF6BRwyiKIhPnxcwI9XRm3F6x/Qq1rt/9k0gPzlQ
+AigTYDCrz7XM8dewFFuZWbtasXpEc03y1Oh44ZM4urJy1BOav+Zu4FMEcw2xAv+e
+xyR/lqpysNM2B7lysa0FQqCQ32NWfkb3NzcG6SN/vX9ZJ5GMvX/a3BZt0DHxZeOk
+Z46JMVx3UuUe2Oj1HQHIvqGOLPuz+3qRglL6tJR4sB5TWlcsA6MsgqsCf1BppZh0
+VvpU7RzSBkQnsEtAsk0p5s40NrkIlq5c6Rwg+PTETV2RaM7ChlR1oSrGSdNk4lFZ
+TEXlAaOzAgMBAAECggEAGYzQ5O0zAtU9aywyVfNPdzwwy3Ks8yYQgA6n7n8/WB3g
+Pk0y226JCOHPGkmWxbxDRENHvKIwZHPcCwpSGeM7QKvePHZEJtH6Wv9fCmpBWjdS
+2KPPoyOIRG4YuTLXgPnjsT/Ssdl0GLh2SsVPO3oaIl2G5qLwXM1klgKM+b5jp/5a
+UOGO4WLFHpcUR+7DO93KxtOoh2/l4v+LtdblSiJj7UhNAt/J3bGSEj0mU+IwDK/A
+38iLyIXmKFYZRp5LDCsdQCucc2Uq+DINiI6vJ1AwQTyUiKdfkuhKIwuAn8TDBdQI
+eULrO7ICQq79DpoxTCEssSwa9eMt4nco/lA6IqECwQKBgQD5TbsQpNqQcz6v4Hv/
+iuwi/jKZQ9o0tmwxC0NGk9aWuEpF8eN0Q+XnPUSSL8u4riTpgiXP7yqtmlHItVtH
+UR1Ap71JEJjEGMzQFVWCVdJ376TmitGYahSMq0XbM2rXwiej+6mY8cR+2mrcaJlM
+T3omoUOjkewhLecNTIIOW5LscQKBgQDs538fA2aYFHWt/5T0mpPTomDaPejSTweR
+0UW/xj5FXqoDcjQkbsikUl1UQKnIP1Zn4RsQO/E5HQBikl85P1jleK2EZ6Zpa2fI
+WX7ndEyIec5u2izID9TPHtggGw9ckC8wSUjyntSYLErGqJcULfgvuNNUfAhY64jL
+Ood3s110YwKBgQDhPkWhSBDhKf6dUSk3PQEUrK5yo0dnENq3hQGHptLe4irY/y8O
+QLpbLpPhsKVTeqOHBju7ns7kguUZfiG2UacoX2U5unEL24xRBLV5SKkcC7zlPs8X
+8eAXKDe5UL9bqOO/2QTmVqm+IwEhmq/Grpgihtlh09mQMLTs4w8ugbZBQQKBgBni
+vbAs1fP+IFGv4J3NmiOA1aZjJ2J7gi87t6xZxAoeauNPgkUM2d2iplIDcsnPqehV
+33gppJUCBz2+EquVsWf5hLQ4AyX3t3Jb3RL7UTWEYbsZGdWObUlobGMtscMCejWD
+fHYORtqN1GnamA97amgEgQr1NpBIxDy4m37H2YlTAoGBAIH1eyLJLp14UvfH4Y2a
+ptH7fyhDAUA0VLiQ4qkHYu2Ey8nB4Ndn35Wf4cIwiHHmLBPekQUD1F8Lnih6Nztr
+wrS/1JT56ML2E1SrwRn0BQG7cyEgDIROBWYTPgEd14vFkNLGnIWQYIXOgqpZtMbs
+8q9WLtwktrTM5Z2h6r+DsXOH
+-----END PRIVATE KEY-----"#;
+
+    const TEST_SERVICE: &str = "registry:5001";
+
+    fn test_config(pem: &str) -> RegistryAuthConfig {
+        RegistryAuthConfig::new(pem.to_string(), TEST_SERVICE.to_string())
+            .expect("config builds from a valid PKCS#8 key")
+    }
+
+    /// Mint a token with explicit lifetime bounds, bypassing
+    /// `generate_docker_jwt`'s fixed 30-minute window so expiry can be tested.
+    fn mint_with_lifetime(
+        config: &RegistryAuthConfig,
+        access: Vec<Access>,
+        iat: OffsetDateTime,
+        exp: OffsetDateTime,
+    ) -> String {
+        let claims = Claims {
+            iss: TOKEN_ISSUER.to_string(),
+            sub: "system".to_string(),
+            aud: config.registry_service.clone(),
+            exp: exp.unix_timestamp(),
+            nbf: iat.unix_timestamp(),
+            iat: iat.unix_timestamp(),
+            jti: Uuid::new_v4().to_string(),
+            access,
+        };
+        let mut header = Header::new(Algorithm::RS256);
+        header.kid = Some(config.signing_key.clone());
+        let key = EncodingKey::from_rsa_pem(config.private_key_pem.as_bytes()).unwrap();
+        encode(&header, &claims, &key).unwrap()
+    }
+
+    fn pull_access(repository: &str) -> Vec<Access> {
+        vec![Access::new(
+            "repository".to_string(),
+            repository.to_string(),
+            vec!["pull".to_string()],
+        )]
+    }
+
+    #[test]
+    fn verify_accepts_our_own_token_with_scope_intact() {
+        let config = test_config(TEST_PEM);
+        let jwt = generate_docker_jwt::<TestRegistryAuth>(
+            "system".to_string(),
+            ValidatedAccess::new(pull_access("user-5/bot")),
+            TEST_SERVICE.to_string(),
+            &config,
+        )
+        .expect("mint succeeds");
+
+        let claims = verify_docker_jwt(&jwt.value, &config).expect("our own token verifies");
+
+        // The access claim is what the registry enforces, so passthrough is only
+        // safe if it survives the round trip unchanged.
+        assert_eq!(claims.access.len(), 1);
+        assert_eq!(claims.access[0].name, "user-5/bot");
+        assert_eq!(claims.access[0].actions, vec!["pull"]);
+        assert_eq!(claims.sub, "system");
+    }
+
+    #[test]
+    fn verify_rejects_an_expired_token() {
+        let config = test_config(TEST_PEM);
+        let now = OffsetDateTime::now_utc();
+        // Well past the 60s default leeway.
+        let token = mint_with_lifetime(
+            &config,
+            pull_access("user-5/bot"),
+            now - Duration::hours(2),
+            now - Duration::hours(1),
+        );
+
+        assert!(
+            verify_docker_jwt(&token, &config).is_err(),
+            "an expired token must not pass through"
+        );
+    }
+
+    #[test]
+    fn verify_rejects_a_token_signed_by_another_key() {
+        let ours = test_config(TEST_PEM);
+        let theirs = test_config(FOREIGN_PEM);
+        let now = OffsetDateTime::now_utc();
+
+        // Correct issuer, audience and scope — only the signature is foreign.
+        let token = mint_with_lifetime(
+            &theirs,
+            pull_access("user-5/bot"),
+            now,
+            now + Duration::minutes(30),
+        );
+
+        assert!(
+            verify_docker_jwt(&token, &ours).is_err(),
+            "a token we did not sign must be rejected"
+        );
+    }
+
+    #[test]
+    fn verify_rejects_a_token_for_another_service() {
+        let config = test_config(TEST_PEM);
+        let other_service =
+            RegistryAuthConfig::new(TEST_PEM.to_string(), "someone-else:5001".to_string()).unwrap();
+        let now = OffsetDateTime::now_utc();
+
+        // Same key, different `aud`: a token minted for another registry must not
+        // be replayable against ours.
+        let token = mint_with_lifetime(
+            &other_service,
+            pull_access("user-5/bot"),
+            now,
+            now + Duration::minutes(30),
+        );
+
+        assert!(verify_docker_jwt(&token, &config).is_err());
+    }
+
+    #[test]
+    fn passthrough_defaults_to_minting() {
+        // The default impl keeps every existing implementor on the mint path, so
+        // adding the method cannot silently change behaviour.
+        let auth = TestRegistryAuth;
+        let result = futures_lite_block_on(auth.passthrough(&TestUserId(1), &String::new()));
+        assert!(result.is_none());
+    }
+
+    /// Minimal executor: this crate has no async runtime dependency, and the
+    /// default `passthrough` body never actually awaits.
+    fn futures_lite_block_on<F: std::future::Future>(fut: F) -> F::Output {
+        use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+        fn noop(_: *const ()) {}
+        fn clone(_: *const ()) -> RawWaker {
+            RawWaker::new(std::ptr::null(), &VTABLE)
+        }
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
+        let waker = unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) };
+        let mut cx = Context::from_waker(&waker);
+        let mut fut = Box::pin(fut);
+        match fut.as_mut().poll(&mut cx) {
+            Poll::Ready(out) => out,
+            Poll::Pending => panic!("the default passthrough impl must not await"),
+        }
+    }
 
     #[test]
     fn test_parse_scopes() {
