@@ -1,7 +1,7 @@
 use super::token::{PlaintextToken, RegistryToken, TokenName};
 use crate::users::UserId;
 use common::ContainerImageUrl;
-use registry_auth::auth::{Access, RegistryAuth, ValidatedAccess};
+use registry_auth::auth::{Access, RegistryAuth, ValidatedAccess, verify_docker_jwt};
 use registry_auth::{RegistryAuthConfig, RegistryJwtToken};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -42,6 +42,22 @@ pub enum TokenManagerError {
 const MAX_TOKENS_PER_USER: i64 = 10;
 const BCRYPT_COST: u32 = 12;
 const SYSTEM_USERNAME: &str = "system";
+
+/// Who is authenticating at the registry token endpoint.
+///
+/// Registry clients present Basic credentials, and the username distinguishes a
+/// human user (`user-{id}`, authenticated by a bcrypt-hashed token in
+/// `registry_tokens`) from this service itself (`system`, authenticating with a
+/// deploy JWT it minted). The two are verified in completely different ways, so
+/// the distinction is carried in the type rather than re-derived per call site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegistryPrincipal {
+    /// This service, presenting a deploy JWT from
+    /// [`RegistryTokenManager::get_system_deploy_token_for`].
+    System,
+    /// A human user, presenting a registry token from `registry_tokens`.
+    User(UserId),
+}
 
 impl RegistryTokenManager {
     pub fn new(db_pool: PgPool, registry_auth_config: RegistryAuthConfig) -> Self {
@@ -274,17 +290,35 @@ impl common::DeployTokenProvider for RegistryTokenManager {
 
 #[async_trait::async_trait]
 impl RegistryAuth for RegistryTokenManager {
-    type UserId = UserId;
+    type UserId = RegistryPrincipal;
     type Token = String;
 
-    fn parse_user_id(username: String) -> Option<UserId> {
+    fn parse_user_id(username: String) -> Option<RegistryPrincipal> {
+        if username == SYSTEM_USERNAME {
+            return Some(RegistryPrincipal::System);
+        }
         username
             .strip_prefix("user-")
-            .map(|id| id.parse::<UserId>().ok())
-            .flatten()
+            .and_then(|id| id.parse::<UserId>().ok())
+            .map(RegistryPrincipal::User)
     }
 
-    fn user_has_access(access: &Access, user_id: &UserId) -> bool {
+    fn user_has_access(access: &Access, principal: &RegistryPrincipal) -> bool {
+        let user_id = match principal {
+            // The system principal never mints anything: its token is echoed
+            // back by `passthrough` before this is reached. Denying here means a
+            // bypass of that branch fails closed rather than granting whatever
+            // scope was asked for.
+            RegistryPrincipal::System => {
+                tracing::warn!(
+                    "System principal reached scope validation for '{}'; refusing to mint",
+                    access.name
+                );
+                return false;
+            }
+            RegistryPrincipal::User(id) => id,
+        };
+
         let user_namespace = format!("user-{}", user_id);
         let granted = access.name.starts_with(&format!("{}/", user_namespace));
         if !granted {
@@ -298,7 +332,47 @@ impl RegistryAuth for RegistryTokenManager {
         granted
     }
 
-    async fn is_valid_token(&self, user_id: &UserId, token: &Self::Token) -> bool {
-        self.validate_token(user_id, token).await.is_ok()
+    async fn is_valid_token(&self, principal: &RegistryPrincipal, token: &Self::Token) -> bool {
+        match principal {
+            // The system principal has no row in `registry_tokens`; it proves
+            // itself with a JWT signed by this service's own key.
+            RegistryPrincipal::System => {
+                verify_docker_jwt(token, &self.registry_auth_config).is_ok()
+            }
+            RegistryPrincipal::User(user_id) => {
+                self.validate_token(user_id, token).await.is_ok()
+            }
+        }
+    }
+
+    async fn passthrough(
+        &self,
+        principal: &RegistryPrincipal,
+        token: &Self::Token,
+    ) -> Option<RegistryJwtToken> {
+        // Only the system principal passes through. Its token is already a
+        // registry bearer token scoped to a single repository with `pull` only —
+        // the same token the Docker path hands to the daemon directly — so
+        // re-minting would add a scope decision without adding a check.
+        if !matches!(principal, RegistryPrincipal::System) {
+            return None;
+        }
+
+        // Verified again here rather than trusting `is_valid_token`: this is what
+        // makes returning the string safe, and the claims carry the real `exp`.
+        let claims = verify_docker_jwt(token, &self.registry_auth_config).ok()?;
+        let expires_at = OffsetDateTime::from_unix_timestamp(claims.exp).ok()?;
+        let issued_at = OffsetDateTime::from_unix_timestamp(claims.iat).ok()?;
+
+        tracing::info!(
+            "Passing through system deploy token, expires at {}",
+            expires_at
+        );
+
+        Some(RegistryJwtToken {
+            value: token.clone(),
+            issued_at,
+            expires_at,
+        })
     }
 }

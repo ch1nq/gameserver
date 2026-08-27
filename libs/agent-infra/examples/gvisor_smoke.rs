@@ -156,9 +156,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn game host (slot 0) then agents, like the coordinator does.
     let mut handles: Vec<MachineHandle> = Vec::new();
     for slot in 0..=AGENTS {
+        // The in-machine listen port. Docker ignores it (containers are
+        // addressed directly); it exists for backends that publish a host port.
         let cfg = SpawnConfig::new(
             ContainerImage::Public(ImageUrl::from(TEST_IMAGE.to_string())),
             slot,
+            PORT,
         );
         match provider.spawn(&ctx, cfg).await {
             Ok(handle) => {

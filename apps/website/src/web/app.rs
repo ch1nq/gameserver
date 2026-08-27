@@ -9,15 +9,15 @@ use achtung_core::api_tokens::ApiTokenManager;
 use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
 use agent_infra::{
-    DockerIsolation, DockerMachineProviderConfig, MachineProvider, Reaper, ReaperConfig,
+    DockerIsolation, DockerMachineProviderConfig, MachineProvider,
+    MicrosandboxMachineProviderConfig, Reaper, ReaperConfig,
 };
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
     AuthManagerLayerBuilder, login_required,
     tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite},
 };
-use coordinator::ImageUrl;
-use coordinator::{CoordinatorConfig, GameCoordinator};
+use coordinator::{CoordinatorConfig, GameCoordinator, ImageUrl};
 use oauth2::{AuthUrl, ClientId, ClientSecret, TokenUrl, basic::BasicClient};
 use registry_auth::RegistryAuthConfig;
 use sqlx::PgPool;
@@ -137,8 +137,27 @@ impl App {
                         spectator_registry.clone(),
                     );
                 }
+                "microsandbox" => {
+                    // Resolve the runtime here rather than mid-match: without it
+                    // every spawn fails, and the first symptom would be a game
+                    // that never starts.
+                    agent_infra::ensure_runtime_installed()
+                        .await
+                        .expect("microsandbox runtime unavailable (requires /dev/kvm)");
+                    let config = microsandbox_config_from_env();
+                    let provider = Arc::new(agent_infra::MicrosandboxMachineProvider::new(config));
+                    // Sandboxes are named "achtung-<id>-slot-N"; this backend
+                    // creates no networks.
+                    self.spawn_coordinator_and_reaper(
+                        provider,
+                        "achtung-",
+                        spectator_registry.clone(),
+                    );
+                }
                 other => {
-                    panic!("Unknown MACHINE_PROVIDER={other:?} (expected \"gvisor\" or \"docker\")")
+                    panic!(
+                        "Unknown MACHINE_PROVIDER={other:?} (expected \"gvisor\", \"docker\", or \"microsandbox\")"
+                    )
                 }
             }
         }
@@ -244,6 +263,15 @@ impl App {
             poll_interval: std::time::Duration::from_secs(1),
             game_host_grpc_port: 50051,
             agent_grpc_port: 50052,
+            // Generous enough to cover a microVM boot plus a cold image pull;
+            // the coordinator retries and proceeds as soon as the host answers,
+            // so a high ceiling costs nothing on a fast backend.
+            game_host_connect_timeout: std::time::Duration::from_secs(
+                env::var("GAME_HOST_CONNECT_TIMEOUT_SECS")
+                    .ok()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(60),
+            ),
         };
 
         let coordinator = GameCoordinator::new(
@@ -303,6 +331,51 @@ fn docker_config_from_env() -> DockerMachineProviderConfig {
         },
         registry_pull_host: env::var("DOCKER_REGISTRY_PULL_HOST")
             .unwrap_or_else(|_| "localhost:5001".to_string()),
+    }
+}
+
+/// microsandbox mode: one real microVM per machine, with match traffic relayed
+/// through published host ports (`MSB_HOST_PORT_BASE + slot`).
+///
+/// Reuses `MACHINE_CPUS` / `MACHINE_MEM_MIB` so machine sizing is one knob
+/// across backends. `MACHINE_PIDS_LIMIT` has no equivalent here — microsandbox
+/// exposes no per-sandbox process cap, so the memory limit is the only bound on
+/// a fork bomb.
+fn microsandbox_config_from_env() -> MicrosandboxMachineProviderConfig {
+    let cpus: u8 = env::var("MACHINE_CPUS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let memory_mib: u32 = env::var("MACHINE_MEM_MIB")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(512);
+    // Whether a guest can reach a loopback-bound published port is undocumented.
+    // If the game host cannot reach agents, widen this to 0.0.0.0 rather than
+    // patching the provider.
+    let host_bind = env::var("MSB_HOST_BIND")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+
+    MicrosandboxMachineProviderConfig {
+        cpus,
+        memory_mib,
+        host_port_base: env::var("MSB_HOST_PORT_BASE")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(51000),
+        host_bind,
+        registry_pull_host: env::var("DOCKER_REGISTRY_PULL_HOST")
+            .unwrap_or_else(|_| "localhost:5001".to_string()),
+        registry_insecure: env::var("MSB_REGISTRY_INSECURE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
+        // Host-enforced backstop for a match that never reports completion; the
+        // reaper is the slower second line of defence.
+        max_duration_secs: env::var("MSB_MAX_DURATION_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok()),
     }
 }
 
