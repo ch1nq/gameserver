@@ -13,6 +13,7 @@ async-trait = { workspace = true }
 bollard = { workspace = true }
 common = { path = "../common" }
 futures-util = { workspace = true }
+microsandbox = { workspace = true }
 rand = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
