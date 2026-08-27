@@ -56,7 +56,8 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       # Local match backend: the coordinator runs matches on the host Docker
-      # daemon (game host + agent containers).
+      # daemon (game host + agent containers), with no sandboxing.
+      MACHINE_PROVIDER: docker
       DOCKER_NETWORK: gameserver_default
       DOCKER_REGISTRY_PULL_HOST: localhost:5001
       GAME_HOST_IMAGE: achtung-game-host:local
