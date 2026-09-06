@@ -22,10 +22,31 @@ pub mod spectator_frame {
     tonic::include_proto!("spectator_frame");
 }
 
-/// The gRPC URL of the game host currently hosting a match, or `None` between
-/// games. Written by the coordinator, read by the spectator relay. One game
-/// runs at a time, so a single slot suffices.
-pub type SpectatorRegistry = Arc<RwLock<Option<String>>>;
+/// The gRPC URL of a game host. Newtyped so registry readers can't confuse it
+/// with an arbitrary string.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GameHostAddr(String);
+
+impl GameHostAddr {
+    pub fn new(addr: impl Into<String>) -> Self {
+        Self(addr.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for GameHostAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The game host currently hosting a match, or `None` between games. Written by
+/// the coordinator, read by the spectator relay. One game runs at a time, so a
+/// single slot suffices.
+pub type SpectatorRegistry = Arc<RwLock<Option<GameHostAddr>>>;
 
 /// Publishes a game host to the [`SpectatorRegistry`] for its lifetime and
 /// clears it on drop, so a cancelled or panicking match never leaves a stale
@@ -34,12 +55,12 @@ pub type SpectatorRegistry = Arc<RwLock<Option<String>>>;
 /// timeout) between publish and clear.
 struct SpectatorRegistryGuard {
     registry: SpectatorRegistry,
-    addr: String,
+    addr: GameHostAddr,
 }
 
 impl SpectatorRegistryGuard {
     /// Publish `addr` and return a guard that clears it on drop.
-    async fn publish(registry: SpectatorRegistry, addr: String) -> Self {
+    async fn publish(registry: SpectatorRegistry, addr: GameHostAddr) -> Self {
         *registry.write().await = Some(addr.clone());
         Self { registry, addr }
     }
@@ -53,7 +74,7 @@ impl Drop for SpectatorRegistryGuard {
         let addr = std::mem::take(&mut self.addr);
         tokio::spawn(async move {
             let mut slot = registry.write().await;
-            if slot.as_deref() == Some(addr.as_str()) {
+            if slot.as_ref() == Some(&addr) {
                 *slot = None;
             }
         });
@@ -327,8 +348,11 @@ impl<P: MachineProvider> GameCoordinator<P> {
         // The guard clears the registry when it drops — on normal completion,
         // early return, cancellation, or panic — so a stale game host never
         // lingers between games. Reuse the exact address form used to dial above.
-        let _registry_guard =
-            SpectatorRegistryGuard::publish(self.spectator_registry.clone(), game_host_addr).await;
+        let _registry_guard = SpectatorRegistryGuard::publish(
+            self.spectator_registry.clone(),
+            GameHostAddr::new(game_host_addr),
+        )
+        .await;
 
         // Poll until the game ends.
         self.poll_until_done(&mut client).await

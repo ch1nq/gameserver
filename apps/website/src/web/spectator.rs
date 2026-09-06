@@ -95,7 +95,7 @@ async fn run_broadcaster(state: SpectatorState) {
             sleep(Duration::from_millis(100)).await;
         };
 
-        let mut client = match GameHostClient::connect(addr.clone()).await {
+        let mut client = match GameHostClient::connect(addr.to_string()).await {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("spectator broadcaster: cannot connect to {addr}: {e}");
@@ -126,7 +126,7 @@ async fn run_broadcaster(state: SpectatorState) {
             };
             // Lock, push to history, and broadcast atomically so that a
             // subscriber who calls hub.lock() between these two steps never
-            // sees a gap — the same guarantee grpc.rs achieves for gRPC clients.
+            // sees a gap.
             let mut hub = state.hub.lock().unwrap();
             if frame.is_snapshot {
                 hub.history.clear();
@@ -148,7 +148,7 @@ async fn run_broadcaster(state: SpectatorState) {
 
         // Wait until the registry clears (or moves to a new address) so the
         // outer loop doesn't immediately reconnect to the same ended game.
-        while state.registry.read().await.as_deref() == Some(addr.as_str()) {
+        while state.registry.read().await.as_ref() == Some(&addr) {
             sleep(Duration::from_millis(100)).await;
         }
     }

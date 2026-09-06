@@ -12,7 +12,7 @@ use prost::Message as _;
 use tonic::transport::Channel;
 
 use crate::game::GameState as _;
-use crate::games::achtung::{Achtung, AchtungConfig, BlobView, GameAction, PlayerId};
+use crate::games::achtung::{Achtung, AchtungConfig, ArenaSize, BlobView, GameAction, PlayerId};
 use crate::grpc::GameAdapter;
 
 pub mod agentpb {
@@ -96,7 +96,7 @@ struct SpectatorPlayer {
 /// Accumulated spectator state for the whole game.
 pub struct AchtungSpectator {
     tick: u64,
-    arena: (u32, u32),
+    arena: ArenaSize,
     players: BTreeMap<PlayerId, SpectatorPlayer>,
 }
 
@@ -187,8 +187,8 @@ impl GameAdapter for AchtungGrpc {
         spectpb::SpectatorSnapshot {
             tick: spec.tick,
             arena: Some(spectpb::ArenaConfig {
-                width: spec.arena.0,
-                height: spec.arena.1,
+                width: spec.arena.width,
+                height: spec.arena.height,
             }),
             players,
         }

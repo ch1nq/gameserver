@@ -333,6 +333,23 @@ pub struct BlobView {
     pub size: f32,
 }
 
+/// Arena dimensions in game units.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArenaSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Blob {
+    fn to_view(self) -> BlobView {
+        BlobView {
+            x: self.position.x,
+            y: self.position.y,
+            size: self.size,
+        }
+    }
+}
+
 /// Full spectator view of a player: head plus the entire trail. Unlike
 /// [`PlayerView`] (agent-facing, head only) this carries the body so the
 /// browser can render the curve.
@@ -350,27 +367,25 @@ impl Achtung {
         self.timestep
     }
 
-    /// Arena dimensions `(width, height)`.
-    pub fn arena(&self) -> (u32, u32) {
-        (self.config.arena_width, self.config.arena_height)
+    /// Arena dimensions.
+    pub fn arena(&self) -> ArenaSize {
+        ArenaSize {
+            width: self.config.arena_width,
+            height: self.config.arena_height,
+        }
     }
 
     /// Full spectator snapshot: every player's head and trail, ordered by id.
     /// The body is append-only, so consumers can diff by trailing length.
     pub fn spectator_view(&self) -> Vec<PlayerSpectatorView> {
-        let blob = |b: &Blob| BlobView {
-            x: b.position.x,
-            y: b.position.y,
-            size: b.size,
-        };
         let mut views: Vec<PlayerSpectatorView> = self
             .players
             .iter()
             .map(|(&player_id, p)| PlayerSpectatorView {
                 player_id,
                 alive: p.is_alive,
-                head: blob(&p.head),
-                body: p.body.iter().map(blob).collect(),
+                head: p.head.to_view(),
+                body: p.body.iter().map(|b| b.to_view()).collect(),
             })
             .collect();
         views.sort_by_key(|v| v.player_id);
