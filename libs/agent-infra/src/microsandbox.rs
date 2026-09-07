@@ -214,7 +214,7 @@ impl MicrosandboxMachineProvider {
     }
 
     /// Whether an error means "this sandbox is already gone", so destroy paths
-    /// can be idempotent. Mirrors `is_not_found` in `docker.rs`.
+    /// can be idempotent.
     fn is_gone(err: &MicrosandboxError) -> bool {
         matches!(err, MicrosandboxError::SandboxNotFound(_))
     }
@@ -264,11 +264,9 @@ pub async fn ensure_runtime_installed() -> Result<(), MachineError> {
         return Ok(());
     }
     tracing::warn!("microsandbox runtime missing; installing to ~/.microsandbox");
-    microsandbox::setup::install().await.map_err(|e| {
-        MachineError::MatchInit(format!(
-            "install microsandbox runtime (needs /dev/kvm): {e}"
-        ))
-    })
+    microsandbox::setup::install()
+        .await
+        .map_err(|e| MachineError::MatchInit(format!("install microsandbox runtime: {e}")))
 }
 
 /// Forward a workload's output into `tracing` until the process exits.
