@@ -247,8 +247,24 @@ impl MicrosandboxMachineProvider {
 
 /// Sandbox name for a slot. Also the reaper's match key, so it must carry
 /// [`NAME_PREFIX`].
-fn sandbox_name(match_id: &str, slot: u8) -> String {
-    format!("{NAME_PREFIX}{match_id}-slot-{slot}")
+fn sandbox_name(match_id: &str, slot: u8) -> MachineName {
+    MachineName(format!("{NAME_PREFIX}{match_id}-slot-{slot}"))
+}
+
+/// Sandbox name, distinct from match ids and image refs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MachineName(String);
+
+impl MachineName {
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for MachineName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 /// Ensure the `msb` runtime and `libkrunfw` are present, downloading them to
@@ -274,33 +290,48 @@ pub async fn ensure_runtime_installed() -> Result<(), MachineError> {
 /// Draining rather than dropping the handle: whether a dropped `ExecHandle`
 /// signals the guest process is undocumented, and this is the only window into a
 /// workload that dies during startup.
-fn drain_workload_output(mut exec: microsandbox::ExecHandle, machine: String) {
+fn drain_workload_output(mut exec: microsandbox::ExecHandle, machine: MachineName) {
     tokio::spawn(async move {
         while let Some(event) = exec.recv().await {
             match event {
                 ExecEvent::Started { pid } => {
-                    tracing::debug!(machine, pid, "Workload started");
+                    tracing::debug!(machine = %machine, pid, "Workload started");
                 }
                 ExecEvent::Stdout(chunk) => {
-                    tracing::debug!(machine, "{}", String::from_utf8_lossy(&chunk).trim_end());
+                    tracing::debug!(
+                        machine = %machine,
+                        "{}",
+                        String::from_utf8_lossy(&chunk).trim_end()
+                    );
                 }
                 ExecEvent::Stderr(chunk) => {
-                    tracing::warn!(machine, "{}", String::from_utf8_lossy(&chunk).trim_end());
+                    tracing::warn!(
+                        machine = %machine,
+                        "{}",
+                        String::from_utf8_lossy(&chunk).trim_end()
+                    );
                 }
                 ExecEvent::Exited { code } => {
                     // Expected at teardown; mid-match this is the first sign of
                     // why the machine stopped answering.
-                    tracing::info!(machine, code, "Workload exited");
+                    tracing::info!(machine = %machine, code, "Workload exited");
                 }
                 ExecEvent::Failed(failed) => {
                     tracing::error!(
-                        machine,
+                        machine = %machine,
                         kind = ?failed.kind,
                         "Workload failed to spawn: {}",
                         failed.message
                     );
                 }
-                _ => {}
+                ExecEvent::StdinError(err) => {
+                    tracing::warn!(
+                        machine = %machine,
+                        errno = ?err.errno,
+                        "Workload stdin write failed: {}",
+                        err.message
+                    );
+                }
             }
         }
     });
@@ -365,7 +396,7 @@ impl MachineProvider for MicrosandboxMachineProvider {
         let token = resolved.token;
         let policy = self.policy_for_slot(slot, ctx.num_slots)?;
 
-        let mut builder = Sandbox::builder(name.clone())
+        let mut builder = Sandbox::builder(name.as_str())
             .image(image.clone())
             .pull_policy(PullPolicy::IfMissing)
             .cpus(self.config.cpus)
@@ -452,7 +483,7 @@ impl MachineProvider for MicrosandboxMachineProvider {
 
         tracing::info!(
             match_id = %ctx.match_id,
-            sandbox = name,
+            sandbox = %name,
             image,
             slot,
             private_ip,
@@ -463,7 +494,7 @@ impl MachineProvider for MicrosandboxMachineProvider {
 
         Ok(MachineHandle {
             app_name: ctx.match_id.as_str().to_string(),
-            machine_id: name,
+            machine_id: name.as_str().to_string(),
             private_ip,
             grpc_port: Some(host_port),
         })
@@ -575,10 +606,10 @@ mod tests {
     #[test]
     fn sandbox_names_carry_the_reaper_prefix() {
         let name = sandbox_name("abc123", 2);
-        assert_eq!(name, "achtung-abc123-slot-2");
+        assert_eq!(name.as_str(), "achtung-abc123-slot-2");
         // The reaper filters on this prefix; renaming here silently stops
         // orphan collection.
-        assert!(name.starts_with(NAME_PREFIX));
+        assert!(name.as_str().starts_with(NAME_PREFIX));
     }
 
     #[test]
