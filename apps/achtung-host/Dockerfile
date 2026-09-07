@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef:latest-rust-1.89.0 AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.97.1 AS chef
 WORKDIR /app
 
 
@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --bin achtung-host
 
 
-FROM debian:bookworm-slim AS runner
+FROM debian:trixie-slim AS runner
 RUN apt-get update && \
     apt-get install -y ca-certificates && \
     rm -rf /var/lib/apt/lists/*
