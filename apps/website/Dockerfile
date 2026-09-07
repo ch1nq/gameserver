@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef:latest-rust-1.89.0 AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.97.1 AS chef
 WORKDIR /app
 
 
@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --bin website
 
 
-FROM debian:bookworm-slim AS runner
+FROM debian:trixie-slim AS runner
 # libcap-ng0 is needed at runtime by the microsandbox backend (MACHINE_PROVIDER=
 # microsandbox), which also requires /dev/kvm to be passed into the container and
 # downloads `msb` + libkrunfw into ~/.microsandbox on first start.
