@@ -310,13 +310,6 @@ fn agent_name_prefix_default() -> &'static str {
     "achtung-"
 }
 
-/// microsandbox mode: one real microVM per machine, with match traffic relayed
-/// through published host ports (`MSB_HOST_PORT_BASE + slot`).
-///
-/// Reuses `MACHINE_CPUS` / `MACHINE_MEM_MIB` so machine sizing is one knob
-/// across backends. `MACHINE_PIDS_LIMIT` has no equivalent here — microsandbox
-/// exposes no per-sandbox process cap, so the memory limit is the only bound on
-/// a fork bomb.
 fn microsandbox_config_from_env() -> MicrosandboxMachineProviderConfig {
     let cpus: u8 = env::var("MACHINE_CPUS")
         .ok()
