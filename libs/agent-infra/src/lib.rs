@@ -49,10 +49,8 @@ pub struct SpawnConfig {
     pub slot: u8,
     /// Port the workload listens on *inside* the machine.
     ///
-    /// Docker ignores this — containers are addressed directly, so the
-    /// consumer already knows the port. microsandbox needs it to publish a host
-    /// port (`port(host, guest)`), since a microVM's own address is not
-    /// reachable from outside its `/30`.
+    /// Backends that relay through a published host port need this to map
+    /// host to guest; backends that address machines directly may ignore it.
     ///
     /// Required rather than defaulted: a wrong value here surfaces as a
     /// connection timeout minutes later, far from its cause.
@@ -94,21 +92,14 @@ pub struct MachineHandle {
     /// Address by which *this machine's consumer* reaches it — **not**
     /// necessarily the machine's own IP.
     ///
-    /// Who the consumer is depends on the slot: the coordinator (a host
-    /// process) dials the game host, and the game host (inside a guest) dials
-    /// the agents. Backends are free to return whatever each consumer needs:
-    ///
-    /// - Docker: the container name, resolved by Docker's embedded DNS.
-    /// - microsandbox: `127.0.0.1` for the game host (published port, read on
-    ///   the host) and `host.microsandbox.internal` for agents (the guest-side
-    ///   name for the host relay).
+    /// Who the consumer is depends on the slot: the coordinator dials the game
+    /// host, and the game host dials the agents. Backends are free to return
+    /// whatever each consumer needs.
     pub private_ip: String,
     /// Port the consumer should dial on [`Self::private_ip`], when it differs
     /// from the port the workload listens on inside the machine.
     ///
-    /// `None` means "dial the in-machine port directly" (Docker).
-    /// microsandbox sets `Some(published_host_port)` because traffic is
-    /// relayed through a host port rather than sent to the guest directly.
+    /// `None` means "dial the in-machine port directly".
     pub grpc_port: Option<u16>,
 }
 
