@@ -109,8 +109,35 @@ impl Default for MicrosandboxMachineProviderConfig {
 /// Per-match context. `num_slots` is retained because slot 0's egress policy
 /// depends on the full relay port range, which is only known up front.
 pub struct MicrosandboxMatchContext {
-    match_id: String,
+    match_id: MatchId,
     num_slots: u8,
+}
+
+/// Match identifier, distinct from sandbox and image names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MatchId(String);
+
+impl MatchId {
+    fn new(match_id: &str) -> Self {
+        Self(match_id.to_string())
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for MatchId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+/// Image ref microsandbox should pull, plus the deploy token for private images.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedImage {
+    reference: String,
+    token: Option<String>,
 }
 
 /// microsandbox implementation of [`MachineProvider`].
@@ -130,17 +157,20 @@ impl MicrosandboxMachineProvider {
 
     /// Resolve a [`ContainerImage`] to the ref microsandbox should pull, plus the
     /// deploy token when the image is private.
-    fn image_ref(&self, image: &ContainerImage) -> (String, Option<String>) {
+    fn image_ref(&self, image: &ContainerImage) -> ResolvedImage {
         match image {
             // Public/local: used verbatim, so a locally `msb load`-ed tag works.
-            ContainerImage::Public(url) => (url.as_ref().to_string(), None),
+            ContainerImage::Public(url) => ResolvedImage {
+                reference: url.as_ref().to_string(),
+                token: None,
+            },
             ContainerImage::Private {
                 image_url,
                 registry_token,
-            } => (
-                format!("{}/{}", self.config.registry_pull_host, image_url.as_ref()),
-                Some(registry_token.as_ref().to_string()),
-            ),
+            } => ResolvedImage {
+                reference: format!("{}/{}", self.config.registry_pull_host, image_url.as_ref()),
+                token: Some(registry_token.as_ref().to_string()),
+            },
         }
     }
 
@@ -312,7 +342,7 @@ impl MachineProvider for MicrosandboxMachineProvider {
         }
 
         Ok(MicrosandboxMatchContext {
-            match_id: match_id.to_string(),
+            match_id: MatchId::new(match_id),
             num_slots,
         })
     }
@@ -330,9 +360,11 @@ impl MachineProvider for MicrosandboxMachineProvider {
             )));
         }
 
-        let name = sandbox_name(&ctx.match_id, slot);
+        let name = sandbox_name(ctx.match_id.as_str(), slot);
         let host_port = self.host_port(slot);
-        let (image, token) = self.image_ref(&config.container_image);
+        let resolved = self.image_ref(&config.container_image);
+        let image = resolved.reference.clone();
+        let token = resolved.token;
         let policy = self.policy_for_slot(slot, ctx.num_slots)?;
 
         let mut builder = Sandbox::builder(name.clone())
@@ -341,7 +373,7 @@ impl MachineProvider for MicrosandboxMachineProvider {
             .cpus(self.config.cpus)
             .memory(self.config.memory_mib)
             .label(MANAGED_LABEL, MANAGED_VALUE)
-            .label(MATCH_LABEL, ctx.match_id.clone())
+            .label(MATCH_LABEL, ctx.match_id.as_str())
             .network(|n| n.policy(policy))
             // Survive a coordinator crash so the reaper can collect them, rather
             // than dying with a dropped in-process handle.
@@ -421,7 +453,7 @@ impl MachineProvider for MicrosandboxMachineProvider {
         };
 
         tracing::info!(
-            match_id = ctx.match_id,
+            match_id = %ctx.match_id,
             sandbox = name,
             image,
             slot,
@@ -432,7 +464,7 @@ impl MachineProvider for MicrosandboxMachineProvider {
         );
 
         Ok(MachineHandle {
-            app_name: ctx.match_id.clone(),
+            app_name: ctx.match_id.as_str().to_string(),
             machine_id: name,
             private_ip,
             grpc_port: Some(host_port),
@@ -452,7 +484,7 @@ impl MachineProvider for MicrosandboxMachineProvider {
         // created and torn down with the VM, and published host ports are freed
         // when `destroy` removes the sandbox.
         tracing::debug!(
-            match_id = ctx.match_id,
+            match_id = %ctx.match_id,
             "microsandbox match cleanup: no shared resources"
         );
         Ok(())
@@ -564,9 +596,12 @@ mod tests {
         let image = ContainerImage::Public(common::ImageUrl::from(
             "achtung-game-host:local".to_string(),
         ));
-        let (reference, token) = p.image_ref(&image);
-        assert_eq!(reference, "achtung-game-host:local");
-        assert!(token.is_none(), "public pulls must not present credentials");
+        let resolved = p.image_ref(&image);
+        assert_eq!(resolved.reference, "achtung-game-host:local");
+        assert!(
+            resolved.token.is_none(),
+            "public pulls must not present credentials"
+        );
     }
 
     #[test]
@@ -576,9 +611,9 @@ mod tests {
             image_url: common::ImageUrl::from("user-5/bot:v1".to_string()),
             registry_token: common::RegistryToken::from("jwt-value".to_string()),
         };
-        let (reference, token) = p.image_ref(&image);
-        assert_eq!(reference, "registry:5001/user-5/bot:v1");
-        assert_eq!(token.as_deref(), Some("jwt-value"));
+        let resolved = p.image_ref(&image);
+        assert_eq!(resolved.reference, "registry:5001/user-5/bot:v1");
+        assert_eq!(resolved.token.as_deref(), Some("jwt-value"));
     }
 
     #[test]
