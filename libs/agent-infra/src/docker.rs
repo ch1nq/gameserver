@@ -30,7 +30,8 @@ use futures_util::StreamExt;
 use common::ImageUrl;
 
 use crate::{
-    ContainerImage, MachineError, MachineHandle, MachineProvider, OrphanedResource, SpawnConfig,
+    ContainerImage, MachineError, MachineHandle, MachineProvider, OrphanKind, OrphanedResource,
+    SpawnConfig,
 };
 
 /// Configuration for the local Docker machine provider.
@@ -146,7 +147,13 @@ fn container_name(prefix: &str, match_id: &str, slot: u8) -> String {
 impl MachineProvider for DockerMachineProvider {
     type MatchContext = DockerMatchContext;
 
-    async fn init_match(&self, match_id: &str) -> Result<DockerMatchContext, MachineError> {
+    async fn init_match(
+        &self,
+        match_id: &str,
+        _num_slots: u8,
+    ) -> Result<DockerMatchContext, MachineError> {
+        // Shared-network mode allocates no per-slot resources, so the slot count
+        // is not needed here.
         Ok(DockerMatchContext {
             match_id: match_id.to_string(),
         })
@@ -201,6 +208,9 @@ impl MachineProvider for DockerMachineProvider {
             machine_id: name.clone(),
             // Container name doubles as the DNS-resolvable address on the network.
             private_ip: name,
+            // Containers are addressed directly, so the consumer dials the
+            // in-machine port it already knows. No host relay involved.
+            grpc_port: None,
         })
     }
 
@@ -275,6 +285,7 @@ impl MachineProvider for DockerMachineProvider {
                     id: c.id.unwrap_or_else(|| name.clone()),
                     name,
                     created_at,
+                    kind: OrphanKind::Machine,
                 });
             }
         }
