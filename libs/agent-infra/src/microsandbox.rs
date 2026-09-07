@@ -243,6 +243,33 @@ impl MicrosandboxMachineProvider {
             Err(e) => Err(MachineError::Destruction(format!("remove {name}: {e}"))),
         }
     }
+
+    /// Clear sandboxes left by a previous run before starting a match.
+    ///
+    /// Relay ports are fixed (`base + slot`), so a leftover sandbox holds the
+    /// port this match needs and `create()` would fail. `Duration::ZERO` makes
+    /// every one of our sandboxes eligible, which is correct because only one
+    /// match runs at a time.
+    async fn sweep_stale_sandboxes(&self, match_id: &MatchId) {
+        match self.list_orphaned(NAME_PREFIX, Duration::ZERO).await {
+            Ok(stale) if !stale.is_empty() => {
+                tracing::warn!(
+                    count = stale.len(),
+                    match_id = %match_id,
+                    "Clearing sandboxes left by a previous run before starting match"
+                );
+                for resource in &stale {
+                    if let Err(e) = self.destroy_orphaned(resource).await {
+                        // Not fatal on its own: only a name or port collision
+                        // actually blocks us, and `create()` reports that.
+                        tracing::warn!(name = %resource.name, error = %e, "Pre-flight sweep failed");
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "Pre-flight sweep could not list sandboxes"),
+        }
+    }
 }
 
 /// Sandbox name for a slot. Also the reaper's match key, so it must carry
@@ -346,34 +373,12 @@ impl MachineProvider for MicrosandboxMachineProvider {
         match_id: &str,
         num_slots: u8,
     ) -> Result<MicrosandboxMatchContext, MachineError> {
-        // Pre-flight sweep: relay ports are fixed (`base + slot`), so a sandbox
-        // left by a crashed run holds the port this match needs and `create()`
-        // would fail. `Duration::ZERO` makes every one of our sandboxes
-        // eligible, which is correct because only one match runs at a time.
-        // Reuses the reaper's own code — one mechanism, two callers.
-        match self.list_orphaned(NAME_PREFIX, Duration::ZERO).await {
-            Ok(stale) if !stale.is_empty() => {
-                tracing::warn!(
-                    count = stale.len(),
-                    match_id,
-                    "Clearing sandboxes left by a previous run before starting match"
-                );
-                for resource in &stale {
-                    if let Err(e) = self.destroy_orphaned(resource).await {
-                        // Not fatal on its own: only a name or port collision
-                        // actually blocks us, and `create()` reports that.
-                        tracing::warn!(name = %resource.name, error = %e, "Pre-flight sweep failed");
-                    }
-                }
-            }
-            Ok(_) => {}
-            Err(e) => tracing::warn!(error = %e, "Pre-flight sweep could not list sandboxes"),
-        }
-
-        Ok(MicrosandboxMatchContext {
+        let ctx = MicrosandboxMatchContext {
             match_id: MatchId::new(match_id),
             num_slots,
-        })
+        };
+        self.sweep_stale_sandboxes(&ctx.match_id).await;
+        Ok(ctx)
     }
 
     async fn spawn(
