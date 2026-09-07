@@ -1,62 +1,30 @@
 //! microsandbox [`MachineProvider`]: every machine is a real microVM with its
-//! own guest kernel, so isolation rests on a hardware boundary rather than a
-//! userspace kernel (gVisor) or shared-kernel namespaces (runc).
+//! own guest kernel.
 //!
-//! # Why the topology differs from `docker.rs`
-//!
-//! microsandbox gives each sandbox its own `/30` from `172.16.0.0/12` with a
-//! host-side gateway and a userspace netstack. There is **no shared-L2
-//! primitive**, so a per-slot-bridge topology (one Docker network per slot) has
-//! no equivalent here: no two sandboxes can be placed on one segment. All
-//! match traffic therefore relays through published ports on the host:
+//! Each sandbox gets its own isolated network with a host-side gateway, so all
+//! match traffic relays through published ports on the host:
 //!
 //! ```text
 //! coordinator (host process)
-//!     |  127.0.0.1:{base+0}                    published port
+//!     |  127.0.0.1:{base+0}
 //!     v
 //! game host sandbox (slot 0)
-//!     |  egress: DNS + allow_host narrowed to the agent relay ports
 //!     |  host.microsandbox.internal:{base+n}
 //!     v
 //! agent n sandbox (slot n)
-//!     egress: default deny, ZERO rules
 //! ```
 //!
-//! This works only because the protocol is one-directional: the coordinator
-//! dials the game host, the game host dials the agents, and agents never dial
-//! out.
-//!
-//! # Isolation properties
-//!
-//! | Property | Mechanism |
-//! |---|---|
-//! | coordinator -> game host | published port bound on `127.0.0.1` |
-//! | game host -> agent | `Host` group, narrowed to the agent relay port range |
-//! | agent -> agent | agent has **no egress rules at all**, so it cannot reach the host relay fronting another agent |
-//! | agent -> internet / host services | `default_egress: Deny` with an empty rule list |
-//! | kernel isolation | real microVM with its own guest kernel |
-//! | CPU/memory abuse | `cpus` / `memory` caps per sandbox |
-//! | fork bombs | **not covered** — no `pids_limit` equivalent; the memory cap is the only bound |
-//!
-//! Agent isolation is structural rather than configured: deny-by-default with an
-//! empty rule list leaves no rule to get wrong. It fails closed.
+//! Slot 0 gets DNS plus host access narrowed to the agent relay ports. Agent
+//! slots get deny-by-default egress with no rules.
 //!
 //! # Load-bearing details
 //!
-//! - **`create()` does not run the image workload.** Sandbox creation is
-//!   boot-only; configuring an image, ENTRYPOINT or CMD does not execute it.
-//!   [`spawn`](MicrosandboxMachineProvider::spawn) must call
-//!   `exec_default_stream()` to start the workload, and must not wait on it —
-//!   the workload runs for the whole match. This differs from Docker, where
-//!   `start_container` runs the image CMD and that *is* the machine.
-//! - **Ingress must stay `Allow`.** `NetworkPolicy::builder().default_deny()`
-//!   sets *both* directions to `Deny`, which silently kills the published port.
-//!   Only egress is denied here.
-//! - **Sandboxes are detached.** [`MachineHandle`] carries strings only, so a
-//!   coordinator crash leaves sandboxes for the reaper instead of killing live
-//!   VMs via a dropped in-process handle.
-//! - **Requires KVM.** Guarded at startup by `setup::is_installed()` in the
-//!   caller, not here.
+//! - **`create()` does not run the image workload.** Call
+//!   `exec_default_stream()` to start it, and do not await it.
+//! - **Ingress must stay `Allow`.** Denying it closes the published port.
+//! - **Sandboxes are detached**, so a coordinator crash leaves them for the
+//!   reaper.
+//! - **Requires KVM.**
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -73,12 +41,7 @@ use crate::{
 
 /// Label carrying the owning match id, for grouping and diagnostics.
 const MATCH_LABEL: &str = "achtung.match";
-/// Constant marker label identifying sandboxes this provider owns.
-///
-/// The reaper must enumerate our sandboxes without knowing any particular match
-/// id, and `SandboxListBuilder::label` matches an exact key/value pair — so
-/// [`MATCH_LABEL`] alone is not selectable. A fixed marker gives the reaper one
-/// concrete value to filter on.
+/// Marker label identifying sandboxes this provider owns, for orphan scans.
 const MANAGED_LABEL: &str = "achtung.managed";
 const MANAGED_VALUE: &str = "1";
 
