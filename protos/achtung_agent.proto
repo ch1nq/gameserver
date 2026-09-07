@@ -8,6 +8,15 @@ service Agent {
 
   // Called each tick to get the agent's action
   rpc GetAction(GameState) returns (AgentAction);
+
+  // Long-lived lockstep action stream, opened once per game after
+  // Initialize. The host sends one PlayRequest per tick and reads exactly
+  // one PlayResponse; the tick echo detects stale replies. Avoids paying
+  // per-RPC stream setup on transports where that dominates (measured ~44ms
+  // per unary call through the microVM port relay vs sub-ms on an open
+  // stream). Agents that do not implement Play keep working: the host falls
+  // back to GetAction on UNIMPLEMENTED.
+  rpc Play(stream PlayRequest) returns (stream PlayResponse);
 }
 
 message InitializeRequest {
@@ -61,4 +70,18 @@ enum Direction {
 
 message AgentAction {
   Direction direction = 1;
+}
+
+message PlayRequest {
+  // Engine tick this state snapshot is for; echoed back in PlayResponse.
+  uint64 tick = 1;
+
+  GameState state = 2;
+}
+
+message PlayResponse {
+  // Must equal the tick of the PlayRequest being answered.
+  uint64 tick = 1;
+
+  AgentAction action = 2;
 }

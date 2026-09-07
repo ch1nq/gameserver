@@ -9,7 +9,10 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use prost::Message as _;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
+use tonic::{Code, Streaming};
 
 use crate::game::GameState as _;
 use crate::games::achtung::{Achtung, AchtungConfig, ArenaSize, BlobView, GameAction, PlayerId};
@@ -24,6 +27,84 @@ pub mod spectpb {
 }
 
 use agentpb::agent_client::AgentClient;
+
+/// Live `Play` stream halves for one agent. Lockstep by construction: the host
+/// sends one request and reads one reply per tick, so at most one message is
+/// ever in flight in either direction and no tick can be answered stale.
+struct PlayStream {
+    tx: mpsc::Sender<agentpb::PlayRequest>,
+    rx: Streaming<agentpb::PlayResponse>,
+}
+
+/// Connection to one agent. Prefers the long-lived `Play` stream (sub-ms per
+/// tick on an open stream through the microVM relay, versus ~44ms per unary
+/// call); falls back to unary `GetAction` when the agent does not implement
+/// `Play`, or if the stream dies mid-game.
+pub struct AchtungAgentClient {
+    client: AgentClient<Channel>,
+    play: Option<PlayStream>,
+}
+
+impl AchtungAgentClient {
+    /// Open the per-game `Play` stream. `None` means unary mode: either the
+    /// agent predates `Play` (`UNIMPLEMENTED`) or the open failed, in which
+    /// case the following `Initialize`/action calls surface the real error
+    /// exactly as they did before streaming existed.
+    async fn open_play(client: &mut AgentClient<Channel>, address: &str) -> Option<PlayStream> {
+        // Depth 1 suffices: lockstep means at most one unsent request exists,
+        // and `send` only blocks while the transport hasn't drained it.
+        let (tx, rx) = mpsc::channel(1);
+        match client.play(ReceiverStream::new(rx)).await {
+            Ok(resp) => {
+                tracing::info!(address, "agent uses Play stream");
+                Some(PlayStream {
+                    tx,
+                    rx: resp.into_inner(),
+                })
+            }
+            Err(e) if e.code() == Code::Unimplemented => {
+                tracing::info!(address, "agent predates Play; using unary GetAction");
+                None
+            }
+            Err(e) => {
+                tracing::warn!(address, error = %e, "Play open failed; trying unary");
+                None
+            }
+        }
+    }
+
+    /// One lockstep exchange on the open stream.
+    async fn play_action(
+        &mut self,
+        tick: u64,
+        state: agentpb::GameState,
+    ) -> Result<GameAction, String> {
+        let stream = self.play.as_mut().ok_or("no Play stream")?;
+        stream
+            .tx
+            .send(agentpb::PlayRequest {
+                tick,
+                state: Some(state),
+            })
+            .await
+            .map_err(|e| format!("Play send failed: {e}"))?;
+        let resp = stream
+            .rx
+            .message()
+            .await
+            .map_err(|e| format!("Play recv failed: {e}"))?
+            .ok_or("Play stream closed by agent")?;
+        if resp.tick != tick {
+            return Err(format!(
+                "stale Play response: got tick {}, want {tick}",
+                resp.tick
+            ));
+        }
+        Ok(map_direction(
+            resp.action.map(|a| a.direction).unwrap_or_default(),
+        ))
+    }
+}
 
 /// Achtung game-host adapter. Holds the arena configuration used to build the
 /// engine and initialize agents.
@@ -127,7 +208,7 @@ impl AchtungSpectator {
 #[async_trait::async_trait]
 impl GameAdapter for AchtungGrpc {
     type Engine = Achtung;
-    type Client = AgentClient<Channel>;
+    type Client = AchtungAgentClient;
     type Spectator = AchtungSpectator;
 
     fn init_engine(&self, num_players: usize) -> Achtung {
@@ -209,7 +290,10 @@ impl GameAdapter for AchtungGrpc {
         let mut last = String::new();
         for _ in 0..30 {
             match AgentClient::connect(url.clone()).await {
-                Ok(c) => return Ok(c),
+                Ok(mut client) => {
+                    let play = AchtungAgentClient::open_play(&mut client, address).await;
+                    return Ok(AchtungAgentClient { client, play });
+                }
                 Err(e) => {
                     last = e.to_string();
                     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -226,6 +310,7 @@ impl GameAdapter for AchtungGrpc {
         num_players: usize,
     ) -> Result<(), String> {
         client
+            .client
             .initialize(agentpb::InitializeRequest {
                 player_id: player_slot as u32,
                 num_players: num_players as u32,
@@ -245,8 +330,21 @@ impl GameAdapter for AchtungGrpc {
         engine: &Achtung,
         _player_slot: usize,
     ) -> Result<GameAction, String> {
+        let tick = engine.tick();
         let state = build_state(engine);
+        if client.play.is_some() {
+            match client.play_action(tick, state.clone()).await {
+                ok @ Ok(_) => return ok,
+                Err(e) => {
+                    // The stream died mid-game: drop back to unary for the
+                    // rest of the match rather than failing every tick.
+                    tracing::warn!(error = %e, "Play stream failed; falling back to unary");
+                    client.play = None;
+                }
+            }
+        }
         client
+            .client
             .get_action(state)
             .await
             .map(|resp| map_direction(resp.into_inner().direction))
