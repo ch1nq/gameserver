@@ -1,10 +1,9 @@
 //! Agent infrastructure management library.
 //!
 //! Provides abstractions for provisioning and managing agent machines
-//! for game matches. Supports multiple backends (Docker, microsandbox microVMs).
+//! for game matches.
 
 pub mod docker;
-pub mod microsandbox;
 pub mod reaper;
 
 use std::collections::HashMap;
@@ -15,9 +14,6 @@ use rand::{Rng, distr::Alphanumeric};
 
 // Re-export key types
 pub use docker::{DockerMachineProvider, DockerMachineProviderConfig};
-pub use microsandbox::{
-    MicrosandboxMachineProvider, MicrosandboxMachineProviderConfig, ensure_runtime_installed,
-};
 pub use reaper::{Reaper, ReaperConfig};
 
 #[derive(Debug, Clone)]
@@ -47,25 +43,15 @@ pub struct SpawnConfig {
     ///
     /// Used by backends that assign addresses deterministically per slot.
     pub slot: u8,
-    /// Port the workload listens on *inside* the machine.
-    ///
-    /// Backends that relay through a published host port need this to map
-    /// host to guest; backends that address machines directly may ignore it.
-    ///
-    /// Required rather than defaulted: a wrong value here surfaces as a
-    /// connection timeout minutes later, far from its cause.
-    pub grpc_port: u16,
 }
 
 impl SpawnConfig {
-    /// Create a new SpawnConfig with the given container image, slot, and
-    /// in-machine listen port.
-    pub fn new(container_image: ContainerImage, slot: u8, grpc_port: u16) -> Self {
+    /// Create a new SpawnConfig with the given container image and slot.
+    pub fn new(container_image: ContainerImage, slot: u8) -> Self {
         Self {
             container_image,
             env: HashMap::new(),
             slot,
-            grpc_port,
         }
     }
 
@@ -94,23 +80,9 @@ pub struct MachineHandle {
     ///
     /// Who the consumer is depends on the slot: the coordinator dials the game
     /// host, and the game host dials the agents. Backends are free to return
-    /// whatever each consumer needs.
+    /// whatever each consumer needs — for Docker on a shared network, that is
+    /// the container name, resolved by Docker's embedded DNS.
     pub private_ip: String,
-    /// Port the consumer should dial on [`Self::private_ip`], when it differs
-    /// from the port the workload listens on inside the machine.
-    ///
-    /// `None` means "dial the in-machine port directly".
-    pub grpc_port: Option<u16>,
-}
-
-/// What kind of resource an [`OrphanedResource`] refers to, so
-/// `destroy_orphaned` knows which API to delete it with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrphanKind {
-    /// A machine (container / microVM).
-    Machine,
-    /// Per-match network infrastructure (e.g., a Docker network).
-    Network,
 }
 
 /// Information about orphaned resources to be reaped
@@ -122,8 +94,6 @@ pub struct OrphanedResource {
     pub name: String,
     /// When the resource was created
     pub created_at: SystemTime,
-    /// What kind of resource this is, so the reaper deletes it with the right API
-    pub kind: OrphanKind,
 }
 
 /// Errors that can occur during machine operations
@@ -167,15 +137,8 @@ pub trait MachineProvider: Send + Sync + 'static {
     /// Initialize shared resources for a match.
     ///
     /// Called once before any `spawn` calls. Sets up networking and other
-    /// shared infrastructure for the match. `num_slots` is the total number of
-    /// machines the match will spawn (game host + agents); backends that
-    /// allocate per-slot resources up front need it because resources cannot
-    /// always be attached after machines start.
-    async fn init_match(
-        &self,
-        match_id: &str,
-        num_slots: u8,
-    ) -> Result<Self::MatchContext, MachineError>;
+    /// shared infrastructure for the match.
+    async fn init_match(&self, match_id: &str) -> Result<Self::MatchContext, MachineError>;
 
     /// Spawn a single machine within an initialized match.
     ///
