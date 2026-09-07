@@ -172,11 +172,9 @@ const TOKEN_ISSUER: &str = "registry-auth";
 /// Pin the JWT crypto backend for this process.
 ///
 /// `jsonwebtoken` selects a backend from its crate features and **panics** if it
-/// cannot decide — which is exactly what happens here through feature
-/// unification: this crate asks for `rust_crypto`, while `oci-client` (pulled in
-/// by the microsandbox machine backend) asks for `aws_lc_rs`. With both enabled
-/// the default provider's signer and verifier are `panic!` stubs, so *every*
-/// mint and verify would abort at runtime.
+/// cannot decide — which happens when feature unification enables more than one
+/// backend. With multiple backends enabled the default provider's signer and
+/// verifier are `panic!` stubs, so *every* mint and verify would abort at runtime.
 ///
 /// Installing one explicitly makes the choice ours rather than the resolver's.
 /// Must be called before any `encode`/`decode`; idempotent, and a lost race is
