@@ -6,17 +6,19 @@
 //! `Config` (default 1000², overridable via `ARENA_WIDTH`/`ARENA_HEIGHT`).
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use prost::Message as _;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
-use tonic::Streaming;
 
 use crate::game::GameState as _;
 use crate::games::achtung::{Achtung, AchtungConfig, ArenaSize, BlobView, GameAction, PlayerId};
-use crate::grpc::GameAdapter;
+use crate::grpc::{GameAdapter, SETUP_TIMEOUT};
 
 pub mod agentpb {
     tonic::include_proto!("achtung.agent");
@@ -28,74 +30,35 @@ pub mod spectpb {
 
 use agentpb::agent_client::AgentClient;
 
-/// Live `Play` stream halves for one agent. Lockstep by construction: the host
-/// sends one request and reads one reply per tick, so at most one message is
-/// ever in flight in either direction and no tick can be answered stale.
-struct PlayStream {
-    tx: mpsc::Sender<agentpb::PlayRequest>,
-    rx: Streaming<agentpb::PlayResponse>,
+/// Background link to one agent. The game loop publishes tick states through
+/// `state_tx` and reads the latest action from `action_rx` without ever
+/// blocking; two pump tasks shuttle messages over the `Play` stream. Latest
+/// wins in both directions: states the agent hasn't drained are skipped, and
+/// the freshest answered action steers, however stale.
+pub struct AchtungAgentLink {
+    state_tx: watch::Sender<Option<agentpb::PlayRequest>>,
+    action_rx: watch::Receiver<Option<(u64, GameAction)>>,
+    alive: Arc<AtomicBool>,
+    /// Pump tasks, aborted on drop (links live exactly as long as the game).
+    _tasks: Vec<JoinHandle<()>>,
 }
 
-/// Connection to one agent: the long-lived `Play` stream plus the client for
-/// the one-shot `Initialize` call.
-pub struct AchtungAgentClient {
-    client: AgentClient<Channel>,
-    play: PlayStream,
-}
-
-impl AchtungAgentClient {
-    /// Open the per-game `Play` stream.
-    async fn open_play(
-        client: &mut AgentClient<Channel>,
-        address: &str,
-    ) -> Result<PlayStream, String> {
-        // Depth 1 suffices: lockstep means at most one unsent request exists,
-        // and `send` only blocks while the transport hasn't drained it.
-        let (tx, rx) = mpsc::channel(1);
-        match client.play(ReceiverStream::new(rx)).await {
-            Ok(resp) => {
-                tracing::info!(address, "agent Play stream open");
-                Ok(PlayStream {
-                    tx,
-                    rx: resp.into_inner(),
-                })
-            }
-            Err(e) => Err(format!(
-                "agent {address} Play open failed ({e}); rebuild the agent image"
-            )),
+impl Drop for AchtungAgentLink {
+    fn drop(&mut self) {
+        for task in &self._tasks {
+            task.abort();
         }
     }
+}
 
-    /// One lockstep exchange on the open stream.
-    async fn play_action(
-        &mut self,
-        tick: u64,
-        state: agentpb::GameState,
-    ) -> Result<GameAction, String> {
-        self.play
-            .tx
-            .send(agentpb::PlayRequest {
-                tick,
-                state: Some(state),
-            })
-            .await
-            .map_err(|e| format!("Play send failed: {e}"))?;
-        let resp = self
-            .play
-            .rx
-            .message()
-            .await
-            .map_err(|e| format!("Play recv failed: {e}"))?
-            .ok_or("Play stream closed by agent")?;
-        if resp.tick != tick {
-            return Err(format!(
-                "stale Play response: got tick {}, want {tick}",
-                resp.tick
-            ));
-        }
-        Ok(map_direction(
-            resp.action.map(|a| a.direction).unwrap_or_default(),
-        ))
+/// Marks the link dead when a pump task exits for any reason (stream
+/// broke, agent disconnected, panic). Normal game-end exit also trips this,
+/// which is harmless: the loop is over and nobody reads `alive` anymore.
+struct LivenessGuard(Arc<AtomicBool>);
+
+impl Drop for LivenessGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
     }
 }
 
@@ -201,7 +164,8 @@ impl AchtungSpectator {
 #[async_trait::async_trait]
 impl GameAdapter for AchtungGrpc {
     type Engine = Achtung;
-    type Client = AchtungAgentClient;
+    type Client = AgentClient<Channel>;
+    type Link = AchtungAgentLink;
     type Spectator = AchtungSpectator;
 
     fn init_engine(&self, num_players: usize) -> Achtung {
@@ -283,10 +247,7 @@ impl GameAdapter for AchtungGrpc {
         let mut last = String::new();
         for _ in 0..30 {
             match AgentClient::connect(url.clone()).await {
-                Ok(mut client) => {
-                    let play = AchtungAgentClient::open_play(&mut client, address).await?;
-                    return Ok(AchtungAgentClient { client, play });
-                }
+                Ok(client) => return Ok(client),
                 Err(e) => {
                     last = e.to_string();
                     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -296,33 +257,273 @@ impl GameAdapter for AchtungGrpc {
         Err(format!("could not connect to agent {address}: {last}"))
     }
 
-    async fn initialize(
+    async fn open_link(
         &self,
-        client: &mut Self::Client,
+        mut client: Self::Client,
         player_slot: usize,
         num_players: usize,
-    ) -> Result<(), String> {
-        client
-            .client
-            .initialize(agentpb::InitializeRequest {
+    ) -> Result<Self::Link, String> {
+        let arena = Some(agentpb::ArenaConfig {
+            width: self.config.arena_width,
+            height: self.config.arena_height,
+        });
+        tokio::time::timeout(
+            SETUP_TIMEOUT,
+            client.initialize(agentpb::InitializeRequest {
                 player_id: player_slot as u32,
                 num_players: num_players as u32,
-                arena: Some(agentpb::ArenaConfig {
-                    width: self.config.arena_width,
-                    height: self.config.arena_height,
-                }),
+                arena,
+            }),
+        )
+        .await
+        .map_err(|_| format!("agent Initialize timed out after {SETUP_TIMEOUT:?}"))?
+        .map(|_| ())
+        .map_err(|e| e.to_string())?;
+
+        // Depth 1 suffices: at most one unsent state exists, and `send` only
+        // blocks while the transport hasn't drained it.
+        let (stream_tx, stream_rx) = mpsc::channel(1);
+        let mut inbound =
+            tokio::time::timeout(SETUP_TIMEOUT, client.play(ReceiverStream::new(stream_rx)))
+                .await
+                .map_err(|_| format!("agent Play open timed out after {SETUP_TIMEOUT:?}"))?
+                .map_err(|e| format!("agent Play open failed ({e}); rebuild the agent image"))?
+                .into_inner();
+        tracing::info!("agent Play stream open");
+
+        let (state_tx, mut state_rx) = watch::channel(None);
+        let (action_tx, action_rx) = watch::channel(None);
+        let alive = Arc::new(AtomicBool::new(true));
+
+        // Forwards the newest published state; blocks on backpressure without
+        // affecting the game loop or the receiver task below.
+        let send_task = {
+            let alive = alive.clone();
+            tokio::spawn(async move {
+                let _liveness = LivenessGuard(alive);
+                while state_rx.changed().await.is_ok() {
+                    let Some(req) = state_rx.borrow_and_update().clone() else {
+                        continue;
+                    };
+                    if stream_tx.send(req).await.is_err() {
+                        break;
+                    }
+                }
             })
-            .await
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+        };
+        // Publishes every answered action, latest wins. Ends (marking the
+        // link dead) when the agent closes or breaks the stream.
+        let recv_task = {
+            let alive = alive.clone();
+            tokio::spawn(async move {
+                let _liveness = LivenessGuard(alive);
+                loop {
+                    match inbound.message().await {
+                        Ok(Some(resp)) => {
+                            let action =
+                                map_direction(resp.action.map(|a| a.direction).unwrap_or_default());
+                            action_tx.send_replace(Some((resp.tick, action)));
+                        }
+                        Ok(None) => break,
+                        Err(_) => break,
+                    }
+                }
+            })
+        };
+
+        Ok(AchtungAgentLink {
+            state_tx,
+            action_rx,
+            alive,
+            _tasks: vec![send_task, recv_task],
+        })
     }
 
-    async fn get_action(
-        &self,
-        client: &mut Self::Client,
-        engine: &Achtung,
-        _player_slot: usize,
-    ) -> Result<GameAction, String> {
-        client.play_action(engine.tick(), build_state(engine)).await
+    fn push_state(&self, link: &Self::Link, tick: u64, engine: &Achtung, _player_slot: usize) {
+        let state = build_state(engine);
+        link.state_tx.send_replace(Some(agentpb::PlayRequest {
+            tick,
+            state: Some(state),
+        }));
+    }
+
+    fn poll_action(&self, link: &Self::Link) -> Option<(u64, GameAction)> {
+        *link.action_rx.borrow()
+    }
+
+    fn link_alive(&self, link: &Self::Link) -> bool {
+        link.alive.load(Ordering::SeqCst)
+    }
+
+    fn default_action(&self) -> GameAction {
+        GameAction::Forward
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grpc::GameAdapter;
+
+    use agentpb::agent_server::{Agent, AgentServer};
+    use agentpb::{
+        AgentAction, Direction, InitializeRequest, InitializeResponse, PlayRequest, PlayResponse,
+    };
+    use tokio::net::TcpListener;
+    use tokio_stream::wrappers::TcpListenerStream;
+    use tonic::transport::Server;
+    use tonic::{Request, Response, Status, Streaming};
+
+    /// Test agent: answers every `Play` request with `TurnLeft` after an
+    /// optional delay, until `die` fires (clean stream close).
+    struct TestAgent {
+        delay: Duration,
+        die: Arc<tokio::sync::Notify>,
+    }
+
+    #[tonic::async_trait]
+    impl Agent for TestAgent {
+        async fn initialize(
+            &self,
+            _request: Request<InitializeRequest>,
+        ) -> Result<Response<InitializeResponse>, Status> {
+            Ok(Response::new(InitializeResponse {}))
+        }
+
+        type PlayStream = ReceiverStream<Result<PlayResponse, Status>>;
+
+        async fn play(
+            &self,
+            request: Request<Streaming<PlayRequest>>,
+        ) -> Result<Response<Self::PlayStream>, Status> {
+            let mut inbound = request.into_inner();
+            let (tx, rx) = mpsc::channel(16);
+            let delay = self.delay;
+            let die = self.die.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = die.notified() => break,
+                        msg = inbound.message() => {
+                            let Ok(Some(req)) = msg else { break };
+                            if !delay.is_zero() {
+                                tokio::time::sleep(delay).await;
+                            }
+                            let resp = PlayResponse {
+                                tick: req.tick,
+                                action: Some(AgentAction {
+                                    direction: Direction::TurnLeft as i32,
+                                }),
+                            };
+                            if tx.send(Ok(resp)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+            Ok(Response::new(ReceiverStream::new(rx)))
+        }
+    }
+
+    fn adapter() -> AchtungGrpc {
+        AchtungGrpc {
+            config: AchtungConfig::default(),
+        }
+    }
+
+    fn engine() -> Achtung {
+        Achtung::init_game(&AchtungConfig::default(), 1)
+    }
+
+    async fn spawn_agent(
+        delay: Duration,
+    ) -> (
+        String,
+        Arc<tokio::sync::Notify>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let die = Arc::new(tokio::sync::Notify::new());
+        let agent = TestAgent {
+            delay,
+            die: die.clone(),
+        };
+        let handle = tokio::spawn(async move {
+            Server::builder()
+                .add_service(AgentServer::new(agent))
+                .serve_with_incoming(TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        // Let the listener settle before dialling.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        (addr, die, handle)
+    }
+
+    #[tokio::test]
+    async fn link_roundtrips_latest_action() {
+        let adapter = adapter();
+        let (addr, _die, server) = spawn_agent(Duration::ZERO).await;
+        let client = adapter.connect(&addr).await.unwrap();
+        let link = adapter.open_link(client, 0, 1).await.unwrap();
+        let engine = engine();
+
+        adapter.push_state(&link, 5, &engine, 0);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let action = loop {
+            if let Some((tick, action)) = adapter.poll_action(&link) {
+                break (tick, action);
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "no action arrived within 5s"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+        assert_eq!(action, (5, GameAction::Left));
+        assert!(adapter.link_alive(&link));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn unanswered_link_polls_none_and_defaults_forward() {
+        let adapter = adapter();
+        // Replies take an hour: effectively never within the test.
+        let (addr, _die, server) = spawn_agent(Duration::from_secs(3600)).await;
+        let client = adapter.connect(&addr).await.unwrap();
+        let link = adapter.open_link(client, 0, 1).await.unwrap();
+
+        adapter.push_state(&link, 1, &engine(), 0);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(adapter.poll_action(&link).is_none());
+        assert_eq!(adapter.default_action(), GameAction::Forward);
+        // Slow does not mean dead.
+        assert!(adapter.link_alive(&link));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn killed_agent_marks_link_dead() {
+        let adapter = adapter();
+        let (addr, die, _server) = spawn_agent(Duration::ZERO).await;
+        let client = adapter.connect(&addr).await.unwrap();
+        let link = adapter.open_link(client, 0, 1).await.unwrap();
+        assert!(adapter.link_alive(&link));
+
+        // Clean stream close from the agent side.
+        die.notify_waiters();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if !adapter.link_alive(&link) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "link still alive 5s after server death"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 }
