@@ -60,9 +60,7 @@ const SPECTATOR_BUFFER: usize = 1024;
 /// types map onto that game's agent proto.
 #[async_trait::async_trait]
 pub trait GameAdapter: Send + Sync + 'static {
-    /// The game engine driven by this adapter. Shared by reference across the
-    /// concurrent per-tick agent fan-out, so it must be `Sync` as well as
-    /// `Send`; `get_action` only reads it.
+    /// The game engine driven by this adapter.
     type Engine: GameState<PlayerId: Eq + Hash + Clone + Send + Sync, GameAction: Send>
         + Send
         + Sync
@@ -315,9 +313,7 @@ async fn run_game<G: GameAdapter>(
     let mut death_tick: HashMap<_, u64> = HashMap::new();
 
     let final_result = loop {
-        // Ask every still-alive agent for its action concurrently. Tick time
-        // is the *slowest* agent, not the sum: with N agents behind one relay
-        // hop each, a serial loop pays N x RTT per tick.
+        // Ask every still-alive agent concurrently; tick time is the slowest agent.
         let actions = futures_util::future::join_all(clients.iter().enumerate().filter_map(
             |(slot, client)| {
                 let pid = &player_ids[slot];
