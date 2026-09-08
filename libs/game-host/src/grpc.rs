@@ -42,6 +42,15 @@ use spectator_frame::SpectatorFrame;
 /// Safety cap so a stuck game can never loop forever.
 const MAX_TICKS: u64 = 100_000;
 
+/// Upper bound on one agent's `GetAction` per tick.
+///
+/// Healthy agents answer in milliseconds, but a hung agent must not stall the
+/// whole tick: the per-tick fan-out waits for *all* agents, so one stalled RPC
+/// would otherwise freeze the game. Exceeding this drops the agent for that
+/// tick (same as any other action error), and a persistently-hung agent is
+/// eliminated by the engine via repeated `handle_player_leave`.
+const ACTION_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Buffer of spectator frames a lagging subscriber can fall behind before it is
 /// dropped and forced to reconnect (which re-snapshots).
 const SPECTATOR_BUFFER: usize = 1024;
@@ -54,6 +63,7 @@ pub trait GameAdapter: Send + Sync + 'static {
     /// The game engine driven by this adapter.
     type Engine: GameState<PlayerId: Eq + Hash + Clone + Send + Sync, GameAction: Send>
         + Send
+        + Sync
         + 'static;
     /// This game's typed agent gRPC client.
     type Client: Send;
@@ -280,15 +290,17 @@ async fn run_game<G: GameAdapter>(
     }
     let agent_ids: Vec<i64> = agents.iter().map(|a| a.agent_id).collect();
 
-    // Connect + initialize every agent.
-    let mut clients: Vec<G::Client> = Vec::with_capacity(num_players);
+    // Connect + initialize every agent. Each client gets its own mutex so the
+    // per-tick fan-out can hold all of them concurrently: slot `i` only ever
+    // locks `clients[i]`, so there is no contention between slots.
+    let mut clients: Vec<Arc<Mutex<G::Client>>> = Vec::with_capacity(num_players);
     for (slot, endpoint) in agents.iter().enumerate() {
         let mut client = adapter.connect(&endpoint.address).await?;
         adapter
             .initialize(&mut client, slot, num_players)
             .await
             .map_err(|e| format!("agent {} initialize failed: {e}", endpoint.address))?;
-        clients.push(client);
+        clients.push(Arc::new(Mutex::new(client)));
     }
 
     progress.lock().await.state = HostGameState::Running;
@@ -301,13 +313,38 @@ async fn run_game<G: GameAdapter>(
     let mut death_tick: HashMap<_, u64> = HashMap::new();
 
     let final_result = loop {
-        // Ask each still-alive agent for its action for this tick.
-        for (slot, client) in clients.iter_mut().enumerate() {
+        // Ask every still-alive agent concurrently; tick time is the slowest agent.
+        let actions = futures_util::future::join_all(clients.iter().enumerate().filter_map(
+            |(slot, client)| {
+                let pid = &player_ids[slot];
+                if !alive_set.contains(pid) {
+                    return None;
+                }
+                let adapter = &*adapter;
+                let engine = &engine;
+                Some(async move {
+                    let mut guard = client.lock().await;
+                    let result = match tokio::time::timeout(
+                        ACTION_TIMEOUT,
+                        adapter.get_action(&mut guard, engine, slot),
+                    )
+                    .await
+                    {
+                        Ok(Ok(action)) => Ok(action),
+                        Ok(Err(e)) => Err(e),
+                        Err(_) => Err(format!(
+                            "agent {slot} action timed out after {ACTION_TIMEOUT:?}"
+                        )),
+                    };
+                    (slot, result)
+                })
+            },
+        ))
+        .await;
+
+        for (slot, result) in actions {
             let pid = &player_ids[slot];
-            if !alive_set.contains(pid) {
-                continue;
-            }
-            match adapter.get_action(client, &engine, slot).await {
+            match result {
                 Ok(action) => engine.handle_player_action(pid.clone(), action),
                 Err(e) => {
                     tracing::warn!(slot, error = %e, "agent action failed; dropping");
