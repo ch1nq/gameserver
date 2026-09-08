@@ -9,7 +9,10 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use prost::Message as _;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
+use tonic::Streaming;
 
 use crate::game::GameState as _;
 use crate::games::achtung::{Achtung, AchtungConfig, ArenaSize, BlobView, GameAction, PlayerId};
@@ -24,6 +27,77 @@ pub mod spectpb {
 }
 
 use agentpb::agent_client::AgentClient;
+
+/// Live `Play` stream halves for one agent. Lockstep by construction: the host
+/// sends one request and reads one reply per tick, so at most one message is
+/// ever in flight in either direction and no tick can be answered stale.
+struct PlayStream {
+    tx: mpsc::Sender<agentpb::PlayRequest>,
+    rx: Streaming<agentpb::PlayResponse>,
+}
+
+/// Connection to one agent: the long-lived `Play` stream plus the client for
+/// the one-shot `Initialize` call.
+pub struct AchtungAgentClient {
+    client: AgentClient<Channel>,
+    play: PlayStream,
+}
+
+impl AchtungAgentClient {
+    /// Open the per-game `Play` stream.
+    async fn open_play(
+        client: &mut AgentClient<Channel>,
+        address: &str,
+    ) -> Result<PlayStream, String> {
+        // Depth 1 suffices: lockstep means at most one unsent request exists,
+        // and `send` only blocks while the transport hasn't drained it.
+        let (tx, rx) = mpsc::channel(1);
+        match client.play(ReceiverStream::new(rx)).await {
+            Ok(resp) => {
+                tracing::info!(address, "agent Play stream open");
+                Ok(PlayStream {
+                    tx,
+                    rx: resp.into_inner(),
+                })
+            }
+            Err(e) => Err(format!(
+                "agent {address} Play open failed ({e}); rebuild the agent image"
+            )),
+        }
+    }
+
+    /// One lockstep exchange on the open stream.
+    async fn play_action(
+        &mut self,
+        tick: u64,
+        state: agentpb::GameState,
+    ) -> Result<GameAction, String> {
+        self.play
+            .tx
+            .send(agentpb::PlayRequest {
+                tick,
+                state: Some(state),
+            })
+            .await
+            .map_err(|e| format!("Play send failed: {e}"))?;
+        let resp = self
+            .play
+            .rx
+            .message()
+            .await
+            .map_err(|e| format!("Play recv failed: {e}"))?
+            .ok_or("Play stream closed by agent")?;
+        if resp.tick != tick {
+            return Err(format!(
+                "stale Play response: got tick {}, want {tick}",
+                resp.tick
+            ));
+        }
+        Ok(map_direction(
+            resp.action.map(|a| a.direction).unwrap_or_default(),
+        ))
+    }
+}
 
 /// Achtung game-host adapter. Holds the arena configuration used to build the
 /// engine and initialize agents.
@@ -127,7 +201,7 @@ impl AchtungSpectator {
 #[async_trait::async_trait]
 impl GameAdapter for AchtungGrpc {
     type Engine = Achtung;
-    type Client = AgentClient<Channel>;
+    type Client = AchtungAgentClient;
     type Spectator = AchtungSpectator;
 
     fn init_engine(&self, num_players: usize) -> Achtung {
@@ -209,7 +283,10 @@ impl GameAdapter for AchtungGrpc {
         let mut last = String::new();
         for _ in 0..30 {
             match AgentClient::connect(url.clone()).await {
-                Ok(c) => return Ok(c),
+                Ok(mut client) => {
+                    let play = AchtungAgentClient::open_play(&mut client, address).await?;
+                    return Ok(AchtungAgentClient { client, play });
+                }
                 Err(e) => {
                     last = e.to_string();
                     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -226,6 +303,7 @@ impl GameAdapter for AchtungGrpc {
         num_players: usize,
     ) -> Result<(), String> {
         client
+            .client
             .initialize(agentpb::InitializeRequest {
                 player_id: player_slot as u32,
                 num_players: num_players as u32,
@@ -245,11 +323,6 @@ impl GameAdapter for AchtungGrpc {
         engine: &Achtung,
         _player_slot: usize,
     ) -> Result<GameAction, String> {
-        let state = build_state(engine);
-        client
-            .get_action(state)
-            .await
-            .map(|resp| map_direction(resp.into_inner().direction))
-            .map_err(|e| e.to_string())
+        client.play_action(engine.tick(), build_state(engine)).await
     }
 }
