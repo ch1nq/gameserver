@@ -35,8 +35,8 @@ use microsandbox::{
 };
 
 use crate::{
-    ContainerImage, MachineError, MachineHandle, MachineProvider, OrphanKind, OrphanedResource,
-    SpawnConfig,
+    AgentSlot, AgentSpawnConfig, ContainerImage, HostSpawnConfig, MachineError, MachineHandle,
+    MachineProvider, MatchLayout, OrphanKind, OrphanedResource,
 };
 
 /// Label carrying the owning match id, for grouping and diagnostics.
@@ -106,11 +106,18 @@ impl Default for MicrosandboxMachineProviderConfig {
     }
 }
 
-/// Per-match context. `num_slots` is retained because slot 0's egress policy
+/// Per-match context. The layout is retained because the host's egress policy
 /// depends on the full relay port range, which is only known up front.
 pub struct MicrosandboxMatchContext {
     match_id: MatchId,
-    num_slots: u8,
+    layout: MatchLayout,
+}
+
+impl MicrosandboxMatchContext {
+    /// Validated agent slots for this match.
+    pub fn layout(&self) -> MatchLayout {
+        self.layout
+    }
 }
 
 /// Match identifier, distinct from sandbox and image names.
@@ -150,9 +157,17 @@ impl MicrosandboxMachineProvider {
         Self { config }
     }
 
-    /// Host relay port for a slot.
-    fn host_port(&self, slot: u8) -> u16 {
-        self.config.host_port_base.saturating_add(slot as u16)
+    /// Host relay port for the game host (raw slot 0).
+    fn host_port_for_host(&self) -> u16 {
+        self.config.host_port_base
+    }
+
+    /// Host relay port for an agent (raw slot `index + 1`).
+    ///
+    /// Cannot overflow: `init_match` rejects layouts whose relay range exceeds
+    /// `u16`, so the plain add here is safe.
+    fn host_port_for_agent(&self, slot: AgentSlot) -> u16 {
+        self.config.host_port_base + u16::from(slot.raw_slot())
     }
 
     /// Resolve a [`ContainerImage`] to the ref microsandbox should pull, plus the
@@ -174,43 +189,51 @@ impl MicrosandboxMachineProvider {
         }
     }
 
-    /// Egress policy for a slot.
+    /// Egress policy for the game host (trusted image).
     ///
-    /// Ingress stays `Allow` in both cases: it is what admits traffic on the
-    /// published port, and `default_deny()` would close it.
+    /// Ingress stays `Allow`: it admits traffic on the published port, and
+    /// `default_deny()` would close it.
     ///
-    /// - Slot 0 (game host, trusted image) gets DNS plus host access **narrowed
-    ///   to the agent relay ports**, so it cannot reach Postgres, the registry,
-    ///   or `/registry/token` on the host.
-    /// - Slots 1+ (agents, untrusted images) get no egress rules at all. With
-    ///   the default deny that blocks the internet, the host, and — critically —
-    ///   the relay ports fronting sibling agents.
-    fn policy_for_slot(&self, slot: u8, num_slots: u8) -> Result<NetworkPolicy, MachineError> {
-        let mut builder = NetworkPolicy::builder()
+    /// Gets DNS plus host access **narrowed to the agent relay ports**, so it
+    /// cannot reach Postgres, the registry, or `/registry/token` on the host.
+    /// The range is always non-empty — zero-agent matches are rejected when
+    /// the [`MatchLayout`] is built.
+    fn policy_for_host(&self, layout: MatchLayout) -> Result<NetworkPolicy, MachineError> {
+        let range = layout.relay_range(self.config.host_port_base)?;
+        let builder = NetworkPolicy::builder()
             .default_egress(NetworkAction::Deny)
-            .default_ingress(NetworkAction::Allow);
-
-        // A single-slot match has no agents, so there is no relay range to open
-        // and the game host needs no egress either.
-        if slot == 0 && num_slots > 1 {
-            let lo = self.host_port(1);
-            let hi = self.host_port(num_slots - 1);
-            builder = builder.egress(|e| e.tcp().port_range(lo, hi).allow_host());
-        }
+            .default_ingress(NetworkAction::Allow)
+            .egress(|e| {
+                e.tcp()
+                    .port_range(*range.start(), *range.end())
+                    .allow_host()
+            });
 
         let mut policy = builder.build().map_err(|e| {
-            MachineError::MachineCreation(format!("build network policy for slot {slot}: {e}"))
+            MachineError::MachineCreation(format!("build network policy for game host: {e}"))
         })?;
 
-        // DNS for slot 0 only. Prepended as a prebuilt rule rather than composed
-        // in the builder: under deny-by-default a query has no resolved IP yet,
-        // so only the gateway-forwarder `Host` group can match it, and
-        // `allow_dns()` is the SDK's canonical encoding of exactly that.
-        if slot == 0 && num_slots > 1 {
-            policy.rules.insert(0, NetworkRule::allow_dns());
-        }
+        // DNS prepended as a prebuilt rule rather than composed in the builder:
+        // under deny-by-default a query has no resolved IP yet, so only the
+        // gateway-forwarder `Host` group can match it, and `allow_dns()` is
+        // the SDK's canonical encoding of exactly that.
+        policy.rules.insert(0, NetworkRule::allow_dns());
 
         Ok(policy)
+    }
+
+    /// Egress policy for agents (untrusted images): deny-by-default with zero
+    /// rules. Blocks the internet, the host, and — critically — the relay
+    /// ports fronting sibling agents. Structural isolation: with an empty rule
+    /// list there is no rule to misconfigure.
+    fn policy_for_agent(&self) -> Result<NetworkPolicy, MachineError> {
+        NetworkPolicy::builder()
+            .default_egress(NetworkAction::Deny)
+            .default_ingress(NetworkAction::Allow)
+            .build()
+            .map_err(|e| {
+                MachineError::MachineCreation(format!("build network policy for agent: {e}"))
+            })
     }
 
     /// Whether an error means "this sandbox is already gone", so destroy paths
@@ -243,6 +266,131 @@ impl MicrosandboxMachineProvider {
             Err(e) => Err(MachineError::Destruction(format!("remove {name}: {e}"))),
         }
     }
+}
+
+/// How a sandbox's guest port is published on the host.
+enum PortPublish {
+    /// Game host: consumed by the coordinator on the host, so loopback always
+    /// suffices and wider exposure adds nothing.
+    HostLoopback,
+    /// Agent: consumed by the game host from inside a guest; may need a wider
+    /// bind to be reachable — see `host_bind`.
+    AgentRelay(IpAddr),
+}
+
+impl MicrosandboxMachineProvider {
+    /// Shared spawn body for host and agents. Role-specific inputs (name,
+    /// ports, policy, publish mode, address) are resolved by the caller, so
+    /// this function never branches on a slot value.
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn_sandbox(
+        &self,
+        ctx: &MicrosandboxMatchContext,
+        name: MachineName,
+        host_port: u16,
+        guest_port: u16,
+        container_image: &ContainerImage,
+        env: &std::collections::HashMap<String, String>,
+        policy: NetworkPolicy,
+        publish: PortPublish,
+        private_ip: String,
+        raw_slot: u8,
+    ) -> Result<MachineHandle, MachineError> {
+        let resolved = self.image_ref(container_image);
+        let image = resolved.reference.clone();
+        let token = resolved.token;
+
+        let mut builder = Sandbox::builder(name.as_str())
+            .image(image.clone())
+            .pull_policy(PullPolicy::IfMissing)
+            .cpus(self.config.cpus)
+            .memory(self.config.memory_mib)
+            .label(MANAGED_LABEL, MANAGED_VALUE)
+            .label(MATCH_LABEL, ctx.match_id.as_str())
+            .network(|n| n.policy(policy))
+            // Survive a coordinator crash so the reaper can collect them, rather
+            // than dying with a dropped in-process handle.
+            .detached(true)
+            // A leftover sandbox of the same name would fail the create
+            // outright; the pre-flight sweep makes that rare, not impossible.
+            .replace();
+
+        // A single `registry()` call: the builder assigns `insecure` wholesale,
+        // so a second call would clobber the first.
+        let insecure = self.config.registry_insecure;
+        builder = builder.registry(move |r| {
+            let r = match token {
+                Some(password) => r.auth(RegistryAuth::Basic {
+                    username: REGISTRY_SYSTEM_USER.to_string(),
+                    password,
+                }),
+                None => r,
+            };
+            if insecure { r.insecure() } else { r }
+        });
+
+        builder = match publish {
+            PortPublish::HostLoopback => builder.port(host_port, guest_port),
+            PortPublish::AgentRelay(bind) => builder.port_bind(bind, host_port, guest_port),
+        };
+
+        for (key, value) in env {
+            builder = builder.env(key, value);
+        }
+
+        if let Some(secs) = self.config.max_duration_secs {
+            builder = builder.max_duration(secs);
+        }
+
+        // Separate the pull failure from the boot failure: the first is a
+        // registry/auth problem, the second a host or image problem.
+        let sandbox = builder.create().await.map_err(|e| {
+            if matches!(
+                e,
+                MicrosandboxError::Image(_) | MicrosandboxError::ImageNotFound(_)
+            ) {
+                MachineError::ImageCopy(format!("pull {image} for {name}: {e}"))
+            } else {
+                MachineError::MachineCreation(format!("create {name}: {e}"))
+            }
+        })?;
+
+        // Creation is boot-only, so nothing is running yet. Start the image's
+        // effective ENTRYPOINT + CMD and do NOT await it: it runs for the whole
+        // match. `exec_default` (non-streaming) would block here, and the
+        // coordinator would time out dialing a machine never actually started.
+        let exec = sandbox.exec_default_stream().await.map_err(|e| {
+            MachineError::MachineCreation(match &e {
+                MicrosandboxError::NoDefaultCommand => format!(
+                    "image {image} has no ENTRYPOINT or CMD, so there is no workload to start"
+                ),
+                _ => format!("start default workload in {name}: {e}"),
+            })
+        })?;
+        drain_workload_output(exec, name.clone());
+
+        // Release the handle without stopping the VM. Consumes `sandbox`, so
+        // this must come after the exec above.
+        sandbox.detach().await;
+
+        tracing::info!(
+            match_id = %ctx.match_id,
+            sandbox = %name,
+            image,
+            slot = raw_slot,
+            private_ip,
+            host_port,
+            guest_port,
+            "Spawned microsandbox microVM"
+        );
+
+        Ok(MachineHandle {
+            app_name: ctx.match_id.as_str().to_string(),
+            machine_id: name.as_str().to_string(),
+            private_ip,
+            grpc_port: Some(host_port),
+        })
+    }
 
     /// Clear sandboxes left by a previous run before starting a match.
     ///
@@ -272,10 +420,15 @@ impl MicrosandboxMachineProvider {
     }
 }
 
-/// Sandbox name for a slot. Also the reaper's match key, so it must carry
-/// [`NAME_PREFIX`].
-fn sandbox_name(match_id: &str, slot: u8) -> MachineName {
-    MachineName(format!("{NAME_PREFIX}{match_id}-slot-{slot}"))
+/// Sandbox name for the game host (raw slot 0). Also the reaper's match key,
+/// so it must carry [`NAME_PREFIX`].
+fn host_sandbox_name(match_id: &str) -> MachineName {
+    MachineName(format!("{NAME_PREFIX}{match_id}-slot-0"))
+}
+
+/// Sandbox name for an agent. Also the reaper's match key.
+fn agent_sandbox_name(match_id: &str, slot: AgentSlot) -> MachineName {
+    MachineName(format!("{NAME_PREFIX}{match_id}-slot-{}", slot.raw_slot()))
 }
 
 /// Sandbox name, distinct from match ids and image refs.
@@ -371,138 +524,76 @@ impl MachineProvider for MicrosandboxMachineProvider {
     async fn init_match(
         &self,
         match_id: &str,
-        num_slots: u8,
+        layout: MatchLayout,
     ) -> Result<MicrosandboxMatchContext, MachineError> {
+        // Fail fast on port overflow: relay ports are fixed (`base + slot`),
+        // so an overflowing range would silently collide at spawn time.
+        layout.relay_range(self.config.host_port_base)?;
         let ctx = MicrosandboxMatchContext {
             match_id: MatchId::new(match_id),
-            num_slots,
+            layout,
         };
         self.sweep_stale_sandboxes(&ctx.match_id).await;
         Ok(ctx)
     }
 
-    async fn spawn(
+    async fn spawn_host(
         &self,
         ctx: &MicrosandboxMatchContext,
-        config: SpawnConfig,
+        config: HostSpawnConfig,
     ) -> Result<MachineHandle, MachineError> {
-        let slot = config.slot;
-        if slot >= ctx.num_slots {
+        let name = host_sandbox_name(ctx.match_id.as_str());
+        let host_port = self.host_port_for_host();
+        let policy = self.policy_for_host(ctx.layout)?;
+        self.spawn_sandbox(
+            ctx,
+            name,
+            host_port,
+            config.grpc_port,
+            &config.container_image,
+            &config.env,
+            policy,
+            PortPublish::HostLoopback,
+            // Consumer-relative addressing: the coordinator reads the host
+            // from the host itself.
+            Ipv4Addr::LOCALHOST.to_string(),
+            0,
+        )
+        .await
+    }
+
+    async fn spawn_agent(
+        &self,
+        ctx: &MicrosandboxMatchContext,
+        config: AgentSpawnConfig,
+    ) -> Result<MachineHandle, MachineError> {
+        // Defense-in-depth: the coordinator can only build slots from this
+        // match's layout, so this never fires unless callers mix matches.
+        if config.slot.index() >= ctx.layout.num_agents() {
             return Err(MachineError::MachineCreation(format!(
-                "slot {slot} exceeds the {} slots declared by init_match",
-                ctx.num_slots
+                "agent slot {} out of range for {} agents",
+                config.slot.index(),
+                ctx.layout.num_agents()
             )));
         }
-
-        let name = sandbox_name(ctx.match_id.as_str(), slot);
-        let host_port = self.host_port(slot);
-        let resolved = self.image_ref(&config.container_image);
-        let image = resolved.reference.clone();
-        let token = resolved.token;
-        let policy = self.policy_for_slot(slot, ctx.num_slots)?;
-
-        let mut builder = Sandbox::builder(name.as_str())
-            .image(image.clone())
-            .pull_policy(PullPolicy::IfMissing)
-            .cpus(self.config.cpus)
-            .memory(self.config.memory_mib)
-            .label(MANAGED_LABEL, MANAGED_VALUE)
-            .label(MATCH_LABEL, ctx.match_id.as_str())
-            .network(|n| n.policy(policy))
-            // Survive a coordinator crash so the reaper can collect them, rather
-            // than dying with a dropped in-process handle.
-            .detached(true)
-            // A leftover sandbox of the same name would fail the create
-            // outright; the pre-flight sweep makes that rare, not impossible.
-            .replace();
-
-        // A single `registry()` call: the builder assigns `insecure` wholesale,
-        // so a second call would clobber the first.
-        let insecure = self.config.registry_insecure;
-        builder = builder.registry(move |r| {
-            let r = match token {
-                Some(password) => r.auth(RegistryAuth::Basic {
-                    username: REGISTRY_SYSTEM_USER.to_string(),
-                    password,
-                }),
-                None => r,
-            };
-            if insecure { r.insecure() } else { r }
-        });
-
-        // Slot 0's consumer is the coordinator on the host, so loopback always
-        // suffices. Agent relays may need a wider bind to be reachable from
-        // inside a guest — see `host_bind`.
-        builder = if slot == 0 {
-            builder.port(host_port, config.grpc_port)
-        } else {
-            builder.port_bind(self.config.host_bind, host_port, config.grpc_port)
-        };
-
-        for (key, value) in &config.env {
-            builder = builder.env(key, value);
-        }
-
-        if let Some(secs) = self.config.max_duration_secs {
-            builder = builder.max_duration(secs);
-        }
-
-        // Separate the pull failure from the boot failure: the first is a
-        // registry/auth problem, the second a host or image problem.
-        let sandbox = builder.create().await.map_err(|e| {
-            if matches!(
-                e,
-                MicrosandboxError::Image(_) | MicrosandboxError::ImageNotFound(_)
-            ) {
-                MachineError::ImageCopy(format!("pull {image} for {name}: {e}"))
-            } else {
-                MachineError::MachineCreation(format!("create {name}: {e}"))
-            }
-        })?;
-
-        // Creation is boot-only, so nothing is running yet. Start the image's
-        // effective ENTRYPOINT + CMD and do NOT await it: it runs for the whole
-        // match. `exec_default` (non-streaming) would block here, and the
-        // coordinator would time out dialing a machine never actually started.
-        let exec = sandbox.exec_default_stream().await.map_err(|e| {
-            MachineError::MachineCreation(match &e {
-                MicrosandboxError::NoDefaultCommand => format!(
-                    "image {image} has no ENTRYPOINT or CMD, so there is no workload to start"
-                ),
-                _ => format!("start default workload in {name}: {e}"),
-            })
-        })?;
-        drain_workload_output(exec, name.clone());
-
-        // Release the handle without stopping the VM. Consumes `sandbox`, so
-        // this must come after the exec above.
-        sandbox.detach().await;
-
-        // Consumer-relative addressing: the coordinator reads slot 0 from the
-        // host; the game host reads agents from inside a guest.
-        let private_ip = if slot == 0 {
-            Ipv4Addr::LOCALHOST.to_string()
-        } else {
-            HOST_INTERNAL.to_string()
-        };
-
-        tracing::info!(
-            match_id = %ctx.match_id,
-            sandbox = %name,
-            image,
-            slot,
-            private_ip,
+        let raw = config.slot.raw_slot();
+        let name = agent_sandbox_name(ctx.match_id.as_str(), config.slot);
+        let host_port = self.host_port_for_agent(config.slot);
+        let policy = self.policy_for_agent()?;
+        self.spawn_sandbox(
+            ctx,
+            name,
             host_port,
-            guest_port = config.grpc_port,
-            "Spawned microsandbox microVM"
-        );
-
-        Ok(MachineHandle {
-            app_name: ctx.match_id.as_str().to_string(),
-            machine_id: name.as_str().to_string(),
-            private_ip,
-            grpc_port: Some(host_port),
-        })
+            config.grpc_port,
+            &config.container_image,
+            &config.env,
+            policy,
+            PortPublish::AgentRelay(self.config.host_bind),
+            // The game host reads agents from inside a guest, via the host relay.
+            HOST_INTERNAL.to_string(),
+            raw,
+        )
+        .await
     }
 
     async fn destroy(
@@ -610,18 +701,24 @@ mod tests {
 
     #[test]
     fn sandbox_names_carry_the_reaper_prefix() {
-        let name = sandbox_name("abc123", 2);
-        assert_eq!(name.as_str(), "achtung-abc123-slot-2");
+        let host = host_sandbox_name("abc123");
+        assert_eq!(host.as_str(), "achtung-abc123-slot-0");
+        let agent = agent_sandbox_name("abc123", AgentSlot::from_index(1).unwrap());
+        assert_eq!(agent.as_str(), "achtung-abc123-slot-2");
         // The reaper filters on this prefix; renaming here silently stops
         // orphan collection.
-        assert!(name.as_str().starts_with(NAME_PREFIX));
+        assert!(host.as_str().starts_with(NAME_PREFIX));
+        assert!(agent.as_str().starts_with(NAME_PREFIX));
     }
 
     #[test]
     fn host_ports_are_slot_offsets_from_the_base() {
         let p = provider();
-        assert_eq!(p.host_port(0), 51000);
-        assert_eq!(p.host_port(3), 51003);
+        assert_eq!(p.host_port_for_host(), 51000);
+        assert_eq!(
+            p.host_port_for_agent(AgentSlot::from_index(2).unwrap()),
+            51003
+        );
     }
 
     #[test]
@@ -651,22 +748,17 @@ mod tests {
     }
 
     #[test]
-    fn every_slot_denies_egress_but_permits_ingress() {
+    fn host_and_agents_deny_egress_but_permit_ingress() {
         let p = provider();
-        for slot in 0..3u8 {
-            let policy = p.policy_for_slot(slot, 3).expect("policy builds");
-            assert_eq!(
-                policy.default_egress,
-                NetworkAction::Deny,
-                "slot {slot} must deny egress by default"
-            );
+        let layout = MatchLayout::new(2).unwrap();
+        for policy in [
+            p.policy_for_host(layout).expect("host policy builds"),
+            p.policy_for_agent().expect("agent policy builds"),
+        ] {
+            assert_eq!(policy.default_egress, NetworkAction::Deny);
             // Ingress Allow is what admits the published port. `default_deny()`
             // would set both directions and silently break the relay.
-            assert_eq!(
-                policy.default_ingress,
-                NetworkAction::Allow,
-                "slot {slot} must keep ingress open for its published port"
-            );
+            assert_eq!(policy.default_ingress, NetworkAction::Allow);
         }
     }
 
@@ -676,20 +768,19 @@ mod tests {
         // Structural isolation: with deny-by-default and an empty rule list
         // there is no rule to misconfigure, so an agent cannot reach the
         // internet, the host, or the relay ports fronting sibling agents.
-        for slot in 1..4u8 {
-            let policy = p.policy_for_slot(slot, 4).expect("policy builds");
-            assert!(
-                policy.rules.is_empty(),
-                "agent slot {slot} must have zero egress rules, found {:?}",
-                policy.rules
-            );
-        }
+        let policy = p.policy_for_agent().expect("policy builds");
+        assert!(
+            policy.rules.is_empty(),
+            "agents must have zero egress rules, found {:?}",
+            policy.rules
+        );
     }
 
     #[test]
     fn game_host_reaches_only_dns_and_the_agent_relay_range() {
         let p = provider();
-        let policy = p.policy_for_slot(0, 4).expect("policy builds");
+        let layout = MatchLayout::new(3).unwrap();
+        let policy = p.policy_for_host(layout).expect("policy builds");
 
         // DNS (53) plus the relay range, and nothing else.
         assert_eq!(
@@ -712,14 +803,5 @@ mod tests {
         // Exactly slots 1..=3 — never slot 0's own port, and never a wider range
         // that would expose Postgres, the registry, or /registry/token.
         assert_eq!((range.start, range.end), (51001, 51003));
-    }
-
-    #[test]
-    fn a_single_slot_match_gives_the_game_host_no_egress() {
-        let p = provider();
-        // No agents means no relay range to open, so the range must not
-        // degenerate into something inverted or all-encompassing.
-        let policy = p.policy_for_slot(0, 1).expect("policy builds");
-        assert!(policy.rules.is_empty());
     }
 }
