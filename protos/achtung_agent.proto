@@ -6,16 +6,10 @@ service Agent {
   // Called at the start of each game to initialize the agent
   rpc Initialize(InitializeRequest) returns (InitializeResponse);
 
-  // Called each tick to get the agent's action
-  rpc GetAction(GameState) returns (AgentAction);
-
   // Long-lived lockstep action stream, opened once per game after
   // Initialize. The host sends one PlayRequest per tick and reads exactly
-  // one PlayResponse; the tick echo detects stale replies. Avoids paying
-  // per-RPC stream setup on transports where that dominates (measured ~44ms
-  // per unary call through the microVM port relay vs sub-ms on an open
-  // stream). Agents that do not implement Play keep working: the host falls
-  // back to GetAction on UNIMPLEMENTED.
+  // one PlayResponse; the tick echo detects stale replies. A single stream
+  // avoids paying per-RPC stream setup every tick.
   rpc Play(stream PlayRequest) returns (stream PlayResponse);
 }
 

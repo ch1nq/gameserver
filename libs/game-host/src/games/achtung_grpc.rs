@@ -12,7 +12,7 @@ use prost::Message as _;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
-use tonic::{Code, Streaming};
+use tonic::Streaming;
 
 use crate::game::GameState as _;
 use crate::games::achtung::{Achtung, AchtungConfig, ArenaSize, BlobView, GameAction, PlayerId};
@@ -36,40 +36,34 @@ struct PlayStream {
     rx: Streaming<agentpb::PlayResponse>,
 }
 
-/// Connection to one agent. Prefers the long-lived `Play` stream (sub-ms per
-/// tick on an open stream through the microVM relay, versus ~44ms per unary
-/// call); falls back to unary `GetAction` when the agent does not implement
-/// `Play`, or if the stream dies mid-game.
+/// Connection to one agent: the long-lived `Play` stream plus the client for
+/// the one-shot `Initialize` call.
 pub struct AchtungAgentClient {
     client: AgentClient<Channel>,
-    play: Option<PlayStream>,
+    play: PlayStream,
 }
 
 impl AchtungAgentClient {
-    /// Open the per-game `Play` stream. `None` means unary mode: either the
-    /// agent predates `Play` (`UNIMPLEMENTED`) or the open failed, in which
-    /// case the following `Initialize`/action calls surface the real error
-    /// exactly as they did before streaming existed.
-    async fn open_play(client: &mut AgentClient<Channel>, address: &str) -> Option<PlayStream> {
+    /// Open the per-game `Play` stream. Agents must implement `Play`;
+    /// anything else is a stale agent image that needs rebuilding.
+    async fn open_play(
+        client: &mut AgentClient<Channel>,
+        address: &str,
+    ) -> Result<PlayStream, String> {
         // Depth 1 suffices: lockstep means at most one unsent request exists,
         // and `send` only blocks while the transport hasn't drained it.
         let (tx, rx) = mpsc::channel(1);
         match client.play(ReceiverStream::new(rx)).await {
             Ok(resp) => {
-                tracing::info!(address, "agent uses Play stream");
-                Some(PlayStream {
+                tracing::info!(address, "agent Play stream open");
+                Ok(PlayStream {
                     tx,
                     rx: resp.into_inner(),
                 })
             }
-            Err(e) if e.code() == Code::Unimplemented => {
-                tracing::info!(address, "agent predates Play; using unary GetAction");
-                None
-            }
-            Err(e) => {
-                tracing::warn!(address, error = %e, "Play open failed; trying unary");
-                None
-            }
+            Err(e) => Err(format!(
+                "agent {address} Play open failed ({e}); rebuild the agent image"
+            )),
         }
     }
 
@@ -79,8 +73,7 @@ impl AchtungAgentClient {
         tick: u64,
         state: agentpb::GameState,
     ) -> Result<GameAction, String> {
-        let stream = self.play.as_mut().ok_or("no Play stream")?;
-        stream
+        self.play
             .tx
             .send(agentpb::PlayRequest {
                 tick,
@@ -88,7 +81,8 @@ impl AchtungAgentClient {
             })
             .await
             .map_err(|e| format!("Play send failed: {e}"))?;
-        let resp = stream
+        let resp = self
+            .play
             .rx
             .message()
             .await
@@ -291,7 +285,7 @@ impl GameAdapter for AchtungGrpc {
         for _ in 0..30 {
             match AgentClient::connect(url.clone()).await {
                 Ok(mut client) => {
-                    let play = AchtungAgentClient::open_play(&mut client, address).await;
+                    let play = AchtungAgentClient::open_play(&mut client, address).await?;
                     return Ok(AchtungAgentClient { client, play });
                 }
                 Err(e) => {
@@ -330,24 +324,6 @@ impl GameAdapter for AchtungGrpc {
         engine: &Achtung,
         _player_slot: usize,
     ) -> Result<GameAction, String> {
-        let tick = engine.tick();
-        let state = build_state(engine);
-        if client.play.is_some() {
-            match client.play_action(tick, state.clone()).await {
-                ok @ Ok(_) => return ok,
-                Err(e) => {
-                    // The stream died mid-game: drop back to unary for the
-                    // rest of the match rather than failing every tick.
-                    tracing::warn!(error = %e, "Play stream failed; falling back to unary");
-                    client.play = None;
-                }
-            }
-        }
-        client
-            .client
-            .get_action(state)
-            .await
-            .map(|resp| map_direction(resp.into_inner().direction))
-            .map_err(|e| e.to_string())
+        client.play_action(engine.tick(), build_state(engine)).await
     }
 }
