@@ -44,8 +44,7 @@ pub struct AchtungAgentClient {
 }
 
 impl AchtungAgentClient {
-    /// Open the per-game `Play` stream. Agents must implement `Play`;
-    /// anything else is a stale agent image that needs rebuilding.
+    /// Open the per-game `Play` stream.
     async fn open_play(
         client: &mut AgentClient<Channel>,
         address: &str,
