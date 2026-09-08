@@ -1,7 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_infra::{ContainerImage, MachineError, MachineHandle, MachineProvider, SpawnConfig};
+use agent_infra::{
+    AgentSlot, AgentSpawnConfig, ContainerImage, HostSpawnConfig, MachineError, MachineHandle,
+    MachineProvider, MatchLayout,
+};
 use common::{AgentId, AgentInfo, AgentRepository, ContainerImageUrl, DeployTokenProvider};
 use game_host::game_host_client::GameHostClient;
 use game_host::{AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest};
@@ -206,15 +209,17 @@ impl<P: MachineProvider> GameCoordinator<P> {
 
         // 2. Initialize match infrastructure (network, etc.)
         let match_id = agent_infra::generate_id();
-        let num_slots = (self.config.agents_per_game + 1) as u8;
+        // Validated once: rejects zero agents and counts that would overflow
+        // the u8 wire slot or the relay port range.
+        let layout = MatchLayout::new(agents.len()).map_err(CoordinatorError::MachineSpawn)?;
         let ctx = self
             .machine_provider
-            .init_match(&match_id, num_slots)
+            .init_match(&match_id, layout)
             .await
             .map_err(CoordinatorError::MachineSpawn)?;
 
         // 3. Run the game, then always clean up
-        let game_result = self.run_game_inner(&ctx, &agents).await;
+        let game_result = self.run_game_inner(&ctx, layout, &agents).await;
 
         // 4. Cleanup match infrastructure regardless of outcome
         if let Err(e) = self.machine_provider.cleanup_match(ctx).await {
@@ -237,22 +242,24 @@ impl<P: MachineProvider> GameCoordinator<P> {
     async fn run_game_inner(
         &self,
         ctx: &P::MatchContext,
+        layout: MatchLayout,
         agents: &[AgentInfo],
     ) -> Result<GameResult, CoordinatorError> {
-        // Spawn game host (slot 0)
+        // Spawn game host
         let game_host_handle = self.spawn_game_host(ctx).await?;
         tracing::info!("Game host spawned at {}", game_host_handle.private_ip);
 
-        // Spawn agents (slots 1+), cleaning up on failure
+        // Spawn agents, cleaning up on failure. Slots come from the validated
+        // layout, so they are always in range — no manual `i + 1` arithmetic.
+        debug_assert_eq!(agents.len(), layout.all_agent_slots().len());
         let mut agent_handles: Vec<(AgentId, MachineHandle)> = Vec::new();
-        for (i, agent) in agents.iter().enumerate() {
-            let slot = (i + 1) as u8;
+        for (agent, slot) in agents.iter().zip(layout.all_agent_slots()) {
             match self.spawn_agent(ctx, agent, slot).await {
                 Ok(handle) => {
                     tracing::info!(
                         agent_id = agent.id,
                         ip = handle.private_ip,
-                        slot,
+                        slot = slot.raw_slot(),
                         "Agent spawned"
                     );
                     agent_handles.push((agent.id, handle));
@@ -281,16 +288,15 @@ impl<P: MachineProvider> GameCoordinator<P> {
         ctx: &P::MatchContext,
     ) -> Result<MachineHandle, CoordinatorError> {
         // Game host is on a public registry, no copy or token needed
-        let config = SpawnConfig::new(
+        let config = HostSpawnConfig::new(
             ContainerImage::Public(self.config.game_host_image.clone()),
-            0,
             self.config.game_host_grpc_port,
         )
         .env("NUM_PLAYERS", self.config.agents_per_game.to_string())
         .env("TICK_RATE_MS", self.config.tick_rate_ms.to_string());
 
         self.machine_provider
-            .spawn(ctx, config)
+            .spawn_host(ctx, config)
             .await
             .map_err(CoordinatorError::MachineSpawn)
     }
@@ -299,7 +305,7 @@ impl<P: MachineProvider> GameCoordinator<P> {
         &self,
         ctx: &P::MatchContext,
         agent: &AgentInfo,
-        slot: u8,
+        slot: AgentSlot,
     ) -> Result<MachineHandle, CoordinatorError> {
         // Agents are pulled from the private registry with a scoped deploy token.
         let registry_token = self
@@ -312,10 +318,10 @@ impl<P: MachineProvider> GameCoordinator<P> {
             registry_token,
         };
 
-        let config = SpawnConfig::new(container_image, slot, self.config.agent_grpc_port);
+        let config = AgentSpawnConfig::new(container_image, slot, self.config.agent_grpc_port);
 
         self.machine_provider
-            .spawn(ctx, config)
+            .spawn_agent(ctx, config)
             .await
             .map_err(CoordinatorError::MachineSpawn)
     }

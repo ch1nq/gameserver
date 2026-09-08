@@ -30,8 +30,8 @@ use futures_util::StreamExt;
 use common::ImageUrl;
 
 use crate::{
-    ContainerImage, MachineError, MachineHandle, MachineProvider, OrphanKind, OrphanedResource,
-    SpawnConfig,
+    AgentSlot, AgentSpawnConfig, ContainerImage, HostSpawnConfig, MachineError, MachineHandle,
+    MachineProvider, MatchLayout, OrphanKind, OrphanedResource,
 };
 
 /// Configuration for the local Docker machine provider.
@@ -51,8 +51,17 @@ pub struct DockerMachineProviderConfig {
 
 /// Per-match context. Docker needs no shared per-match resources (containers
 /// share one network), so this just carries the match id used to name them.
+/// The layout is retained so agent slots can be range-checked on spawn.
 pub struct DockerMatchContext {
     match_id: String,
+    layout: MatchLayout,
+}
+
+impl DockerMatchContext {
+    /// Validated agent slots for this match.
+    pub fn layout(&self) -> MatchLayout {
+        self.layout
+    }
 }
 
 /// Local Docker implementation of [`MachineProvider`].
@@ -137,37 +146,21 @@ impl DockerMachineProvider {
             }
         )
     }
-}
 
-fn container_name(prefix: &str, match_id: &str, slot: u8) -> String {
-    format!("{prefix}{match_id}-slot-{slot}")
-}
-
-#[async_trait::async_trait]
-impl MachineProvider for DockerMachineProvider {
-    type MatchContext = DockerMatchContext;
-
-    async fn init_match(
-        &self,
-        match_id: &str,
-        _num_slots: u8,
-    ) -> Result<DockerMatchContext, MachineError> {
-        // Shared-network mode allocates no per-slot resources, so the slot count
-        // is not needed here.
-        Ok(DockerMatchContext {
-            match_id: match_id.to_string(),
-        })
-    }
-
-    async fn spawn(
+    /// Shared spawn body for host and agents: only the container name differs.
+    /// Role-specific addressing does not exist here — every container is
+    /// reached by name on the shared network.
+    async fn spawn_inner(
         &self,
         ctx: &DockerMatchContext,
-        config: SpawnConfig,
+        name: String,
+        raw_slot: u8,
+        image: &ContainerImage,
+        env: &std::collections::HashMap<String, String>,
     ) -> Result<MachineHandle, MachineError> {
-        let name = container_name(&self.config.name_prefix, &ctx.match_id, config.slot);
-        let image = self.ensure_image(&config.container_image).await?;
+        let image = self.ensure_image(image).await?;
 
-        let env: Vec<String> = config.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        let env: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
 
         let container_config = Config {
             image: Some(image.as_ref().to_string()),
@@ -199,7 +192,7 @@ impl MachineProvider for DockerMachineProvider {
             match_id = ctx.match_id,
             container = name,
             image = %image,
-            slot = config.slot,
+            slot = raw_slot,
             "Spawned Docker container"
         );
 
@@ -212,6 +205,60 @@ impl MachineProvider for DockerMachineProvider {
             // in-machine port it already knows. No host relay involved.
             grpc_port: None,
         })
+    }
+}
+
+fn host_container_name(prefix: &str, match_id: &str) -> String {
+    format!("{prefix}{match_id}-slot-0")
+}
+
+fn agent_container_name(prefix: &str, match_id: &str, slot: AgentSlot) -> String {
+    format!("{prefix}{match_id}-slot-{}", slot.raw_slot())
+}
+
+#[async_trait::async_trait]
+impl MachineProvider for DockerMachineProvider {
+    type MatchContext = DockerMatchContext;
+
+    async fn init_match(
+        &self,
+        match_id: &str,
+        layout: MatchLayout,
+    ) -> Result<DockerMatchContext, MachineError> {
+        // Shared-network mode allocates no per-slot resources, so the layout
+        // is only retained for spawn-time range checks.
+        Ok(DockerMatchContext {
+            match_id: match_id.to_string(),
+            layout,
+        })
+    }
+
+    async fn spawn_host(
+        &self,
+        ctx: &DockerMatchContext,
+        config: HostSpawnConfig,
+    ) -> Result<MachineHandle, MachineError> {
+        let name = host_container_name(&self.config.name_prefix, &ctx.match_id);
+        self.spawn_inner(ctx, name, 0, &config.container_image, &config.env)
+            .await
+    }
+
+    async fn spawn_agent(
+        &self,
+        ctx: &DockerMatchContext,
+        config: AgentSpawnConfig,
+    ) -> Result<MachineHandle, MachineError> {
+        if config.slot.index() >= ctx.layout.num_agents() {
+            return Err(MachineError::MachineCreation(format!(
+                "agent slot {} out of range for {} agents",
+                config.slot.index(),
+                ctx.layout.num_agents()
+            )));
+        }
+        let raw = config.slot.raw_slot();
+        let name = agent_container_name(&self.config.name_prefix, &ctx.match_id, config.slot);
+        self.spawn_inner(ctx, name, raw, &config.container_image, &config.env)
+            .await
     }
 
     async fn destroy(
