@@ -18,7 +18,7 @@ pub struct RegistryTokenManager {
 #[derive(Debug, thiserror::Error)]
 pub enum TokenManagerError {
     #[error("Database error: {0}")]
-    DatabaseError(sqlx::Error),
+    DatabaseError(#[from] sqlx::Error),
 
     #[error("Invalid input: {0}")]
     InvalidInput(String),
@@ -33,7 +33,7 @@ pub enum TokenManagerError {
     FailedToGenerateSystemToken,
 
     #[error("Failed to hash token: {0}")]
-    FailedToHashToken(String),
+    FailedToHashToken(#[from] bcrypt::BcryptError),
 
     #[error("Invalid credentials")]
     InvalidCredentials,
@@ -85,8 +85,7 @@ impl RegistryTokenManager {
         let plaintext_token = PlaintextToken::generate();
 
         // Hash the token using bcrypt
-        let token_hash = bcrypt::hash(plaintext_token.as_ref(), BCRYPT_COST)
-            .map_err(|e| TokenManagerError::FailedToHashToken(e.to_string()))?;
+        let token_hash = bcrypt::hash(plaintext_token.as_ref(), BCRYPT_COST)?;
 
         // Insert into database
         let _token_id = sqlx::query!(
@@ -100,8 +99,7 @@ impl RegistryTokenManager {
             name.as_ref(),
         )
         .fetch_one(&self.db_pool)
-        .await
-        .map_err(TokenManagerError::DatabaseError)?
+        .await?
         .id;
 
         Ok(plaintext_token)
@@ -192,8 +190,7 @@ impl RegistryTokenManager {
             user_id
         )
         .fetch_all(&self.db_pool)
-        .await
-        .map_err(TokenManagerError::DatabaseError)?;
+        .await?;
 
         Ok(tokens)
     }
@@ -214,8 +211,7 @@ impl RegistryTokenManager {
             user_id,
         )
         .execute(&self.db_pool)
-        .await
-        .map_err(TokenManagerError::DatabaseError)?;
+        .await?;
 
         if result.rows_affected() == 0 {
             return Err(TokenManagerError::TokenNotFound);
@@ -235,8 +231,7 @@ impl RegistryTokenManager {
             user_id
         )
         .fetch_one(&self.db_pool)
-        .await
-        .map_err(TokenManagerError::DatabaseError)?
+        .await?
         .count;
 
         Ok(count)
@@ -246,7 +241,7 @@ impl RegistryTokenManager {
         &self,
         user_id: &UserId,
     ) -> Result<Vec<RegistryToken>, TokenManagerError> {
-        sqlx::query_as!(
+        Ok(sqlx::query_as!(
             RegistryToken,
             r#"
             SELECT id, user_id, name, token_hash, created_at, revoked_at
@@ -256,8 +251,7 @@ impl RegistryTokenManager {
             user_id
         )
         .fetch_all(&self.db_pool)
-        .await
-        .map_err(TokenManagerError::DatabaseError)
+        .await?)
     }
 
     /// Validate a registry token for a user

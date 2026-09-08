@@ -9,6 +9,7 @@ agent-infra = { path = "../agent-infra", package = "achtung-agent-infra" }
 common = { path = "../common" }
 prost = { workspace = true }
 rand = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }

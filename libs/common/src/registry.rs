@@ -253,9 +253,9 @@ pub struct ImageUrl(String);
 
 impl ImageUrl {
     /// Create a new ImageUrl with validation
-    pub fn new(s: String) -> Result<Self, String> {
+    pub fn new(s: String) -> Result<Self, ImageParseError> {
         if s.trim().is_empty() {
-            return Err("Image URL cannot be empty".to_string());
+            return Err(ImageParseError::Empty);
         }
         Ok(Self(s))
     }
