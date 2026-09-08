@@ -42,14 +42,11 @@ use spectator_frame::SpectatorFrame;
 /// Safety cap so a stuck game can never loop forever.
 const MAX_TICKS: u64 = 100_000;
 
-/// Upper bound on one agent's `GetAction` per tick.
-///
-/// Healthy agents answer in milliseconds, but a hung agent must not stall the
-/// whole tick: the per-tick fan-out waits for *all* agents, so one stalled RPC
-/// would otherwise freeze the game. Exceeding this drops the agent for that
-/// tick (same as any other action error), and a persistently-hung agent is
-/// eliminated by the engine via repeated `handle_player_leave`.
-const ACTION_TIMEOUT: Duration = Duration::from_secs(5);
+/// Upper bound on per-agent setup (`Initialize` plus opening the action
+/// stream). A wedged agent fails the match fast instead of hanging it before
+/// tick 0. There is deliberately no per-tick timeout: the game loop never
+/// waits for agents (see below).
+pub(crate) const SETUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Buffer of spectator frames a lagging subscriber can fall behind before it is
 /// dropped and forced to reconnect (which re-snapshots).
@@ -63,10 +60,12 @@ pub trait GameAdapter: Send + Sync + 'static {
     /// The game engine driven by this adapter.
     type Engine: GameState<PlayerId: Eq + Hash + Clone + Send + Sync, GameAction: Send>
         + Send
-        + Sync
         + 'static;
-    /// This game's typed agent gRPC client.
+    /// This game's typed agent gRPC client, as returned by [`Self::connect`].
     type Client: Send;
+    /// Background link to one agent. The game loop publishes tick states and
+    /// reads the latest action through it without ever blocking.
+    type Link: Send + 'static;
 
     /// Accumulated spectator state used to encode snapshots and derive deltas.
     /// Holds whatever this game needs to diff frames across ticks (e.g. the
@@ -94,22 +93,36 @@ pub trait GameAdapter: Send + Sync + 'static {
     /// Dial an agent, retrying while its VM/container finishes booting.
     async fn connect(&self, address: &str) -> Result<Self::Client, String>;
 
-    /// One-time per-game agent setup (proto `Initialize`).
-    async fn initialize(
+    /// One-time per-game agent setup plus link spawn: runs `Initialize`,
+    /// opens the action stream, and starts the background pump tasks. Slow
+    /// agents are fine after this point, but a wedge *here* fails the match,
+    /// so implementations must bound it with [`SETUP_TIMEOUT`].
+    async fn open_link(
         &self,
-        client: &mut Self::Client,
+        client: Self::Client,
         player_slot: usize,
         num_players: usize,
-    ) -> Result<(), String>;
+    ) -> Result<Self::Link, String>;
 
-    /// Build this tick's typed observation for `player_slot`, call the agent's
-    /// `GetAction`, and map the reply into an engine action.
-    async fn get_action(
+    /// Publish this tick's observation to the agent. Never blocks: states the
+    /// agent hasn't drained are skipped (latest wins).
+    fn push_state(&self, link: &Self::Link, tick: u64, engine: &Self::Engine, player_slot: usize);
+
+    /// Latest action received from the agent, with the tick it was computed
+    /// for. `None` if the agent hasn't answered yet: the game loop then uses
+    /// [`Self::default_action`]. Stale answers apply as-is — a slow agent's
+    /// intent still steers, just delayed.
+    fn poll_action(
         &self,
-        client: &mut Self::Client,
-        engine: &Self::Engine,
-        player_slot: usize,
-    ) -> Result<<Self::Engine as GameState>::GameAction, String>;
+        link: &Self::Link,
+    ) -> Option<(u64, <Self::Engine as GameState>::GameAction)>;
+
+    /// False once the agent's stream has broken (crash, disconnect). The game
+    /// loop eliminates such agents; mere slowness never trips this.
+    fn link_alive(&self, link: &Self::Link) -> bool;
+
+    /// Action used when the agent has no answer yet.
+    fn default_action(&self) -> <Self::Engine as GameState>::GameAction;
 }
 
 /// Progress of the single game this host runs. A game-host process hosts
@@ -272,7 +285,9 @@ async fn run_game<G: GameAdapter>(
     spectator_tx: &broadcast::Sender<SpectatorFrame>,
 ) -> Result<(), String> {
     let num_players = agents.len();
-    let tick_rate = Duration::from_millis(cfg.tick_rate_ms.max(1));
+    // The tick *period*: the loop below advances on this wall-clock interval
+    // no matter how fast or slow agents answer.
+    let tick_period = Duration::from_millis(cfg.tick_rate_ms.max(1));
 
     let mut engine = adapter.init_engine(num_players);
 
@@ -290,17 +305,16 @@ async fn run_game<G: GameAdapter>(
     }
     let agent_ids: Vec<i64> = agents.iter().map(|a| a.agent_id).collect();
 
-    // Connect + initialize every agent. Each client gets its own mutex so the
-    // per-tick fan-out can hold all of them concurrently: slot `i` only ever
-    // locks `clients[i]`, so there is no contention between slots.
-    let mut clients: Vec<Arc<Mutex<G::Client>>> = Vec::with_capacity(num_players);
+    // Connect every agent, then open its background link (setup + stream +
+    // pump tasks). From here on the game loop never blocks on agents.
+    let mut links: Vec<G::Link> = Vec::with_capacity(num_players);
     for (slot, endpoint) in agents.iter().enumerate() {
-        let mut client = adapter.connect(&endpoint.address).await?;
-        adapter
-            .initialize(&mut client, slot, num_players)
+        let client = adapter.connect(&endpoint.address).await?;
+        let link = adapter
+            .open_link(client, slot, num_players)
             .await
-            .map_err(|e| format!("agent {} initialize failed: {e}", endpoint.address))?;
-        clients.push(Arc::new(Mutex::new(client)));
+            .map_err(|e| format!("agent {} setup failed: {e}", endpoint.address))?;
+        links.push(link);
     }
 
     progress.lock().await.state = HostGameState::Running;
@@ -311,46 +325,44 @@ async fn run_game<G: GameAdapter>(
     let mut alive_set: HashSet<_> = alive_order.iter().cloned().collect();
     let mut death_order = Vec::new();
     let mut death_tick: HashMap<_, u64> = HashMap::new();
+    // Ticks whose own work (engine + spectator encoding) overran the period.
+    // A rising count means the period is too tight for the engine cost, not
+    // that agents are slow: agent I/O never blocks this loop.
+    let mut overran_ticks: u64 = 0;
+
+    // Fixed-rate ticker. `Skip` sheds backlog instead of spiralling: if one
+    // tick overruns, the next fires on schedule rather than bursting.
+    let mut interval = tokio::time::interval(tick_period);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    // Seed tick 0 so agents have a state before the first gears turn. The
+    // first interval tick fires immediately and will mostly apply defaults.
+    for (slot, link) in links.iter().enumerate() {
+        adapter.push_state(link, 0, &engine, slot);
+    }
 
     let final_result = loop {
-        // Ask every still-alive agent concurrently; tick time is the slowest agent.
-        let actions = futures_util::future::join_all(clients.iter().enumerate().filter_map(
-            |(slot, client)| {
-                let pid = &player_ids[slot];
-                if !alive_set.contains(pid) {
-                    return None;
-                }
-                let adapter = &*adapter;
-                let engine = &engine;
-                Some(async move {
-                    let mut guard = client.lock().await;
-                    let result = match tokio::time::timeout(
-                        ACTION_TIMEOUT,
-                        adapter.get_action(&mut guard, engine, slot),
-                    )
-                    .await
-                    {
-                        Ok(Ok(action)) => Ok(action),
-                        Ok(Err(e)) => Err(e),
-                        Err(_) => Err(format!(
-                            "agent {slot} action timed out after {ACTION_TIMEOUT:?}"
-                        )),
-                    };
-                    (slot, result)
-                })
-            },
-        ))
-        .await;
+        interval.tick().await;
+        let work_start = std::time::Instant::now();
 
-        for (slot, result) in actions {
+        // Consume whatever each alive agent has offered. Slow agents simply
+        // steer on their latest answer or the default; only a broken stream
+        // eliminates.
+        for (slot, link) in links.iter().enumerate() {
             let pid = &player_ids[slot];
-            match result {
-                Ok(action) => engine.handle_player_action(pid.clone(), action),
-                Err(e) => {
-                    tracing::warn!(slot, error = %e, "agent action failed; dropping");
-                    engine.handle_player_leave(pid.clone());
-                }
+            if !alive_set.contains(pid) {
+                continue;
             }
+            if !adapter.link_alive(link) {
+                tracing::warn!(slot, "agent link dead; dropping");
+                engine.handle_player_leave(pid.clone());
+                continue;
+            }
+            let action = adapter
+                .poll_action(link)
+                .map(|(_, action)| action)
+                .unwrap_or_else(|| adapter.default_action());
+            engine.handle_player_action(pid.clone(), action);
         }
 
         engine.update_game_state();
@@ -389,7 +401,24 @@ async fn run_game<G: GameAdapter>(
         match engine.get_game_result() {
             Some(r) => break r,
             None if current_tick >= MAX_TICKS => break EngineResult::NoWinner,
-            None => tokio::time::sleep(tick_rate).await,
+            None => {
+                // Publish the new state for the next tick, then account for
+                // our own cost. Finished games break above without publishing.
+                for (slot, link) in links.iter().enumerate() {
+                    if alive_set.contains(&player_ids[slot]) {
+                        adapter.push_state(link, current_tick, &engine, slot);
+                    }
+                }
+                if work_start.elapsed() > tick_period {
+                    overran_ticks += 1;
+                    tracing::debug!(
+                        current_tick,
+                        elapsed_ms = work_start.elapsed().as_millis(),
+                        period_ms = tick_period.as_millis(),
+                        "tick work overran its period"
+                    );
+                }
+            }
         }
     };
 
@@ -415,7 +444,7 @@ async fn run_game<G: GameAdapter>(
         .collect();
 
     let has_winner = matches!(final_result, EngineResult::Winner(_));
-    tracing::info!(has_winner, final_tick, "game finished");
+    tracing::info!(has_winner, final_tick, overran_ticks, "game finished");
 
     {
         let mut p = progress.lock().await;
