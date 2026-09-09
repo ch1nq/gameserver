@@ -33,6 +33,12 @@ pub struct AppState {
     pub api_token_manager: ApiTokenManager,
     pub registry_token_manager: RegistryTokenManager,
     pub registry_client: RegistryClient,
+    /// Host users type into `docker login/tag/push` (reachable from their
+    /// machine, e.g. `localhost:5001`). Deliberately separate from
+    /// `REGISTRY_SERVICE` (the JWT `aud`, which must match the registry's
+    /// `REGISTRY_AUTH_TOKEN_SERVICE`) and `REGISTRY_URL` (how this server
+    /// reaches the registry API over the compose network).
+    pub registry_public_host: String,
 }
 
 pub struct App {
@@ -53,10 +59,20 @@ impl App {
             .expect("GITHUB_CLIENT_SECRET should be provided");
         let private_key_pem = env::var("REGISTRY_PRIVATE_KEY")
             .expect("REGISTRY_PRIVATE_KEY must be set for registry authentication (RSA private key in PEM format)");
+        // JWT audience; must equal the registry's REGISTRY_AUTH_TOKEN_SERVICE
+        // (compose sets both to `registry:5001`).
         let registry_service =
-            env::var("REGISTRY_SERVICE").unwrap_or_else(|_| "achtung-registry.fly.dev".to_string());
+            env::var("REGISTRY_SERVICE").unwrap_or_else(|_| "registry:5001".to_string());
+        // How this server reaches the registry API. Defaults to the host's
+        // published port so `cargo run` outside compose works; compose
+        // overrides it to `http://registry:5001` for in-network DNS.
         let registry_url =
-            env::var("REGISTRY_URL").unwrap_or_else(|_| format!("https://{}", registry_service));
+            env::var("REGISTRY_URL").unwrap_or_else(|_| "http://localhost:5001".to_string());
+        // Host rendered into user-facing `docker login/tag/push` hints. Users
+        // run Docker on their own machine, so this is the externally reachable
+        // address (`localhost:5001`), never the in-network name.
+        let registry_public_host =
+            env::var("REGISTRY_PUBLIC_HOST").unwrap_or_else(|_| "localhost:5001".to_string());
 
         let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())?;
         let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())?;
@@ -80,6 +96,7 @@ impl App {
             api_token_manager: api_token_manager.clone(),
             registry_token_manager: registry_token_manager.clone(),
             registry_client: registry_client.clone(),
+            registry_public_host,
         };
 
         let api_state = ApiState {

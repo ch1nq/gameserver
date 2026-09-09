@@ -70,6 +70,7 @@ struct ConfigFile {
     api_url: Option<String>,
     user_id: Option<UserId>,
     api_token: Option<String>,
+    registry_host: Option<String>,
 }
 
 /// Resolved runtime configuration (all fields required)
@@ -77,6 +78,7 @@ struct Config {
     api_url: String,
     user_id: UserId,
     api_token: String,
+    registry_host: String,
 }
 
 fn load_config() -> Result<Config, CliError> {
@@ -92,6 +94,7 @@ fn load_config() -> Result<Config, CliError> {
             api_url: None,
             user_id: None,
             api_token: None,
+            registry_host: None,
         },
         Err(e) => {
             return Err(CliError::Config(format!(
@@ -132,10 +135,18 @@ fn load_config() -> Result<Config, CliError> {
             ))
         })?;
 
+    // Host users push to (reachable from their machine). Defaults to the local
+    // compose registry's published port; override for any non-local registry.
+    let registry_host = std::env::var("ACHTUNG_REGISTRY_HOST")
+        .ok()
+        .or(config_file.registry_host)
+        .unwrap_or_else(|| "localhost:5001".to_string());
+
     Ok(Config {
         api_url,
         user_id,
         api_token,
+        registry_host,
     })
 }
 
@@ -198,12 +209,12 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                             format!("user-{}/{}", config.user_id, image_base);
                         error_msg.push_str("Tip: Push your image to the registry first:\n");
                         error_msg.push_str(&format!(
-                            "  docker tag your-image:tag achtung-registry.fly.dev/{}\n",
-                            image_with_namespace
+                            "  docker tag your-image:tag {}/{}\n",
+                            config.registry_host, image_with_namespace
                         ));
                         error_msg.push_str(&format!(
-                            "  docker push achtung-registry.fly.dev/{}",
-                            image_with_namespace
+                            "  docker push {}/{}",
+                            config.registry_host, image_with_namespace
                         ));
 
                         return Err(CliError::Api(ApiError::Validation(error_msg)));

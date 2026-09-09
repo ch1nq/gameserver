@@ -44,7 +44,7 @@ const MAX_TICKS: u64 = 100_000;
 
 /// Upper bound on per-agent setup (`Initialize` plus opening the action
 /// stream). A wedged agent fails the match fast instead of hanging it before
-/// tick 0. 
+/// tick 0.
 pub(crate) const SETUP_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Buffer of spectator frames a lagging subscriber can fall behind before it is
