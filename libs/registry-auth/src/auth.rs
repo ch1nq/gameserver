@@ -21,7 +21,7 @@ use axum::{http::StatusCode, response::IntoResponse};
 pub struct RegistryAuthConfig {
     /// RSA private key in PEM format for signing JWT tokens
     private_key_pem: String,
-    /// Registry service name (e.g., "achtung-registry.fly.dev")
+    /// Registry service name (e.g., "registry:5001")
     pub registry_service: String,
     /// Key ID for JWT header (derived from public key)
     signing_key: String,
@@ -147,7 +147,7 @@ pub struct RegistryJwtToken {
 /// <https://docs.docker.com/reference/api/registry/auth/>
 #[derive(Debug, Deserialize)]
 pub struct TokenRequest {
-    /// The service that hosts the resource (e.g., "achtung-registry.fly.dev")
+    /// The service that hosts the resource (e.g., "registry:5001")
     service: String,
     /// Scope(s) for registry access. Can be specified multiple times in the query string.
     /// Each scope has format "type:name:actions" (e.g., "repository:user-123/myimage:push,pull")

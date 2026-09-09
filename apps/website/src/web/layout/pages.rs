@@ -114,6 +114,7 @@ pub fn settings<'a>(
 pub fn token_created(
     user_id: UserId,
     plaintext_token: String,
+    registry_host: &str,
     auth_session: &AuthSession,
 ) -> Markup {
     token_created_page(
@@ -123,7 +124,7 @@ pub fn token_created(
         html! {
             p class="font-medium mb-2" { "Docker login command:" }
             code class="text-xs" {
-                "docker login achtung-registry.fly.dev -u user-" (user_id) " -p " (plaintext_token)
+                "docker login " (registry_host) " -u user-" (user_id) " -p " (plaintext_token)
             }
         },
         auth_session,

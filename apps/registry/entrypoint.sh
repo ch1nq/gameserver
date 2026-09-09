@@ -5,7 +5,7 @@ set -e
 mkdir -p /certs
 
 # Write the public key from environment variable to file
-# This allows us to use Fly secrets instead of the [[files]] section
+# This allows us to inject the key via environment instead of mounting a file
 if [ -n "$REGISTRY_CERT" ]; then
     echo "Writing public key from REGISTRY_CERT to /certs/public.crt"
     # Use printf with %b to interpret \n escape sequences

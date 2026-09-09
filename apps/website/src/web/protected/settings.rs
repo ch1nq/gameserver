@@ -104,9 +104,14 @@ async fn create_deploy_token(
         .create_token(&user.id, &token_name)
         .await
     {
-        Ok(plaintext_token) => pages::token_created(user.id, plaintext_token.into(), &auth_session)
-            .render()
-            .into_response(),
+        Ok(plaintext_token) => pages::token_created(
+            user.id,
+            plaintext_token.into(),
+            &state.registry_public_host,
+            &auth_session,
+        )
+        .render()
+        .into_response(),
         Err(e) => {
             tracing::error!("Failed to create deploy token: {}", e);
             pages::settings(&auth_session, user, tokens, api_tokens)
