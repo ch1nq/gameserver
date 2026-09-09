@@ -3,13 +3,15 @@
 //! Unifies the arena defaults: both dimensions default to 1000² (previously
 //! `AchtungConfig::default()` was 1000x200 while `from_env()` defaulted to
 //! 1000x1000). `PORT` shares its *name* with the website via `env_names::PORT`
-//! but keeps its own default (`50051`).
+//! but keeps its own default (`50051`). Loading mirrors [`crate::website`]:
+//! one [`config::Environment`] source over a flat raw struct, semantic checks
+//! in [`RawGameHost::resolve`].
 
 use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::env_names;
+use crate::env_names::{self, ALL_ENV_VARS};
 use crate::error::ConfigError;
 
 pub const DEFAULT_GAME_HOST_PORT: u16 = 50051;
@@ -29,14 +31,19 @@ pub struct GameHostConfig {
     pub rust_log: String,
 }
 
+/// Flat deserialization target; snake_case fields bind their `SCREAMING` vars.
 #[derive(Debug, Deserialize)]
 struct RawGameHost {
+    /// Env: `PORT` (default `50051`).
     #[serde(default = "default_port")]
     port: u16,
+    /// Env: `ARENA_WIDTH` (default `1000`, must be > 0).
     #[serde(default = "default_width")]
     arena_width: u32,
+    /// Env: `ARENA_HEIGHT` (default `1000`, must be > 0).
     #[serde(default = "default_height")]
     arena_height: u32,
+    /// Env: `RUST_LOG` (default `achtung_host=info,arcadio=info,info`).
     #[serde(default = "default_log")]
     rust_log: String,
 }
@@ -56,84 +63,43 @@ fn default_log() -> String {
 
 impl GameHostConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
-        let map: HashMap<String, String> = std::env::vars().collect();
-        Self::from_map(map)
+        Self::from_map(std::env::vars().collect())
     }
 
     pub fn from_map(map: HashMap<String, String>) -> Result<Self, ConfigError> {
-        let mut b = config::Config::builder();
-        b = b
-            .set_default("port", i64::from(DEFAULT_GAME_HOST_PORT))
-            .map_err(ConfigError::from)?;
-        b = b
-            .set_default("arena_width", i64::from(DEFAULT_ARENA_WIDTH))
-            .map_err(ConfigError::from)?;
-        b = b
-            .set_default("arena_height", i64::from(DEFAULT_ARENA_HEIGHT))
-            .map_err(ConfigError::from)?;
-        b = b
-            .set_default("rust_log", default_log())
-            .map_err(ConfigError::from)?;
+        let snapshot = map.clone();
+        let raw: RawGameHost = config::Config::builder()
+            .add_source(
+                config::Environment::default()
+                    .try_parsing(true)
+                    .ignore_empty(true)
+                    .source(Some(map)),
+            )
+            .build()
+            .map_err(ConfigError::from)?
+            .try_deserialize()
+            .map_err(|e| map_serde_error(e, &snapshot))?;
+        raw.resolve()
+    }
+}
 
-        for (nested, flat) in [
-            ("port", env_names::PORT),
-            ("arena_width", env_names::ARENA_WIDTH),
-            ("arena_height", env_names::ARENA_HEIGHT),
-            ("rust_log", env_names::RUST_LOG),
-        ] {
-            if let Some(v) = map.get(flat) {
-                if v.is_empty() {
-                    continue;
-                }
-                b = b
-                    .set_override(nested, v.clone())
-                    .map_err(|e| ConfigError::invalid(flat, v.clone(), e.to_string()))?;
-            }
-        }
-
-        let built = b.build().map_err(ConfigError::from)?;
-        let raw: RawGameHost = built.try_deserialize().map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("arena_width") {
-                ConfigError::invalid(
-                    env_names::ARENA_WIDTH,
-                    map.get(env_names::ARENA_WIDTH).cloned().unwrap_or_default(),
-                    msg,
-                )
-            } else if msg.contains("arena_height") {
-                ConfigError::invalid(
-                    env_names::ARENA_HEIGHT,
-                    map.get(env_names::ARENA_HEIGHT)
-                        .cloned()
-                        .unwrap_or_default(),
-                    msg,
-                )
-            } else if msg.contains("port") {
-                ConfigError::invalid(
-                    env_names::PORT,
-                    map.get(env_names::PORT).cloned().unwrap_or_default(),
-                    msg,
-                )
-            } else {
-                ConfigError::Config(e)
-            }
-        })?;
-
-        if raw.port == 0 {
+impl RawGameHost {
+    fn resolve(self) -> Result<GameHostConfig, ConfigError> {
+        if self.port == 0 {
             return Err(ConfigError::invalid(
                 env_names::PORT,
                 "0",
                 "must be a non-zero port",
             ));
         }
-        if raw.arena_width == 0 {
+        if self.arena_width == 0 {
             return Err(ConfigError::invalid(
                 env_names::ARENA_WIDTH,
                 "0",
                 "must be at least 1",
             ));
         }
-        if raw.arena_height == 0 {
+        if self.arena_height == 0 {
             return Err(ConfigError::invalid(
                 env_names::ARENA_HEIGHT,
                 "0",
@@ -141,11 +107,33 @@ impl GameHostConfig {
             ));
         }
 
-        Ok(Self {
-            port: raw.port,
-            arena_width: raw.arena_width,
-            arena_height: raw.arena_height,
-            rust_log: raw.rust_log,
+        Ok(GameHostConfig {
+            port: self.port,
+            arena_width: self.arena_width,
+            arena_height: self.arena_height,
+            rust_log: self.rust_log,
         })
+    }
+}
+
+/// Recover the env var name from the message (see [`crate::website`]) — here
+/// the only possible keys are the four fields below.
+fn map_serde_error(e: config::ConfigError, map: &HashMap<String, String>) -> ConfigError {
+    let msg = e.to_string();
+    let key = msg
+        .rsplit('`')
+        .nth(1)
+        .or_else(|| msg.rsplit('"').nth(1))
+        .unwrap_or_default();
+    let found = ALL_ENV_VARS
+        .iter()
+        .copied()
+        .find(|var| var.eq_ignore_ascii_case(key));
+    match found {
+        Some(var) => {
+            let value = map.get(var).cloned().unwrap_or_default();
+            ConfigError::invalid(var, value, msg)
+        }
+        None => ConfigError::Config(e),
     }
 }

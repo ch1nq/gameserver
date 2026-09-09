@@ -4,10 +4,12 @@
 //! fail-fast [`ConfigError`]. All env var *names* live in [`env_names`] so the
 //! website, coordinator, game host, and CLI cannot drift apart.
 //!
-//! Built on the [`config`] crate + [`serde`]: defaults are layered in the
-//! builder, flat env vars override via dotted keys, and `try_deserialize`
-//! coerces `"50"` → `50`, `"true"` → `true`, etc. Tests use `from_map` with an
-//! explicit map so process env is never mutated.
+//! Built on the [`config`] crate + [`serde`]: declarative `File`/`Environment`
+//! sources layer defaults < file < env over flat raw structs (field attributes
+//! carry defaults and bindings), and `try_deserialize` coerces `"50"` → `50`,
+//! `"true"` → `true`, etc. Semantic validation lives in small `resolve`
+//! methods. Tests use `from_map` with an explicit map so process env is never
+//! mutated.
 
 pub mod cli;
 pub mod env_names;
@@ -15,7 +17,7 @@ pub mod error;
 pub mod game_host;
 pub mod website;
 
-pub use cli::{CliConfig, config_path};
+pub use cli::{CliConfig, CliFileParsed, config_path};
 pub use env_names::ALL_ENV_VARS;
 pub use error::ConfigError;
 pub use game_host::GameHostConfig;

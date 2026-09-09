@@ -64,3 +64,37 @@ fn cli_rejects_non_integer_user_id() {
         "{err}"
     );
 }
+
+#[test]
+fn cli_file_layer_fills_gaps_and_env_wins() {
+    use achtung_config::CliFileParsed;
+    let file = CliFileParsed {
+        api_url: Some("http://file".to_string()),
+        user_id: Some(3),
+        api_token: Some("file-token".to_string()),
+        registry_host: Some("file-host:5001".to_string()),
+    };
+    // File alone suffices; registry_host falls back to its default.
+    let bare = CliFileParsed {
+        registry_host: None,
+        ..file.clone()
+    };
+    let cfg = CliConfig::from_map_with_file(HashMap::new(), Some(bare)).unwrap();
+    assert_eq!(cfg.api_url, "http://file");
+    assert_eq!(cfg.user_id, 3);
+    assert_eq!(cfg.registry_host, "localhost:5001");
+
+    // Env overrides the file on every field it sets.
+    let m = HashMap::from([
+        (
+            env_names::ACHTUNG_API_URL.to_string(),
+            "http://env".to_string(),
+        ),
+        (env_names::ACHTUNG_USER_ID.to_string(), "9".to_string()),
+    ]);
+    let cfg = CliConfig::from_map_with_file(m, Some(file)).unwrap();
+    assert_eq!(cfg.api_url, "http://env");
+    assert_eq!(cfg.user_id, 9);
+    assert_eq!(cfg.api_token, "file-token");
+    assert_eq!(cfg.registry_host, "file-host:5001");
+}

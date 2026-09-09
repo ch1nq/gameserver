@@ -1,26 +1,23 @@
 //! Typed CLI configuration, sharing `ACHTUNG_*` name constants.
 //!
-//! Preserves the existing precedence: explicit env vars win, then
-//! `~/.config/achtung/config.toml` (or `$XDG_CONFIG_HOME`), then built-in
-//! defaults. Fail-fast with [`ConfigError`] instead of ad-hoc strings.
+//! Loading is declarative: an optional TOML file layer under an environment
+//! layer (env wins), deserialized once into [`RawCli`]. Precedence is source
+//! ordering — defaults < file < env — not hand-written merge code. Field
+//! `rename`s name the full env var, so errors and `.env.example` name the
+//! same thing; `alias`es accept the bare `config.toml` keys.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::env_names;
 use crate::error::ConfigError;
 
 pub const DEFAULT_REGISTRY_HOST: &str = "localhost:5001";
 
-/// Raw on-disk format (all fields optional).
-#[derive(Debug, Default, Deserialize)]
-struct CliFile {
-    api_url: Option<String>,
-    user_id: Option<i64>,
-    api_token: Option<String>,
-    registry_host: Option<String>,
+fn default_registry_host() -> String {
+    DEFAULT_REGISTRY_HOST.to_string()
 }
 
 /// Validated CLI runtime config (all fields resolved).
@@ -32,10 +29,24 @@ pub struct CliConfig {
     pub registry_host: String,
 }
 
+/// Flat deserialization target shared by the file and env layers.
+///
+/// Both layers speak bare `snake_case` keys — the TOML file natively, and env
+/// via `with_prefix("ACHTUNG")` stripping (`ACHTUNG_API_URL` → `api_url`) — so
+/// the crate merges them natively with env winning, and no field is ever seen
+/// twice under two spellings.
+#[derive(Debug, Deserialize)]
+struct RawCli {
+    api_url: Option<String>,
+    user_id: Option<i64>,
+    api_token: Option<String>,
+    #[serde(default = "default_registry_host")]
+    registry_host: String,
+}
+
 impl CliConfig {
     /// Load from process env + optional toml file (env wins).
     pub fn from_env_or_file() -> Result<Self, ConfigError> {
-        let map: HashMap<String, String> = std::env::vars().collect();
         let file = load_file().map_err(|e| {
             ConfigError::invalid(
                 env_names::ACHTUNG_API_URL,
@@ -43,7 +54,7 @@ impl CliConfig {
                 format!("failed to read CLI config file: {e}"),
             )
         })?;
-        Self::from_map_with_file(map, file)
+        Self::load(file.as_ref(), None)
     }
 
     /// Injectable variant for tests (no fs/env access).
@@ -51,77 +62,55 @@ impl CliConfig {
         map: HashMap<String, String>,
         file: Option<CliFileParsed>,
     ) -> Result<Self, ConfigError> {
-        // Build a `config` crate layer: file values as defaults, env as overrides.
-        let mut b = config::Config::builder();
-        if let Some(f) = &file {
-            if let Some(v) = &f.api_url {
-                b = b
-                    .set_default("api_url", v.clone())
-                    .map_err(ConfigError::from)?;
-            }
-            if let Some(v) = f.user_id {
-                b = b.set_default("user_id", v).map_err(ConfigError::from)?;
-            }
-            if let Some(v) = &f.api_token {
-                b = b
-                    .set_default("api_token", v.clone())
-                    .map_err(ConfigError::from)?;
-            }
-            if let Some(v) = &f.registry_host {
-                b = b
-                    .set_default("registry_host", v.clone())
-                    .map_err(ConfigError::from)?;
-            }
-        }
-        b = b
-            .set_default("registry_host", DEFAULT_REGISTRY_HOST)
-            .map_err(ConfigError::from)?;
+        Self::load(file.as_ref(), Some(map))
+    }
 
-        for (nested, flat) in [
-            ("api_url", env_names::ACHTUNG_API_URL),
-            ("user_id", env_names::ACHTUNG_USER_ID),
-            ("api_token", env_names::ACHTUNG_API_TOKEN),
-            ("registry_host", env_names::ACHTUNG_REGISTRY_HOST),
-        ] {
-            if let Some(v) = map.get(flat) {
-                if v.is_empty() {
-                    continue;
-                }
-                b = b
-                    .set_override(nested, v.clone())
-                    .map_err(|e| ConfigError::invalid(flat, v.clone(), e.to_string()))?;
-            }
-        }
+    /// Simple map-only parse (no file), used by unit tests.
+    pub fn from_map(map: HashMap<String, String>) -> Result<Self, ConfigError> {
+        Self::load(None, Some(map))
+    }
 
-        #[derive(Debug, Deserialize)]
-        struct Raw {
-            api_url: Option<String>,
-            user_id: Option<i64>,
-            api_token: Option<String>,
-            #[serde(default = "default_registry_host")]
-            registry_host: String,
-        }
-        fn default_registry_host() -> String {
-            DEFAULT_REGISTRY_HOST.to_string()
-        }
-
-        let built = b.build().map_err(ConfigError::from)?;
-        let raw: Raw = built.try_deserialize().map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("user_id") {
+    /// Defaults < TOML file < env, deserialized once into [`RawCli`].
+    fn load(
+        file: Option<&CliFileParsed>,
+        env: Option<HashMap<String, String>>,
+    ) -> Result<Self, ConfigError> {
+        let snapshot = env.clone().unwrap_or_default();
+        let mut builder = config::Config::builder();
+        if let Some(f) = file {
+            // Reuse the `File` source so precedence stays declarative: the
+            // parsed file content is re-encoded (empty doc when all `None`).
+            let toml_str = toml::to_string(f).map_err(|e| {
                 ConfigError::invalid(
-                    env_names::ACHTUNG_USER_ID,
-                    map.get(env_names::ACHTUNG_USER_ID)
-                        .cloned()
-                        .unwrap_or_default(),
-                    format!("must be an integer user id: {msg}"),
+                    env_names::ACHTUNG_API_URL,
+                    String::new(),
+                    format!("failed to encode CLI file config: {e}"),
                 )
-            } else {
-                ConfigError::Config(e)
-            }
-        })?;
+            })?;
+            builder =
+                builder.add_source(config::File::from_str(&toml_str, config::FileFormat::Toml));
+        }
+        builder = builder.add_source(
+            config::Environment::with_prefix("ACHTUNG")
+                .try_parsing(true)
+                .ignore_empty(true)
+                .source(env),
+        );
+        let raw: RawCli = builder
+            .build()
+            .map_err(ConfigError::from)?
+            .try_deserialize()
+            .map_err(|e| map_serde_error(e, &snapshot))?;
+        raw.resolve()
+    }
+}
 
-        let api_url = match raw.api_url.filter(|s| !s.trim().is_empty()) {
+impl RawCli {
+    /// Required-field checks with hints pointing at both configuration sites.
+    /// Everything the derive layer cannot express.
+    fn resolve(self) -> Result<CliConfig, ConfigError> {
+        let path = config_path();
+        let api_url = match self.api_url.filter(|s| !s.trim().is_empty()) {
             Some(s) => s,
             None => {
                 return Err(ConfigError::missing(
@@ -129,12 +118,12 @@ impl CliConfig {
                     format!(
                         "set {} or add api_url to {}",
                         env_names::ACHTUNG_API_URL,
-                        config_path().display()
+                        path.display()
                     ),
                 ));
             }
         };
-        let user_id = match raw.user_id {
+        let user_id = match self.user_id {
             Some(id) => id,
             None => {
                 return Err(ConfigError::missing(
@@ -142,12 +131,12 @@ impl CliConfig {
                     format!(
                         "set {} or add user_id to {}",
                         env_names::ACHTUNG_USER_ID,
-                        config_path().display()
+                        path.display()
                     ),
                 ));
             }
         };
-        let api_token = match raw.api_token.filter(|s| !s.trim().is_empty()) {
+        let api_token = match self.api_token.filter(|s| !s.trim().is_empty()) {
             Some(s) => s,
             None => {
                 return Err(ConfigError::missing(
@@ -155,27 +144,56 @@ impl CliConfig {
                     format!(
                         "set {} or add api_token to {}",
                         env_names::ACHTUNG_API_TOKEN,
-                        config_path().display()
+                        path.display()
                     ),
                 ));
             }
         };
-        Ok(Self {
+        Ok(CliConfig {
             api_url,
             user_id,
             api_token,
-            registry_host: raw.registry_host,
+            registry_host: self.registry_host,
         })
-    }
-
-    /// Simple map-only parse (no file), used by unit tests.
-    pub fn from_map(map: HashMap<String, String>) -> Result<Self, ConfigError> {
-        Self::from_map_with_file(map, None)
     }
 }
 
-/// Parsed file contents, exposed for `from_map_with_file` tests.
-#[derive(Debug, Clone)]
+/// Translate a load error back to the `ACHTUNG_*` name: messages carry the
+/// bare key (``for key `user_id` `` / `"user_id"`), and the four fields map
+/// 1:1 onto their env vars.
+fn map_serde_error(e: config::ConfigError, map: &HashMap<String, String>) -> ConfigError {
+    let msg = e.to_string();
+    let key = msg
+        .rsplit('`')
+        .nth(1)
+        .or_else(|| msg.rsplit('"').nth(1))
+        .unwrap_or_default();
+    let found = match key {
+        "api_url" => Some(env_names::ACHTUNG_API_URL),
+        "user_id" => Some(env_names::ACHTUNG_USER_ID),
+        "api_token" => Some(env_names::ACHTUNG_API_TOKEN),
+        "registry_host" => Some(env_names::ACHTUNG_REGISTRY_HOST),
+        _ => None,
+    };
+    match found {
+        Some(var) => {
+            let value = map.get(var).cloned().unwrap_or_default();
+            if msg.starts_with("missing configuration field") {
+                ConfigError::missing(
+                    var,
+                    format!("set {var} or add it to {}", config_path().display()),
+                )
+            } else {
+                ConfigError::invalid(var, value, msg)
+            }
+        }
+        None => ConfigError::Config(e),
+    }
+}
+
+/// On-disk `config.toml` shape (all fields optional); doubles as the file
+/// layer input, so the two can never drift apart.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CliFileParsed {
     pub api_url: Option<String>,
     pub user_id: Option<i64>,
@@ -194,14 +212,9 @@ fn load_file() -> Result<Option<CliFileParsed>, String> {
     let path = config_path();
     match std::fs::read_to_string(&path) {
         Ok(contents) => {
-            let f: CliFile = toml::from_str(&contents)
+            let f: CliFileParsed = toml::from_str(&contents)
                 .map_err(|e| format!("failed to parse {}: {e}", path.display()))?;
-            Ok(Some(CliFileParsed {
-                api_url: f.api_url,
-                user_id: f.user_id,
-                api_token: f.api_token,
-                registry_host: f.registry_host,
-            }))
+            Ok(Some(f))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("failed to read {}: {e}", path.display())),
