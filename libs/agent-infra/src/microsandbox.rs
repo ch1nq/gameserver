@@ -278,24 +278,43 @@ enum PortPublish {
     AgentRelay(IpAddr),
 }
 
+/// Per-machine inputs to `spawn_sandbox`.
+///
+/// Bundled so the shared spawn body stays under clippy's too-many-arguments
+/// lint. Role-specific values are resolved by `spawn_host` / `spawn_agent`
+/// before calling.
+struct SandboxSpawn<'a> {
+    name: MachineName,
+    host_port: u16,
+    guest_port: u16,
+    container_image: &'a ContainerImage,
+    env: &'a std::collections::HashMap<String, String>,
+    policy: NetworkPolicy,
+    publish: PortPublish,
+    private_ip: String,
+    agent_slot: Option<AgentSlot>,
+}
+
 impl MicrosandboxMachineProvider {
     /// Shared spawn body for host and agents. Role-specific inputs (name,
     /// ports, policy, publish mode, address) are resolved by the caller, so
     /// this function never branches on a role value.
-    #[allow(clippy::too_many_arguments)]
     async fn spawn_sandbox(
         &self,
         ctx: &MicrosandboxMatchContext,
-        name: MachineName,
-        host_port: u16,
-        guest_port: u16,
-        container_image: &ContainerImage,
-        env: &std::collections::HashMap<String, String>,
-        policy: NetworkPolicy,
-        publish: PortPublish,
-        private_ip: String,
-        agent_slot: Option<AgentSlot>,
+        spawn: SandboxSpawn<'_>,
     ) -> Result<MachineHandle, MachineError> {
+        let SandboxSpawn {
+            name,
+            host_port,
+            guest_port,
+            container_image,
+            env,
+            policy,
+            publish,
+            private_ip,
+            agent_slot,
+        } = spawn;
         let resolved = self.image_ref(container_image);
         let image = resolved.reference.clone();
         let token = resolved.token;
@@ -547,17 +566,19 @@ impl MachineProvider for MicrosandboxMachineProvider {
         let policy = self.policy_for_host(ctx.layout)?;
         self.spawn_sandbox(
             ctx,
-            name,
-            host_port,
-            config.grpc_port,
-            &config.container_image,
-            &config.env,
-            policy,
-            PortPublish::HostLoopback,
-            // Consumer-relative addressing: the coordinator reads the host
-            // from the host itself.
-            Ipv4Addr::LOCALHOST.to_string(),
-            None,
+            SandboxSpawn {
+                name,
+                host_port,
+                guest_port: config.grpc_port,
+                container_image: &config.container_image,
+                env: &config.env,
+                policy,
+                publish: PortPublish::HostLoopback,
+                // Consumer-relative addressing: the coordinator reads the host
+                // from the host itself.
+                private_ip: Ipv4Addr::LOCALHOST.to_string(),
+                agent_slot: None,
+            },
         )
         .await
     }
@@ -581,16 +602,18 @@ impl MachineProvider for MicrosandboxMachineProvider {
         let policy = self.policy_for_agent()?;
         self.spawn_sandbox(
             ctx,
-            name,
-            host_port,
-            config.grpc_port,
-            &config.container_image,
-            &config.env,
-            policy,
-            PortPublish::AgentRelay(self.config.host_bind),
-            // The game host reads agents from inside a guest, via the host relay.
-            HOST_INTERNAL.to_string(),
-            Some(config.slot),
+            SandboxSpawn {
+                name,
+                host_port,
+                guest_port: config.grpc_port,
+                container_image: &config.container_image,
+                env: &config.env,
+                policy,
+                publish: PortPublish::AgentRelay(self.config.host_bind),
+                // The game host reads agents from inside a guest, via the host relay.
+                private_ip: HOST_INTERNAL.to_string(),
+                agent_slot: Some(config.slot),
+            },
         )
         .await
     }

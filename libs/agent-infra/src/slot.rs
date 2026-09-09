@@ -1,11 +1,9 @@
-//! Typed match slots: the game host is not slot 0 of anything.
+//! Typed match slots separating the game host from agents.
 //!
-//! Previously every spawn took a raw `slot: u8` with `0 == host`, `1+ ==
-//! agents`, forcing each backend to re-check `slot == 0`, `slot >= num_slots`
-//! and `num_slots > 1` at every use site. Now the role is in the type:
-//! [`AgentSlot`] can only name an agent, and [`MatchLayout`] is validated once
-//! in `init_match`, so backends offer `spawn_host` / `spawn_agent` with no
-//! role branch left to get wrong.
+//! [`AgentSlot`] names one agent by 0-based index; the host has no slot and is
+//! spawned through a dedicated host path. [`MatchLayout`] validates the agent
+//! count once in `init_match`, so backends offer `spawn_host` / `spawn_agent`
+//! with no role branch left to get wrong.
 
 use std::num::NonZeroU8;
 use std::ops::RangeInclusive;
