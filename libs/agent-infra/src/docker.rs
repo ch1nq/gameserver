@@ -4,7 +4,8 @@
 //! shared user-defined network so the coordinator (running in the website
 //! container) can reach them by container name via Docker's embedded DNS.
 //!
-//! Addressing: each container is named `{prefix}{match}-slot-{n}` and that name
+//! Addressing: the host container is named `{prefix}{match}-host` and each
+//! agent `{prefix}{match}-agent-{n}` (0-based), and that name
 //! is used as its `private_ip`, so the coordinator dials `http://{name}:50051`
 //! (game host) / `{name}:50052` (agents), resolved on the shared network.
 //!
@@ -154,7 +155,7 @@ impl DockerMachineProvider {
         &self,
         ctx: &DockerMatchContext,
         name: String,
-        raw_slot: u8,
+        agent_slot: Option<AgentSlot>,
         image: &ContainerImage,
         env: &std::collections::HashMap<String, String>,
     ) -> Result<MachineHandle, MachineError> {
@@ -192,7 +193,7 @@ impl DockerMachineProvider {
             match_id = ctx.match_id,
             container = name,
             image = %image,
-            slot = raw_slot,
+            agent_slot = agent_slot.map(|s| s.index()),
             "Spawned Docker container"
         );
 
@@ -209,11 +210,11 @@ impl DockerMachineProvider {
 }
 
 fn host_container_name(prefix: &str, match_id: &str) -> String {
-    format!("{prefix}{match_id}-slot-0")
+    format!("{prefix}{match_id}-host")
 }
 
 fn agent_container_name(prefix: &str, match_id: &str, slot: AgentSlot) -> String {
-    format!("{prefix}{match_id}-slot-{}", slot.raw_slot())
+    format!("{prefix}{match_id}-agent-{}", slot.index())
 }
 
 #[async_trait::async_trait]
@@ -239,7 +240,7 @@ impl MachineProvider for DockerMachineProvider {
         config: HostSpawnConfig,
     ) -> Result<MachineHandle, MachineError> {
         let name = host_container_name(&self.config.name_prefix, &ctx.match_id);
-        self.spawn_inner(ctx, name, 0, &config.container_image, &config.env)
+        self.spawn_inner(ctx, name, None, &config.container_image, &config.env)
             .await
     }
 
@@ -255,10 +256,15 @@ impl MachineProvider for DockerMachineProvider {
                 ctx.layout.num_agents()
             )));
         }
-        let raw = config.slot.raw_slot();
         let name = agent_container_name(&self.config.name_prefix, &ctx.match_id, config.slot);
-        self.spawn_inner(ctx, name, raw, &config.container_image, &config.env)
-            .await
+        self.spawn_inner(
+            ctx,
+            name,
+            Some(config.slot),
+            &config.container_image,
+            &config.env,
+        )
+        .await
     }
 
     async fn destroy(

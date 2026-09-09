@@ -14,7 +14,7 @@ use crate::MachineError;
 
 /// 0-based agent index. The host is unrepresentable here by construction.
 ///
-/// The on-the-wire slot number (`*-slot-N` names, `base + N` ports) is
+/// The on-the-wire slot number (`base + N` relay ports) is
 /// [`Self::raw_slot`]: `index + 1`. Slot 0 is always the game host and never
 /// surfaces as a value of this type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

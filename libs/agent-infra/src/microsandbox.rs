@@ -8,14 +8,14 @@
 //! coordinator (host process)
 //!     |  127.0.0.1:{base+0}
 //!     v
-//! game host sandbox (slot 0)
+//! game host sandbox (`{match}-host`)
 //!     |  host.microsandbox.internal:{base+n}
 //!     v
-//! agent n sandbox (slot n)
+//! agent n sandbox (`{match}-agent-{n}`, 0-based)
 //! ```
 //!
-//! Slot 0 gets DNS plus host access narrowed to the agent relay ports. Agent
-//! slots get deny-by-default egress with no rules.
+//! The host gets DNS plus host access narrowed to the agent relay ports. Agent
+//! sandboxes get deny-by-default egress with no rules.
 //!
 //! # Load-bearing details
 //!
@@ -281,7 +281,7 @@ enum PortPublish {
 impl MicrosandboxMachineProvider {
     /// Shared spawn body for host and agents. Role-specific inputs (name,
     /// ports, policy, publish mode, address) are resolved by the caller, so
-    /// this function never branches on a slot value.
+    /// this function never branches on a role value.
     #[allow(clippy::too_many_arguments)]
     async fn spawn_sandbox(
         &self,
@@ -294,7 +294,7 @@ impl MicrosandboxMachineProvider {
         policy: NetworkPolicy,
         publish: PortPublish,
         private_ip: String,
-        raw_slot: u8,
+        agent_slot: Option<AgentSlot>,
     ) -> Result<MachineHandle, MachineError> {
         let resolved = self.image_ref(container_image);
         let image = resolved.reference.clone();
@@ -377,7 +377,7 @@ impl MicrosandboxMachineProvider {
             match_id = %ctx.match_id,
             sandbox = %name,
             image,
-            slot = raw_slot,
+            agent_slot = agent_slot.map(|s| s.index()),
             private_ip,
             host_port,
             guest_port,
@@ -420,15 +420,15 @@ impl MicrosandboxMachineProvider {
     }
 }
 
-/// Sandbox name for the game host (raw slot 0). Also the reaper's match key,
+/// Sandbox name for the game host. Also the reaper's match key,
 /// so it must carry [`NAME_PREFIX`].
 fn host_sandbox_name(match_id: &str) -> MachineName {
-    MachineName(format!("{NAME_PREFIX}{match_id}-slot-0"))
+    MachineName(format!("{NAME_PREFIX}{match_id}-host"))
 }
 
-/// Sandbox name for an agent. Also the reaper's match key.
+/// Sandbox name for an agent (0-based index). Also the reaper's match key.
 fn agent_sandbox_name(match_id: &str, slot: AgentSlot) -> MachineName {
-    MachineName(format!("{NAME_PREFIX}{match_id}-slot-{}", slot.raw_slot()))
+    MachineName(format!("{NAME_PREFIX}{match_id}-agent-{}", slot.index()))
 }
 
 /// Sandbox name, distinct from match ids and image refs.
@@ -557,7 +557,7 @@ impl MachineProvider for MicrosandboxMachineProvider {
             // Consumer-relative addressing: the coordinator reads the host
             // from the host itself.
             Ipv4Addr::LOCALHOST.to_string(),
-            0,
+            None,
         )
         .await
     }
@@ -576,7 +576,6 @@ impl MachineProvider for MicrosandboxMachineProvider {
                 ctx.layout.num_agents()
             )));
         }
-        let raw = config.slot.raw_slot();
         let name = agent_sandbox_name(ctx.match_id.as_str(), config.slot);
         let host_port = self.host_port_for_agent(config.slot);
         let policy = self.policy_for_agent()?;
@@ -591,7 +590,7 @@ impl MachineProvider for MicrosandboxMachineProvider {
             PortPublish::AgentRelay(self.config.host_bind),
             // The game host reads agents from inside a guest, via the host relay.
             HOST_INTERNAL.to_string(),
-            raw,
+            Some(config.slot),
         )
         .await
     }
@@ -702,9 +701,9 @@ mod tests {
     #[test]
     fn sandbox_names_carry_the_reaper_prefix() {
         let host = host_sandbox_name("abc123");
-        assert_eq!(host.as_str(), "achtung-abc123-slot-0");
+        assert_eq!(host.as_str(), "achtung-abc123-host");
         let agent = agent_sandbox_name("abc123", AgentSlot::from_index(1).unwrap());
-        assert_eq!(agent.as_str(), "achtung-abc123-slot-2");
+        assert_eq!(agent.as_str(), "achtung-abc123-agent-1");
         // The reaper filters on this prefix; renaming here silently stops
         // orphan collection.
         assert!(host.as_str().starts_with(NAME_PREFIX));
