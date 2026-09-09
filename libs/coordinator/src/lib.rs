@@ -512,25 +512,20 @@ pub struct AgentPlacement {
 }
 
 /// Errors that can occur during coordination
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CoordinatorError {
-    Database(Box<dyn std::error::Error + Send + Sync>),
-    MachineSpawn(MachineError),
-    DeployToken(Box<dyn std::error::Error + Send + Sync>),
+    #[error("Database error: {0}")]
+    Database(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("Failed to spawn machine: {0}")]
+    MachineSpawn(#[from] MachineError),
+
+    #[error("Failed to get deploy token: {0}")]
+    DeployToken(#[source] Box<dyn std::error::Error + Send + Sync>),
+
+    #[error("Connection error: {0}")]
     Connection(String),
+
+    #[error("Game host error: {0}")]
     GameHost(String),
 }
-
-impl std::fmt::Display for CoordinatorError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CoordinatorError::Database(e) => write!(f, "Database error: {}", e),
-            CoordinatorError::MachineSpawn(e) => write!(f, "Failed to spawn machine: {}", e),
-            CoordinatorError::DeployToken(e) => write!(f, "Failed to get deploy token: {}", e),
-            CoordinatorError::Connection(e) => write!(f, "Connection error: {}", e),
-            CoordinatorError::GameHost(e) => write!(f, "Game host error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for CoordinatorError {}

@@ -35,7 +35,7 @@ pub struct ApiTokenManager {
 #[derive(Debug, thiserror::Error)]
 pub enum ApiTokenError {
     #[error("Database error: {0}")]
-    DatabaseError(sqlx::Error),
+    DatabaseError(#[from] sqlx::Error),
 
     #[error("Token limit reached")]
     TokenLimitReached,
@@ -44,7 +44,7 @@ pub enum ApiTokenError {
     TokenNotFound,
 
     #[error("Failed to hash token: {0}")]
-    FailedToHashToken(String),
+    FailedToHashToken(#[from] bcrypt::BcryptError),
 
     #[error("Invalid credentials")]
     InvalidCredentials,
@@ -72,8 +72,7 @@ impl ApiTokenManager {
 
         let plaintext_token = PlaintextToken::generate();
 
-        let token_hash = bcrypt::hash(plaintext_token.as_ref(), BCRYPT_COST)
-            .map_err(|e| ApiTokenError::FailedToHashToken(e.to_string()))?;
+        let token_hash = bcrypt::hash(plaintext_token.as_ref(), BCRYPT_COST)?;
 
         sqlx::query!(
             r#"
@@ -86,15 +85,13 @@ impl ApiTokenManager {
             name.as_ref(),
         )
         .fetch_one(&self.db_pool)
-        .await
-        .map_err(ApiTokenError::DatabaseError)?;
-
+        .await?;
         Ok(plaintext_token)
     }
 
     /// List all active (non-revoked) API tokens for a user.
     pub async fn list_tokens(&self, user_id: &UserId) -> Result<Vec<ApiToken>, ApiTokenError> {
-        sqlx::query_as!(
+        Ok(sqlx::query_as!(
             ApiToken,
             r#"
             SELECT id, user_id, name, token_hash, created_at, revoked_at
@@ -105,8 +102,7 @@ impl ApiTokenManager {
             user_id
         )
         .fetch_all(&self.db_pool)
-        .await
-        .map_err(ApiTokenError::DatabaseError)
+        .await?)
     }
 
     /// Revoke an API token (soft delete).
@@ -125,8 +121,7 @@ impl ApiTokenManager {
             user_id,
         )
         .execute(&self.db_pool)
-        .await
-        .map_err(ApiTokenError::DatabaseError)?;
+        .await?;
 
         if result.rows_affected() == 0 {
             return Err(ApiTokenError::TokenNotFound);
@@ -161,8 +156,7 @@ impl ApiTokenManager {
             user_id
         )
         .fetch_one(&self.db_pool)
-        .await
-        .map_err(ApiTokenError::DatabaseError)?
+        .await?
         .count;
 
         Ok(count)
