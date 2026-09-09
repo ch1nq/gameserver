@@ -48,7 +48,6 @@ services:
       HOST: "0.0.0.0"
       PORT: "3000"
       DATABASE_URL: postgresql://arcadio:arcadio@postgres:5432/arcadio
-      TOURNAMENT_MANAGER_URL: http://overseer:50051
       ENABLE_COORDINATOR: true
       REGISTRY_SERVICE: registry:5001
       REGISTRY_URL: http://registry:5001

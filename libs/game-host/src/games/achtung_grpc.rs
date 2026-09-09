@@ -69,9 +69,25 @@ pub struct AchtungGrpc {
 }
 
 impl AchtungGrpc {
-    /// Build an adapter, reading arena dimensions from `ARENA_WIDTH` /
+    /// Build an adapter from an explicit engine config (preferred).
+    ///
+    /// The `achtung-host` binary builds this from typed [`GameHostConfig`]
+    /// (see the `achtung-config` crate), whose env var *names* are shared via
+    /// `env_names` (#11) — so this constructor is the drift-free path.
+    pub fn new(config: AchtungConfig) -> Self {
+        Self { config }
+    }
+
+    /// Legacy helper: read arena dimensions from `ARENA_WIDTH` /
     /// `ARENA_HEIGHT` (default 1000² if unset/unparseable). Edge wrapping off.
+    ///
+    /// Prefer `AchtungGrpc::new` with a typed config from the `achtung-config`
+    /// crate (`GameHostConfig`), which validates fail-fast with one error and
+    /// shares name constants. Kept for back-compat and examples.
     pub fn from_env() -> Self {
+        // Names intentionally match `achtung_config::env_names::ARENA_*`.
+        const ARENA_WIDTH: &str = "ARENA_WIDTH";
+        const ARENA_HEIGHT: &str = "ARENA_HEIGHT";
         let dim = |key: &str| {
             std::env::var(key)
                 .ok()
@@ -81,8 +97,8 @@ impl AchtungGrpc {
         };
         Self {
             config: AchtungConfig {
-                arena_width: dim("ARENA_WIDTH"),
-                arena_height: dim("ARENA_HEIGHT"),
+                arena_width: dim(ARENA_WIDTH),
+                arena_height: dim(ARENA_HEIGHT),
                 edge_wrapping: false,
             },
         }

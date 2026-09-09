@@ -8,6 +8,7 @@ name = "achtung-host"
 path = "src/main.rs"
 
 [dependencies]
+achtung-config = { path = "../../libs/config", package = "achtung-config" }
 arcadio = { version = "0.1.1", path = "../../libs/game-host" }
 tokio = { workspace = true }
 tracing = { workspace = true }

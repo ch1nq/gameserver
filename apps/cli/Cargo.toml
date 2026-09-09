@@ -9,12 +9,10 @@ name = "achtung"
 path = "src/main.rs"
 
 [dependencies]
+achtung-config = { path = "../../libs/config", package = "achtung-config" }
 api-types = { path = "../../libs/api-types", package = "achtung-api-types", features = ["client"] }
 common = { path = "../../libs/common" }
 clap = { workspace = true }
-dirs = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-toml = { workspace = true }

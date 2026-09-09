@@ -15,7 +15,7 @@ impl Default for AchtungConfig {
     fn default() -> Self {
         Self {
             arena_width: 1000,
-            arena_height: 200,
+            arena_height: 1000,
             edge_wrapping: false,
         }
     }

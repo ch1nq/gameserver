@@ -1,11 +1,10 @@
 mod client;
 
+use achtung_config::CliConfig;
 use api_types::{CreateAgentRequest, GameApi};
 use clap::{Parser, Subcommand};
 use client::{ApiClient, ApiError, CliError};
-use common::{AgentId, UserId};
-use serde::Deserialize;
-use std::path::PathBuf;
+use common::AgentId;
 
 #[derive(Parser)]
 #[command(name = "achtung", about = "Achtung platform CLI")]
@@ -64,93 +63,14 @@ enum RegistryCommands {
     Images,
 }
 
-/// Raw config file format (all fields optional)
-#[derive(Deserialize)]
-struct ConfigFile {
-    api_url: Option<String>,
-    user_id: Option<UserId>,
-    api_token: Option<String>,
-    registry_host: Option<String>,
+/// Single entry-point parse: env vars (`ACHTUNG_*`, see `env_names`) win over
+/// `~/.config/achtung/config.toml`, via the shared `achtung-config` crate.
+/// Fail-fast with one human-readable [`CliError::Config`].
+fn load_config() -> Result<CliConfig, CliError> {
+    Ok(CliConfig::from_env_or_file()?)
 }
 
-/// Resolved runtime configuration (all fields required)
-struct Config {
-    api_url: String,
-    user_id: UserId,
-    api_token: String,
-    registry_host: String,
-}
-
-fn load_config() -> Result<Config, CliError> {
-    let path = dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("achtung")
-        .join("config.toml");
-
-    let config_file: ConfigFile = match std::fs::read_to_string(&path) {
-        Ok(contents) => toml::from_str(&contents)
-            .map_err(|e| CliError::Config(format!("failed to parse {}: {}", path.display(), e)))?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => ConfigFile {
-            api_url: None,
-            user_id: None,
-            api_token: None,
-            registry_host: None,
-        },
-        Err(e) => {
-            return Err(CliError::Config(format!(
-                "failed to read {}: {}",
-                path.display(),
-                e
-            )));
-        }
-    };
-
-    // Apply env var overrides
-    let api_url = std::env::var("ACHTUNG_API_URL")
-        .ok()
-        .or(config_file.api_url)
-        .ok_or_else(|| {
-            CliError::Config(format!(
-                "api_url not set. Set ACHTUNG_API_URL or add api_url to {}",
-                path.display()
-            ))
-        })?;
-    let user_id = std::env::var("ACHTUNG_USER_ID")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .or(config_file.user_id)
-        .ok_or_else(|| {
-            CliError::Config(format!(
-                "user_id not set. Set ACHTUNG_USER_ID or add user_id to {}",
-                path.display()
-            ))
-        })?;
-    let api_token = std::env::var("ACHTUNG_API_TOKEN")
-        .ok()
-        .or(config_file.api_token)
-        .ok_or_else(|| {
-            CliError::Config(format!(
-                "api_token not set. Set ACHTUNG_API_TOKEN or add api_token to {}",
-                path.display()
-            ))
-        })?;
-
-    // Host users push to (reachable from their machine). Defaults to the local
-    // compose registry's published port; override for any non-local registry.
-    let registry_host = std::env::var("ACHTUNG_REGISTRY_HOST")
-        .ok()
-        .or(config_file.registry_host)
-        .unwrap_or_else(|| "localhost:5001".to_string());
-
-    Ok(Config {
-        api_url,
-        user_id,
-        api_token,
-        registry_host,
-    })
-}
-
-fn build_client(config: &Config) -> Result<ApiClient, CliError> {
+fn build_client(config: &CliConfig) -> Result<ApiClient, CliError> {
     Ok(ApiClient::new(
         config.api_url.clone(),
         config.user_id,

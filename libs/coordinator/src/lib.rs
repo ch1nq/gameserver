@@ -287,13 +287,14 @@ impl<P: MachineProvider> GameCoordinator<P> {
         &self,
         ctx: &P::MatchContext,
     ) -> Result<MachineHandle, CoordinatorError> {
-        // Game host is on a public registry, no copy or token needed
+        // Game host is on a public registry, no copy or token needed.
+        // No env injection: player count comes from `agents.len()` and tick
+        // rate from `StartGameRequest::config` — the old NUM_PLAYERS /
+        // TICK_RATE_MS env vars were never read and are removed (#27).
         let config = HostSpawnConfig::new(
             ContainerImage::Public(self.config.game_host_image.clone()),
             self.config.game_host_grpc_port,
-        )
-        .env("NUM_PLAYERS", self.config.agents_per_game.to_string())
-        .env("TICK_RATE_MS", self.config.tick_rate_ms.to_string());
+        );
 
         self.machine_provider
             .spawn_host(ctx, config)

@@ -1,23 +1,31 @@
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
+use achtung_config::WebsiteConfig;
 use website::web::App;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Single entry-point parse: every env var is validated here with a
+    // fail-fast, human-readable error. No `env::var(...).expect()` deeper in
+    // `App::new` / `serve`.
+    let config = match WebsiteConfig::from_env() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("configuration error: {e}");
+            std::process::exit(1);
+        }
+    };
+
     tracing_subscriber::registry()
-        .with(EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(
-            |_| {
-                "website=debug,achtung-core=debug,coordinator=debug,achtung-api=debug,agent_infra=debug,axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug,registry-auth=debug"
-                    .into()
-            },
-        )))
+        .with(EnvFilter::new(config.rust_log.clone()))
         .with(tracing_subscriber::fmt::layer())
         .try_init()?;
 
-    // Fetch address and port from environment variables.
-    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
-    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse().unwrap();
+    let addr = config.server.addr().map_err(|e| {
+        eprintln!("configuration error: {e}");
+        e
+    })?;
+    let coordinator = config.coordinator.clone();
 
-    App::new().await?.serve(addr).await
+    App::new(&config).await?.serve(addr, coordinator).await
 }

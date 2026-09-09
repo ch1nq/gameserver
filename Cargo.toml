@@ -52,6 +52,7 @@ trait-variant = "0.1"
 base32 = "0.5"
 base64 = "0.22"
 clap = { version = "4.4", features = ["derive", "env"] }
+config = "0.15"
 futures-util = "0.3"
 maud = { version = "0.27", features = ["axum"] }
 rand = "0.9"
