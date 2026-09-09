@@ -57,6 +57,7 @@ dependencies = [
  "dirs",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "toml",
 ]
@@ -1301,6 +1302,7 @@ dependencies = [
  "common",
  "prost",
  "rand 0.9.2",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tonic",

@@ -8,7 +8,11 @@ pub struct AgentManager {
     db_pool: PgPool,
 }
 
-type AgentManagerError = Box<dyn std::error::Error>;
+#[derive(Debug, thiserror::Error)]
+pub enum AgentManagerError {
+    #[error("Database error: {0}")]
+    Database(#[from] sqlx::Error),
+}
 
 impl AgentManager {
     pub fn new(db_pool: PgPool) -> Self {
@@ -151,7 +155,7 @@ impl AgentManager {
     pub async fn get_random_active_agents(
         &self,
         count: usize,
-    ) -> Result<Vec<AgentInfo>, sqlx::Error> {
+    ) -> Result<Vec<AgentInfo>, AgentManagerError> {
         let agents = sqlx::query_as::<_, (i64, i64, String)>(
             r#"
             SELECT id, user_id, image_url

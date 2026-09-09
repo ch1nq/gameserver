@@ -36,7 +36,7 @@ impl RegistryAuthConfig {
     pub fn new(
         private_key_pem: String,
         registry_service: String,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, RegistryConfigError> {
         let signing_key = key_id_from_pem(&private_key_pem)?;
         let public_key_pem = public_key_pem_from_private(&private_key_pem)?;
         Ok(Self {
@@ -48,8 +48,18 @@ impl RegistryAuthConfig {
     }
 }
 
+/// Errors that can occur while building [`RegistryAuthConfig`] from PEM input.
+#[derive(Debug, thiserror::Error)]
+pub enum RegistryConfigError {
+    #[error("invalid RSA private key: {0}")]
+    InvalidPrivateKey(#[from] rsa::pkcs8::Error),
+
+    #[error("failed to encode RSA public key: {0}")]
+    PublicKeyEncoding(#[from] rsa::pkcs8::spki::Error),
+}
+
 /// Derive the SPKI public key PEM from a PKCS#8 private key PEM.
-fn public_key_pem_from_private(pem: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn public_key_pem_from_private(pem: &str) -> Result<String, RegistryConfigError> {
     use rsa::pkcs8::{EncodePublicKey, LineEnding};
     let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(pem)?;
     let public_key = RsaPublicKey::from(&private_key);
@@ -501,7 +511,7 @@ where
 /// 3. Computing SHA256 hash
 /// 4. Truncating to 240 bits (30 bytes)
 /// 5. Base32 encoding and formatting as colon-separated 4-character groups
-pub fn key_id_from_pem(pem: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn key_id_from_pem(pem: &str) -> Result<String, RegistryConfigError> {
     let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(pem)?;
     let public_key = RsaPublicKey::from(&private_key);
 

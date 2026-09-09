@@ -105,21 +105,12 @@ impl RegistryClient {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum RegistryError {
+    #[error("Failed to connect to registry: {0}")]
     Connection(String),
+    #[error("Registry API error: {0}")]
     Api(String),
+    #[error("Failed to parse registry response: {0}")]
     Parse(String),
 }
-
-impl std::fmt::Display for RegistryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RegistryError::Connection(e) => write!(f, "Failed to connect to registry: {}", e),
-            RegistryError::Api(e) => write!(f, "Registry API error: {}", e),
-            RegistryError::Parse(e) => write!(f, "Failed to parse registry response: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for RegistryError {}

@@ -6,6 +6,7 @@
 pub mod docker;
 pub mod microsandbox;
 pub mod reaper;
+pub mod slot;
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -19,6 +20,7 @@ pub use microsandbox::{
     MicrosandboxMachineProvider, MicrosandboxMachineProviderConfig, ensure_runtime_installed,
 };
 pub use reaper::{Reaper, ReaperConfig};
+pub use slot::{AgentSlot, MatchLayout};
 
 #[derive(Debug, Clone)]
 pub enum ContainerImage {
@@ -29,24 +31,16 @@ pub enum ContainerImage {
     },
 }
 
-/// Configuration for spawning a single machine within a match.
+/// Configuration for spawning the game host within a match.
 ///
-/// The `slot` determines the machine's role and network address within the match:
-/// - slot 0: game host
-/// - slot 1+: agents (in order)
-///
-/// Each backend derives the machine's address from the slot number
-/// deterministically, so no mutable state is needed to track allocations.
+/// The host has no slot: its role is in the type of this struct and in the
+/// [`MachineProvider::spawn_host`] method that takes it.
 #[derive(Debug, Clone)]
-pub struct SpawnConfig {
+pub struct HostSpawnConfig {
     /// Image to spawn
     pub container_image: ContainerImage,
     /// Environment variables to set in the container
     pub env: HashMap<String, String>,
-    /// Slot index: 0 = game host, 1+ = agents.
-    ///
-    /// Used by backends that assign addresses deterministically per slot.
-    pub slot: u8,
     /// Port the workload listens on *inside* the machine.
     ///
     /// Backends that relay through a published host port need this to map
@@ -57,10 +51,52 @@ pub struct SpawnConfig {
     pub grpc_port: u16,
 }
 
-impl SpawnConfig {
-    /// Create a new SpawnConfig with the given container image, slot, and
+impl HostSpawnConfig {
+    /// Create a new host spawn config with the given image and in-machine port.
+    pub fn new(container_image: ContainerImage, grpc_port: u16) -> Self {
+        Self {
+            container_image,
+            env: HashMap::new(),
+            grpc_port,
+        }
+    }
+
+    /// Add an environment variable
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.insert(key.into(), value.into());
+        self
+    }
+
+    /// Add multiple environment variables
+    pub fn with_env(mut self, env: HashMap<String, String>) -> Self {
+        self.env.extend(env);
+        self
+    }
+}
+
+/// Configuration for spawning a single agent within a match.
+///
+/// The agent's identity is an [`AgentSlot`] (0-based index), which can only be
+/// obtained from a [`MatchLayout`] — so an out-of-range slot or the host slot
+/// cannot be constructed here.
+#[derive(Debug, Clone)]
+pub struct AgentSpawnConfig {
+    /// Image to spawn
+    pub container_image: ContainerImage,
+    /// Environment variables to set in the container
+    pub env: HashMap<String, String>,
+    /// Which agent this is (0-based). Determines the machine's name and
+    /// network address deterministically.
+    pub slot: AgentSlot,
+    /// Port the workload listens on *inside* the machine. See
+    /// [`HostSpawnConfig::grpc_port`].
+    pub grpc_port: u16,
+}
+
+impl AgentSpawnConfig {
+    /// Create a new agent spawn config with the given image, slot, and
     /// in-machine listen port.
-    pub fn new(container_image: ContainerImage, slot: u8, grpc_port: u16) -> Self {
+    pub fn new(container_image: ContainerImage, slot: AgentSlot, grpc_port: u16) -> Self {
         Self {
             container_image,
             env: HashMap::new(),
@@ -92,8 +128,8 @@ pub struct MachineHandle {
     /// Address by which *this machine's consumer* reaches it — **not**
     /// necessarily the machine's own IP.
     ///
-    /// Who the consumer is depends on the slot: the coordinator dials the game
-    /// host, and the game host dials the agents. Backends are free to return
+    /// The consumer is fixed by role: the coordinator dials the game host,
+    /// and the game host dials the agents. Backends are free to return
     /// whatever each consumer needs.
     pub private_ip: String,
     /// Port the consumer should dial on [`Self::private_ip`], when it differs
@@ -151,7 +187,7 @@ pub enum MachineError {
 ///
 /// Each game match follows this sequence:
 /// 1. `init_match` — allocate shared resources (network, bridge, etc.)
-/// 2. `spawn` × N — start individual machines within the match
+/// 2. `spawn_host` × 1 + `spawn_agent` × N — start machines within the match
 /// 3. `destroy` × N — stop individual machines
 /// 4. `cleanup_match` — release shared resources
 ///
@@ -161,30 +197,37 @@ pub enum MachineError {
 #[async_trait::async_trait]
 pub trait MachineProvider: Send + Sync + 'static {
     /// Backend-specific per-match context produced by `init_match` and
-    /// consumed by `spawn`, `destroy`, and `cleanup_match`.
+    /// consumed by `spawn_*`, `destroy`, and `cleanup_match`.
     type MatchContext: Send + Sync;
 
     /// Initialize shared resources for a match.
     ///
-    /// Called once before any `spawn` calls. Sets up networking and other
-    /// shared infrastructure for the match. `num_slots` is the total number of
-    /// machines the match will spawn (game host + agents); backends that
-    /// allocate per-slot resources up front need it because resources cannot
-    /// always be attached after machines start.
+    /// Called once before any `spawn_*` calls. Sets up networking and other
+    /// shared infrastructure for the match. `layout` is the validated match
+    /// shape (host + >=1 agent); backends that allocate per-agent resources up
+    /// front need it because resources cannot always be attached after machines
+    /// start. Port-range overflow is rejected here, not at spawn time.
     async fn init_match(
         &self,
         match_id: &str,
-        num_slots: u8,
+        layout: MatchLayout,
     ) -> Result<Self::MatchContext, MachineError>;
 
-    /// Spawn a single machine within an initialized match.
-    ///
-    /// `config.slot` determines the machine's role (0 = game host, 1+ = agents)
-    /// and is used by backends that assign addresses deterministically per slot.
-    async fn spawn(
+    /// Spawn the game host within an initialized match. Called exactly once.
+    async fn spawn_host(
         &self,
         ctx: &Self::MatchContext,
-        config: SpawnConfig,
+        config: HostSpawnConfig,
+    ) -> Result<MachineHandle, MachineError>;
+
+    /// Spawn a single agent within an initialized match.
+    ///
+    /// `config.slot` comes from the same [`MatchLayout`] passed to
+    /// `init_match`, so it is always in range.
+    async fn spawn_agent(
+        &self,
+        ctx: &Self::MatchContext,
+        config: AgentSpawnConfig,
     ) -> Result<MachineHandle, MachineError>;
 
     /// Destroy a single machine.
