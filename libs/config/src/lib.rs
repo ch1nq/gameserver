@@ -15,6 +15,7 @@ pub mod cli;
 pub mod env_names;
 pub mod error;
 pub mod game_host;
+mod support;
 pub mod website;
 
 pub use cli::{CliConfig, CliFileParsed, config_path};

@@ -13,12 +13,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::env_names;
 use crate::error::ConfigError;
+use crate::support::{serde_error_key, setting};
 
-pub const DEFAULT_REGISTRY_HOST: &str = "localhost:5001";
-
-fn default_registry_host() -> String {
-    DEFAULT_REGISTRY_HOST.to_string()
-}
+setting!(
+    DEFAULT_REGISTRY_HOST,
+    default_registry_host,
+    &str,
+    "localhost:5001"
+);
 
 /// Validated CLI runtime config (all fields resolved).
 #[derive(Debug, Clone)]
@@ -163,12 +165,7 @@ impl RawCli {
 /// 1:1 onto their env vars.
 fn map_serde_error(e: config::ConfigError, map: &HashMap<String, String>) -> ConfigError {
     let msg = e.to_string();
-    let key = msg
-        .rsplit('`')
-        .nth(1)
-        .or_else(|| msg.rsplit('"').nth(1))
-        .unwrap_or_default();
-    let found = match key {
+    let found = match serde_error_key(&msg) {
         "api_url" => Some(env_names::ACHTUNG_API_URL),
         "user_id" => Some(env_names::ACHTUNG_USER_ID),
         "api_token" => Some(env_names::ACHTUNG_API_TOKEN),

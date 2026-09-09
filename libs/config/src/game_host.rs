@@ -11,12 +11,19 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::env_names::{self, ALL_ENV_VARS};
+use crate::env_names;
 use crate::error::ConfigError;
+use crate::support::{map_serde_error, setting};
 
-pub const DEFAULT_GAME_HOST_PORT: u16 = 50051;
-pub const DEFAULT_ARENA_WIDTH: u32 = 1000;
-pub const DEFAULT_ARENA_HEIGHT: u32 = 1000;
+setting!(DEFAULT_GAME_HOST_PORT, default_port, u16, 50051);
+setting!(DEFAULT_ARENA_WIDTH, default_width, u32, 1000);
+setting!(DEFAULT_ARENA_HEIGHT, default_height, u32, 1000);
+setting!(
+    DEFAULT_GAME_HOST_LOG,
+    default_log,
+    &str,
+    "achtung_host=info,arcadio=info,info"
+);
 
 /// Validated game-host startup config.
 #[derive(Debug, Clone)]
@@ -46,19 +53,6 @@ struct RawGameHost {
     /// Env: `RUST_LOG` (default `achtung_host=info,arcadio=info,info`).
     #[serde(default = "default_log")]
     rust_log: String,
-}
-
-fn default_port() -> u16 {
-    DEFAULT_GAME_HOST_PORT
-}
-fn default_width() -> u32 {
-    DEFAULT_ARENA_WIDTH
-}
-fn default_height() -> u32 {
-    DEFAULT_ARENA_HEIGHT
-}
-fn default_log() -> String {
-    "achtung_host=info,arcadio=info,info".to_string()
 }
 
 impl GameHostConfig {
@@ -113,27 +107,5 @@ impl RawGameHost {
             arena_height: self.arena_height,
             rust_log: self.rust_log,
         })
-    }
-}
-
-/// Recover the env var name from the message (see [`crate::website`]) — here
-/// the only possible keys are the four fields below.
-fn map_serde_error(e: config::ConfigError, map: &HashMap<String, String>) -> ConfigError {
-    let msg = e.to_string();
-    let key = msg
-        .rsplit('`')
-        .nth(1)
-        .or_else(|| msg.rsplit('"').nth(1))
-        .unwrap_or_default();
-    let found = ALL_ENV_VARS
-        .iter()
-        .copied()
-        .find(|var| var.eq_ignore_ascii_case(key));
-    match found {
-        Some(var) => {
-            let value = map.get(var).cloned().unwrap_or_default();
-            ConfigError::invalid(var, value, msg)
-        }
-        None => ConfigError::Config(e),
     }
 }

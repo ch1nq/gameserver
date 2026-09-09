@@ -14,100 +14,109 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use serde::Deserialize;
 
-use crate::env_names::{self, ALL_ENV_VARS};
+use crate::env_names;
 use crate::error::ConfigError;
+use crate::support::{map_serde_error, non_empty_opt, setting};
 
 // ─── Defaults (must match historical behavior) ───────────────────────────────
+// One line per setting: a `pub const` plus the serde-default `fn`.
 
-pub const DEFAULT_HOST: &str = "0.0.0.0";
-pub const DEFAULT_WEBSITE_PORT: u16 = 3000;
-pub const DEFAULT_RUST_LOG: &str = "website=debug,achtung-core=debug,coordinator=debug,achtung-api=debug,agent_infra=debug,axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug,registry-auth=debug";
-
-pub const DEFAULT_REGISTRY_SERVICE: &str = "registry:5001";
-pub const DEFAULT_REGISTRY_URL: &str = "http://localhost:5001";
-pub const DEFAULT_REGISTRY_PUBLIC_HOST: &str = "localhost:5001";
-
-pub const DEFAULT_GAME_HOST_IMAGE: &str = "ghcr.io/ch1nq/achtung-game-host:latest";
-pub const DEFAULT_AGENTS_PER_GAME: usize = 4;
-pub const DEFAULT_GAME_TICK_RATE_MS: u64 = 50;
-pub const DEFAULT_GAME_INTERVAL_SECS: u64 = 10;
-pub const DEFAULT_GAME_HOST_CONNECT_TIMEOUT_SECS: u64 = 60;
-
-pub const DEFAULT_DOCKER_REGISTRY_PULL_HOST: &str = "localhost:5001";
-pub const DEFAULT_AGENT_NAME_PREFIX: &str = "achtung-";
-
-pub const DEFAULT_MACHINE_CPUS: u8 = 1;
-pub const DEFAULT_MACHINE_MEM_MIB: u32 = 512;
-
-pub const DEFAULT_MSB_HOST_PORT_BASE: u16 = 51000;
-pub const DEFAULT_MSB_REGISTRY_INSECURE: bool = false;
-
-pub const DEFAULT_REAPER_INTERVAL_SECS: u64 = 300;
-pub const DEFAULT_REAPER_MAX_AGE_SECS: u64 = 3600;
-
-fn default_host() -> String {
-    DEFAULT_HOST.to_string()
-}
-fn default_website_port() -> u16 {
-    DEFAULT_WEBSITE_PORT
-}
-fn default_rust_log() -> String {
-    DEFAULT_RUST_LOG.to_string()
-}
-fn default_registry_service() -> String {
-    DEFAULT_REGISTRY_SERVICE.to_string()
-}
-fn default_registry_url() -> String {
-    DEFAULT_REGISTRY_URL.to_string()
-}
-fn default_registry_public_host() -> String {
-    DEFAULT_REGISTRY_PUBLIC_HOST.to_string()
-}
-fn default_game_host_image() -> String {
-    DEFAULT_GAME_HOST_IMAGE.to_string()
-}
-fn default_agents_per_game() -> usize {
-    DEFAULT_AGENTS_PER_GAME
-}
-fn default_tick_rate_ms() -> u64 {
-    DEFAULT_GAME_TICK_RATE_MS
-}
-fn default_game_interval_secs() -> u64 {
-    DEFAULT_GAME_INTERVAL_SECS
-}
-fn default_connect_timeout_secs() -> u64 {
-    DEFAULT_GAME_HOST_CONNECT_TIMEOUT_SECS
-}
-fn default_registry_pull_host() -> String {
-    DEFAULT_DOCKER_REGISTRY_PULL_HOST.to_string()
-}
-fn default_name_prefix() -> String {
-    DEFAULT_AGENT_NAME_PREFIX.to_string()
-}
-fn default_cpus() -> u8 {
-    DEFAULT_MACHINE_CPUS
-}
-fn default_mem_mib() -> u32 {
-    DEFAULT_MACHINE_MEM_MIB
-}
-fn default_host_port_base() -> u16 {
-    DEFAULT_MSB_HOST_PORT_BASE
-}
-fn default_host_bind() -> IpAddr {
+setting!(DEFAULT_HOST, default_host, &str, "0.0.0.0");
+setting!(DEFAULT_WEBSITE_PORT, default_website_port, u16, 3000);
+setting!(
+    DEFAULT_RUST_LOG,
+    default_rust_log,
+    &str,
+    "website=debug,achtung-core=debug,coordinator=debug,achtung-api=debug,agent_infra=debug,axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug,registry-auth=debug"
+);
+setting!(
+    DEFAULT_REGISTRY_SERVICE,
+    default_registry_service,
+    &str,
+    "registry:5001"
+);
+setting!(
+    DEFAULT_REGISTRY_URL,
+    default_registry_url,
+    &str,
+    "http://localhost:5001"
+);
+setting!(
+    DEFAULT_REGISTRY_PUBLIC_HOST,
+    default_registry_public_host,
+    &str,
+    "localhost:5001"
+);
+setting!(
+    DEFAULT_GAME_HOST_IMAGE,
+    default_game_host_image,
+    &str,
+    "ghcr.io/ch1nq/achtung-game-host:latest"
+);
+setting!(DEFAULT_AGENTS_PER_GAME, default_agents_per_game, usize, 4);
+setting!(DEFAULT_GAME_TICK_RATE_MS, default_tick_rate_ms, u64, 50);
+setting!(
+    DEFAULT_GAME_INTERVAL_SECS,
+    default_game_interval_secs,
+    u64,
+    10
+);
+setting!(
+    DEFAULT_GAME_HOST_CONNECT_TIMEOUT_SECS,
+    default_connect_timeout_secs,
+    u64,
+    60
+);
+setting!(
+    DEFAULT_DOCKER_REGISTRY_PULL_HOST,
+    default_registry_pull_host,
+    &str,
+    "localhost:5001"
+);
+setting!(
+    DEFAULT_AGENT_NAME_PREFIX,
+    default_name_prefix,
+    &str,
+    "achtung-"
+);
+setting!(DEFAULT_MACHINE_CPUS, default_cpus, u8, 1);
+setting!(DEFAULT_MACHINE_MEM_MIB, default_mem_mib, u32, 512);
+setting!(
+    DEFAULT_MSB_HOST_PORT_BASE,
+    default_host_port_base,
+    u16,
+    51000
+);
+setting!(
+    DEFAULT_MSB_HOST_BIND,
+    default_host_bind,
+    IpAddr,
     IpAddr::V4(Ipv4Addr::LOCALHOST)
-}
-fn default_registry_insecure() -> bool {
-    DEFAULT_MSB_REGISTRY_INSECURE
-}
-fn default_reaper_interval() -> u64 {
-    DEFAULT_REAPER_INTERVAL_SECS
-}
-fn default_reaper_max_age() -> u64 {
-    DEFAULT_REAPER_MAX_AGE_SECS
-}
-fn default_provider() -> MachineProviderKind {
+);
+setting!(
+    DEFAULT_MSB_REGISTRY_INSECURE,
+    default_registry_insecure,
+    bool,
+    false
+);
+setting!(
+    DEFAULT_REAPER_INTERVAL_SECS,
+    default_reaper_interval,
+    u64,
+    300
+);
+setting!(
+    DEFAULT_REAPER_MAX_AGE_SECS,
+    default_reaper_max_age,
+    u64,
+    3600
+);
+setting!(
+    DEFAULT_MACHINE_PROVIDER,
+    default_provider,
+    MachineProviderKind,
     MachineProviderKind::Microsandbox
-}
+);
 
 // ─── Public typed config ─────────────────────────────────────────────────────
 
@@ -128,15 +137,14 @@ impl std::fmt::Display for MachineProviderKind {
     }
 }
 
-/// Website listen address (`HOST` / `PORT`) plus log filter (`RUST_LOG`).
+/// Website listen address (`HOST` / `PORT`). The log filter (`RUST_LOG`) lives
+/// on [`WebsiteConfig`] directly.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     /// Bind host. Env: `HOST` (default `0.0.0.0`).
     pub host: String,
     /// Bind port. Env: `PORT` (default `3000`).
     pub port: u16,
-    /// Tracing filter. Env: `RUST_LOG` (default: per-crate debug).
-    pub rust_log: String,
 }
 
 impl ServerConfig {
@@ -366,7 +374,6 @@ impl RawWebsite {
             server: ServerConfig {
                 host: self.host,
                 port: self.port,
-                rust_log: self.rust_log.clone(),
             },
             github_client_id,
             github_client_secret,
@@ -458,63 +465,5 @@ impl RawWebsite {
             reaper_max_age_secs: self.reaper_max_age_secs,
             reaper_prefix,
         }))
-    }
-}
-
-fn non_empty_opt(v: Option<String>, key: &'static str, hint: &str) -> Result<String, ConfigError> {
-    match v {
-        Some(s) if !s.trim().is_empty() => Ok(s),
-        _ => Err(ConfigError::missing(key, hint)),
-    }
-}
-
-/// Translate a `config::ConfigError` into the most helpful `ConfigError`.
-///
-/// `Environment` lowercases keys, so the message names the snake_case field
-/// (``for key `port` ``) or the missing field (`"database_url"`); uppercasing
-/// recovers the env var name with no per-field table.
-fn map_serde_error(e: config::ConfigError, map: &HashMap<String, String>) -> ConfigError {
-    let msg = e.to_string();
-    // Prefer the backtick-quoted key (type errors); fall back to the
-    // double-quoted field (missing-field errors, which carry no backticks).
-    let key = msg
-        .rsplit('`')
-        .nth(1)
-        .or_else(|| msg.rsplit('"').nth(1))
-        .unwrap_or_default();
-    let found = ALL_ENV_VARS
-        .iter()
-        .copied()
-        .find(|var| var.eq_ignore_ascii_case(key));
-    match found {
-        Some(var) => {
-            let value = map.get(var).cloned().unwrap_or_default();
-            if msg.starts_with("missing configuration field") {
-                ConfigError::missing(var, missing_hint(var))
-            } else {
-                let mut reason = msg;
-                if var == env_names::MACHINE_PROVIDER {
-                    reason += " (expected \"docker\" or \"microsandbox\")";
-                }
-                ConfigError::invalid(var, value, reason)
-            }
-        }
-        None => ConfigError::Config(e),
-    }
-}
-
-/// Human hints for required vars; everything else points at `.env.example`.
-fn missing_hint(var: &str) -> String {
-    match var {
-        env_names::GITHUB_CLIENT_ID => "GitHub OAuth app client id".to_string(),
-        env_names::GITHUB_CLIENT_SECRET => "GitHub OAuth app client secret".to_string(),
-        env_names::DATABASE_URL => {
-            "Postgres connection string, e.g. postgresql://arcadio:arcadio@localhost:5432/arcadio"
-                .to_string()
-        }
-        env_names::REGISTRY_PRIVATE_KEY => {
-            "RSA private key (PEM) used to mint registry JWTs".to_string()
-        }
-        _ => "required; see .env.example".to_string(),
     }
 }
