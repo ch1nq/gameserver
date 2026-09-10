@@ -42,9 +42,6 @@ pub enum ConfigError {
     #[error("invalid configuration: {0}")]
     Extract(#[from] figment::Error),
 
-    #[error("MACHINE_PROVIDER={0:?} is not valid (expected \"docker\" or \"microsandbox\")")]
-    UnknownMachineProvider(String),
-
     #[error("GAME_HOST_IMAGE is not a valid image URL: {0}")]
     InvalidGameHostImage(String),
 
@@ -59,6 +56,16 @@ pub enum ConfigError {
         port: u16,
         source: std::net::AddrParseError,
     },
+}
+
+/// Machine backend selector. Deriving `Deserialize` lets figment reject an
+/// unknown `MACHINE_PROVIDER` for us, with its own "unknown variant" error —
+/// no hand-written match or error variant needed.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum MachineProviderKind {
+    Docker,
+    Microsandbox,
 }
 
 /// Flat DTO mirroring the raw environment. Field names are the lowercased env
@@ -90,7 +97,7 @@ struct RawConfig {
     #[serde(default)]
     enable_coordinator: Option<String>,
     #[serde(default = "default_machine_provider")]
-    machine_provider: String,
+    machine_provider: MachineProviderKind,
     #[serde(default = "default_game_host_image")]
     game_host_image: String,
     #[serde(default = "default_agents_per_game")]
@@ -152,8 +159,8 @@ fn default_host() -> String {
 fn default_port() -> u16 {
     3000
 }
-fn default_machine_provider() -> String {
-    "microsandbox".to_string()
+fn default_machine_provider() -> MachineProviderKind {
+    MachineProviderKind::Microsandbox
 }
 fn default_game_host_image() -> String {
     "ghcr.io/ch1nq/achtung-game-host:latest".to_string()
@@ -318,8 +325,8 @@ impl Config {
         let game_host_image = ImageUrl::new(raw.game_host_image.clone())
             .map_err(|e| ConfigError::InvalidGameHostImage(e.to_string()))?;
 
-        let provider = match raw.machine_provider.as_str() {
-            "docker" => ProviderConfig::Docker(DockerMachineProviderConfig {
+        let provider = match raw.machine_provider {
+            MachineProviderKind::Docker => ProviderConfig::Docker(DockerMachineProviderConfig {
                 network: raw
                     .docker_network
                     .clone()
@@ -327,20 +334,21 @@ impl Config {
                 registry_pull_host: raw.docker_registry_pull_host.clone(),
                 name_prefix: raw.agent_name_prefix.clone(),
             }),
-            "microsandbox" => ProviderConfig::Microsandbox(MicrosandboxMachineProviderConfig {
-                cpus: raw.machine_cpus,
-                memory_mib: raw.machine_mem_mib,
-                host_port_base: raw.msb_host_port_base,
-                host_bind: raw.msb_host_bind,
-                registry_pull_host: raw.docker_registry_pull_host.clone(),
-                registry_insecure: raw
-                    .msb_registry_insecure
-                    .as_deref()
-                    .map(truthy)
-                    .unwrap_or(false),
-                max_duration_secs: raw.msb_max_duration_secs,
-            }),
-            other => return Err(ConfigError::UnknownMachineProvider(other.to_string())),
+            MachineProviderKind::Microsandbox => {
+                ProviderConfig::Microsandbox(MicrosandboxMachineProviderConfig {
+                    cpus: raw.machine_cpus,
+                    memory_mib: raw.machine_mem_mib,
+                    host_port_base: raw.msb_host_port_base,
+                    host_bind: raw.msb_host_bind,
+                    registry_pull_host: raw.docker_registry_pull_host.clone(),
+                    registry_insecure: raw
+                        .msb_registry_insecure
+                        .as_deref()
+                        .map(truthy)
+                        .unwrap_or(false),
+                    max_duration_secs: raw.msb_max_duration_secs,
+                })
+            }
         };
 
         let reaper = ReaperConfig {
@@ -460,20 +468,23 @@ mod tests {
 
     #[test]
     fn unknown_machine_provider_fails_fast() {
-        let mut raw = raw_minimal();
-        raw.enable_coordinator = Some("1".into());
-        raw.machine_provider = "podman".into();
-        assert!(matches!(
-            Config::from_raw(raw),
-            Err(ConfigError::UnknownMachineProvider(p)) if p == "podman"
-        ));
+        // Rejected by figment/serde at deserialize time, not by hand-written code.
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("GITHUB_CLIENT_ID", "id");
+            jail.set_env("GITHUB_CLIENT_SECRET", "secret");
+            jail.set_env("DATABASE_URL", "postgres://localhost/db");
+            jail.set_env("REGISTRY_PRIVATE_KEY", "pem");
+            jail.set_env("MACHINE_PROVIDER", "podman");
+            assert!(matches!(Config::load(), Err(ConfigError::Extract(_))));
+            Ok(())
+        });
     }
 
     #[test]
     fn docker_requires_a_network() {
         let mut raw = raw_minimal();
         raw.enable_coordinator = Some("1".into());
-        raw.machine_provider = "docker".into();
+        raw.machine_provider = MachineProviderKind::Docker;
         assert!(matches!(
             Config::from_raw(raw),
             Err(ConfigError::MissingDockerNetwork)
@@ -484,7 +495,7 @@ mod tests {
     fn docker_backend_is_built_from_config() {
         let mut raw = raw_minimal();
         raw.enable_coordinator = Some("1".into());
-        raw.machine_provider = "docker".into();
+        raw.machine_provider = MachineProviderKind::Docker;
         raw.docker_network = Some("gameserver_default".into());
 
         let coordinator = Config::from_raw(raw).unwrap().coordinator.unwrap();
