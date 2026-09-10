@@ -9,4 +9,5 @@
 .DS_Store
 CLAUDE.md
 .env
+config.toml
 *.pem

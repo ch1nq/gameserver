@@ -71,9 +71,11 @@ pub trait GameAdapter: Send + Sync + 'static {
     /// trail length already sent).
     type Spectator: Send;
 
-    /// Build a fresh engine for `num_players`. The adapter owns the game
-    /// `Config` (arena size, etc.); slot `i` controls `get_player_ids()[i]`.
-    fn init_engine(&self, num_players: usize) -> Self::Engine;
+    /// Build a fresh engine for `num_players`. The coordinator's per-match
+    /// [`GameConfig`] is passed so game-specific fields (e.g. arena size) come
+    /// from a single source; the adapter falls back to its own defaults for any
+    /// unset (zero) field. Slot `i` controls `get_player_ids()[i]`.
+    fn init_engine(&self, num_players: usize, cfg: &GameConfig) -> Self::Engine;
 
     /// Seed spectator state from the freshly built engine (tick 0).
     fn init_spectator(&self, engine: &Self::Engine) -> Self::Spectator;
@@ -288,7 +290,7 @@ async fn run_game<G: GameAdapter>(
     // no matter how fast or slow agents answer.
     let tick_period = Duration::from_millis(cfg.tick_rate_ms.max(1));
 
-    let mut engine = adapter.init_engine(num_players);
+    let mut engine = adapter.init_engine(num_players, &cfg);
 
     // Seed spectator state from the initial engine so joiners can snapshot even
     // before the first tick is produced.

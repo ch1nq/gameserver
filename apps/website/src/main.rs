@@ -1,5 +1,6 @@
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
+use website::config::Config;
 use website::web::App;
 
 #[tokio::main]
@@ -14,10 +15,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(tracing_subscriber::fmt::layer())
         .try_init()?;
 
-    // Fetch address and port from environment variables.
-    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
-    let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let addr: std::net::SocketAddr = format!("{}:{}", host, port).parse().unwrap();
+    // Single fail-fast parse of all startup configuration. A missing var or an
+    // invalid value is reported here as one human-readable line, rather than
+    // panicking deep inside `serve`.
+    let config = match Config::load() {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Configuration error: {e}");
+            std::process::exit(1);
+        }
+    };
 
-    App::new().await?.serve(addr).await
+    let addr = config.server.socket_addr()?;
+
+    App::new(config).await?.serve(addr).await
 }

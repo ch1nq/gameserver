@@ -100,6 +100,12 @@ pub struct CoordinatorConfig {
     /// Game tick rate in milliseconds
     pub tick_rate_ms: u64,
 
+    /// Arena width, passed to the game host in the `StartGame` config.
+    pub arena_width: u32,
+
+    /// Arena height, passed to the game host in the `StartGame` config.
+    pub arena_height: u32,
+
     /// How long to wait between games
     pub game_interval: Duration,
 
@@ -287,13 +293,13 @@ impl<P: MachineProvider> GameCoordinator<P> {
         &self,
         ctx: &P::MatchContext,
     ) -> Result<MachineHandle, CoordinatorError> {
-        // Game host is on a public registry, no copy or token needed
+        // Game host is on a public registry, no copy or token needed. The game
+        // parameters (player count, tick rate, arena size) travel in the typed
+        // `StartGame` config, not env vars, so there is nothing to set here.
         let config = HostSpawnConfig::new(
             ContainerImage::Public(self.config.game_host_image.clone()),
             self.config.game_host_grpc_port,
-        )
-        .env("NUM_PLAYERS", self.config.agents_per_game.to_string())
-        .env("TICK_RATE_MS", self.config.tick_rate_ms.to_string());
+        );
 
         self.machine_provider
             .spawn_host(ctx, config)
@@ -362,6 +368,8 @@ impl<P: MachineProvider> GameCoordinator<P> {
             agents: agent_endpoints,
             config: Some(GameConfig {
                 tick_rate_ms: self.config.tick_rate_ms,
+                arena_width: self.config.arena_width,
+                arena_height: self.config.arena_height,
             }),
         };
 
