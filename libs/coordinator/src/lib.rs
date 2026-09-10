@@ -492,16 +492,23 @@ impl<P: MachineProvider> GameCoordinator<P> {
         game_host: Option<&MachineHandle>,
         agents: &[(AgentId, MachineHandle)],
     ) {
-        if let Some(handle) = game_host
-            && let Err(e) = self.machine_provider.destroy(ctx, handle).await
-        {
-            tracing::error!("Failed to destroy game host: {}", e);
+        use futures_util::future::join_all;
+
+        let mut targets: Vec<(String, &MachineHandle)> =
+            Vec::with_capacity(agents.len() + usize::from(game_host.is_some()));
+        if let Some(handle) = game_host {
+            targets.push(("game host".to_string(), handle));
         }
         for (agent_id, handle) in agents {
-            if let Err(e) = self.machine_provider.destroy(ctx, handle).await {
-                tracing::error!("Failed to destroy agent {}: {}", agent_id, e);
-            }
+            targets.push((format!("agent {agent_id}"), handle));
         }
+
+        join_all(targets.into_iter().map(|(label, handle)| async move {
+            if let Err(e) = self.machine_provider.destroy(ctx, handle).await {
+                tracing::error!("Failed to destroy {label}: {e}");
+            }
+        }))
+        .await;
     }
 }
 
