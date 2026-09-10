@@ -209,7 +209,7 @@ impl GameAdapter for AchtungGrpc {
         AchtungSpectator::from_engine(engine)
     }
 
-    fn tick_spectator(&self, spec: &mut AchtungSpectator, engine: &Achtung) -> Vec<u8> {
+    fn tick_spectator(&self, spec: &mut AchtungSpectator, engine: &Achtung) -> (Vec<u8>, String) {
         spec.tick = engine.tick();
         let players = engine
             .spectator_view()
@@ -237,14 +237,18 @@ impl GameAdapter for AchtungGrpc {
                 }
             })
             .collect();
-        spectpb::SpectatorDelta {
+        let delta = spectpb::SpectatorDelta {
             tick: spec.tick,
             players,
-        }
-        .encode_to_vec()
+        };
+        // JSON is rendered once here; the website relay forwards it opaquely.
+        // A serialization failure can only come from an in-memory struct, so
+        // fall back to `{}` rather than dropping the tick.
+        let json = serde_json::to_string(&delta).unwrap_or_else(|_| "{}".to_string());
+        (delta.encode_to_vec(), json)
     }
 
-    fn encode_snapshot(&self, spec: &AchtungSpectator) -> Vec<u8> {
+    fn encode_snapshot(&self, spec: &AchtungSpectator) -> (Vec<u8>, String) {
         let players = spec
             .players
             .iter()
@@ -255,15 +259,16 @@ impl GameAdapter for AchtungGrpc {
                 body: p.body.iter().map(to_blob).collect(),
             })
             .collect();
-        spectpb::SpectatorSnapshot {
+        let snapshot = spectpb::SpectatorSnapshot {
             tick: spec.tick,
             arena: Some(spectpb::ArenaConfig {
                 width: spec.arena.width,
                 height: spec.arena.height,
             }),
             players,
-        }
-        .encode_to_vec()
+        };
+        let json = serde_json::to_string(&snapshot).unwrap_or_else(|_| "{}".to_string());
+        (snapshot.encode_to_vec(), json)
     }
 
     fn active_players(&self, engine: &Achtung) -> Vec<PlayerId> {

@@ -81,12 +81,17 @@ pub trait GameAdapter: Send + Sync + 'static {
     fn init_spectator(&self, engine: &Self::Engine) -> Self::Spectator;
 
     /// Advance `spec` to `engine`'s current tick and return the encoded delta
-    /// (game-specific proto bytes) to broadcast to spectators.
-    fn tick_spectator(&self, spec: &mut Self::Spectator, engine: &Self::Engine) -> Vec<u8>;
+    /// as `(proto bytes, browser JSON)`. The JSON is rendered once here, where
+    /// the game-specific schema lives; the website relay forwards it opaquely.
+    fn tick_spectator(
+        &self,
+        spec: &mut Self::Spectator,
+        engine: &Self::Engine,
+    ) -> (Vec<u8>, String);
 
-    /// Encode the full accumulated state as snapshot bytes for a joining
-    /// spectator.
-    fn encode_snapshot(&self, spec: &Self::Spectator) -> Vec<u8>;
+    /// Encode the full accumulated state as `(snapshot proto bytes, browser
+    /// JSON)` for a joining spectator.
+    fn encode_snapshot(&self, spec: &Self::Spectator) -> (Vec<u8>, String);
 
     /// Currently-alive players. Diffed across ticks to derive elimination order.
     fn active_players(&self, engine: &Self::Engine) -> Vec<<Self::Engine as GameState>::PlayerId>;
@@ -253,10 +258,14 @@ impl<G: GameAdapter> GameHost for GrpcGameServer<G> {
         let (snapshot, rx) = {
             let spec = self.spectator.lock().await;
             let rx = self.spectator_tx.subscribe();
-            let snapshot = spec.as_ref().map(|s| SpectatorFrame {
-                tick: 0,
-                is_snapshot: true,
-                payload: self.adapter.encode_snapshot(s),
+            let snapshot = spec.as_ref().map(|s| {
+                let (payload, json) = self.adapter.encode_snapshot(s);
+                SpectatorFrame {
+                    tick: 0,
+                    is_snapshot: true,
+                    payload,
+                    json,
+                }
             });
             (snapshot, rx)
         };
@@ -376,11 +385,12 @@ async fn run_game<G: GameAdapter>(
         {
             let mut spec = spectator.lock().await;
             if let Some(s) = spec.as_mut() {
-                let payload = adapter.tick_spectator(s, &engine);
+                let (payload, json) = adapter.tick_spectator(s, &engine);
                 let _ = spectator_tx.send(SpectatorFrame {
                     tick: current_tick,
                     is_snapshot: false,
                     payload,
+                    json,
                 });
             }
         }

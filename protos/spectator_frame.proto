@@ -17,4 +17,10 @@ message SpectatorFrame {
   // Game-specific encoded state (e.g. achtung.spectator.SpectatorSnapshot /
   // SpectatorDelta). Opaque to the generic transport.
   bytes payload = 3;
+
+  // Pre-rendered JSON for the browser SSE relay, produced once per frame by
+  // the game host (which owns the game-specific schema). Opaque to the
+  // website relay: it forwards this without decoding. `is_snapshot` selects
+  // the SSE event name; `tick` is for ordering/logging.
+  string json = 4;
 }

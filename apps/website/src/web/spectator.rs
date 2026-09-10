@@ -1,11 +1,13 @@
 //! Browser-facing spectator stream, served as Server-Sent Events.
 //!
 //! One background task maintains a single gRPC `WatchGame` stream to the
-//! current game host and fans every `SpectatorFrame` out to all connected SSE
-//! clients via a `tokio::sync::broadcast` channel. Late-joining clients receive
-//! the full frame history buffered since the last snapshot, then switch to the
-//! live broadcast — so they get a consistent view without the game host ever
-//! opening more than one outbound stream to the website.
+//! current game host and fans every frame out to all connected SSE
+//! clients via a `tokio::sync::broadcast` channel. The host renders browser
+//! JSON once per frame (`SpectatorFrame.json`); this relay treats it as opaque
+//! and never decodes game payloads, so it stays game-agnostic. Late-joining
+//! clients receive the frames buffered since the last snapshot, then switch to
+//! the live broadcast — so they get a consistent view without the game host
+//! ever opening more than one outbound stream to the website.
 
 use std::convert::Infallible;
 use std::pin::Pin;
@@ -21,9 +23,7 @@ use axum::{
 use coordinator::SpectatorRegistry;
 use coordinator::game_host::WatchGameRequest;
 use coordinator::game_host::game_host_client::GameHostClient;
-use coordinator::spectator_frame::SpectatorFrame;
-use prost::Message;
-use tokio::sync::broadcast;
+use tokio::sync::{RwLock, broadcast};
 use tokio::time::sleep;
 use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
 
@@ -36,18 +36,32 @@ const BROADCAST_BUFFER: usize = 4096;
 
 type EventStream = Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
 
-// Decoded achtung spectator payloads with `serde::Serialize` derived in build.rs.
-mod achtung {
-    tonic::include_proto!("achtung.spectator");
+/// One spectator frame with pre-rendered browser JSON. The JSON comes from the
+/// game host (`SpectatorFrame.json`) and is forwarded without inspection.
+#[derive(Debug, Clone)]
+struct LiveEvent {
+    is_snapshot: bool,
+    json: String,
+}
+
+impl LiveEvent {
+    fn to_sse(&self) -> Event {
+        let name = if self.is_snapshot {
+            "snapshot"
+        } else {
+            "delta"
+        };
+        Event::default().event(name).data(self.json.clone())
+    }
 }
 
 /// In-process hub that holds the frame history for the current game and a live
 /// broadcast channel. All SSE clients subscribe here.
 struct SpectatorHub {
-    /// Every frame from the current game, for clients that connect mid-game.
-    history: Vec<SpectatorFrame>,
-    /// `Some(frame)` during a game; `None` is the game-over sentinel.
-    sender: broadcast::Sender<Option<SpectatorFrame>>,
+    /// Frames since the last snapshot, for clients that connect mid-game.
+    history: Vec<LiveEvent>,
+    /// `Some(event)` during a game; `None` is the game-over sentinel.
+    sender: broadcast::Sender<Option<LiveEvent>>,
     /// True while the background task is actively receiving frames from the
     /// game host. Checked atomically with `sender.subscribe()` so a tab that
     /// connects in the gap between "game over sentinel sent" and "registry
@@ -71,12 +85,12 @@ impl SpectatorHub {
 #[derive(Clone)]
 pub struct SpectatorState {
     registry: SpectatorRegistry,
-    hub: Arc<std::sync::Mutex<SpectatorHub>>,
+    hub: Arc<RwLock<SpectatorHub>>,
 }
 
 impl SpectatorState {
     pub fn new(registry: SpectatorRegistry) -> Self {
-        let hub = Arc::new(std::sync::Mutex::new(SpectatorHub::new()));
+        let hub = Arc::new(RwLock::new(SpectatorHub::new()));
         let state = Self { registry, hub };
         tokio::spawn(run_broadcaster(state.clone()));
         state
@@ -113,7 +127,7 @@ async fn run_broadcaster(state: SpectatorState) {
             }
         };
 
-        state.hub.lock().unwrap().game_active = true;
+        state.hub.write().await.game_active = true;
 
         tokio::pin!(stream);
         while let Some(result) = stream.next().await {
@@ -124,23 +138,34 @@ async fn run_broadcaster(state: SpectatorState) {
                     break;
                 }
             };
+            if frame.json.is_empty() {
+                tracing::warn!(
+                    tick = frame.tick,
+                    is_snapshot = frame.is_snapshot,
+                    "spectator broadcaster: host sent empty json; skipping frame"
+                );
+                continue;
+            }
+            let event = LiveEvent {
+                is_snapshot: frame.is_snapshot,
+                json: frame.json,
+            };
             // Lock, push to history, and broadcast atomically so that a
-            // subscriber who calls hub.lock() between these two steps never
-            // sees a gap.
-            let mut hub = state.hub.lock().unwrap();
-            if frame.is_snapshot {
+            // subscriber who reads under the same lock never sees a gap.
+            let mut hub = state.hub.write().await;
+            if event.is_snapshot {
                 hub.history.clear();
             }
-            hub.history.push(frame.clone());
-            let _ = hub.sender.send(Some(frame));
+            hub.history.push(event.clone());
+            let _ = hub.sender.send(Some(event));
         }
 
         // Game over: mark inactive, signal waiting SSE clients, and reset.
         // Setting game_active = false happens atomically with the sentinel
-        // send, so any subscriber who calls hub.lock() after this point sees
+        // send, so any subscriber who reads after this point sees
         // the correct state.
         {
-            let mut hub = state.hub.lock().unwrap();
+            let mut hub = state.hub.write().await;
             hub.game_active = false;
             hub.history.clear();
             let _ = hub.sender.send(None);
@@ -178,7 +203,7 @@ async fn watch(
     // sent sees game_active=false and emits "waiting" instead of hanging on a
     // broadcast that will never deliver (the sentinel was sent before subscribe).
     let (history, receiver, game_active) = {
-        let hub = state.hub.lock().unwrap();
+        let hub = state.hub.read().await;
         (hub.history.clone(), hub.sender.subscribe(), hub.game_active)
     };
     // receiver is only used in the else branch; drop it early when waiting.
@@ -186,15 +211,11 @@ async fn watch(
         drop(receiver);
         Box::pin(waiting())
     } else {
-        let history_events = tokio_stream::iter(
-            history
-                .into_iter()
-                .filter_map(|f| frame_to_event(f).map(Ok)),
-        );
+        let history_events = tokio_stream::iter(history.into_iter().map(|e| Ok(e.to_sse())));
         // `None` sentinel or a lag error both end the stream so the browser
         // reconnects and picks up a fresh history from the next game.
         let live = BroadcastStream::new(receiver).map_while(|r| match r {
-            Ok(Some(frame)) => frame_to_event(frame).map(Ok),
+            Ok(Some(event)) => Some(Ok(event.to_sse())),
             _ => None,
         });
         Box::pin(history_events.chain(live))
@@ -206,17 +227,4 @@ async fn watch(
 /// One-shot stream that tells the browser no game is running.
 fn waiting() -> impl Stream<Item = Result<Event, Infallible>> {
     tokio_stream::once(Ok(Event::default().event("waiting").data("{}")))
-}
-
-/// Decode one `SpectatorFrame` into an SSE event, or `None` on payload error.
-fn frame_to_event(frame: SpectatorFrame) -> Option<Event> {
-    let payload = frame.payload.as_slice();
-    let (name, json) = if frame.is_snapshot {
-        let snap = achtung::SpectatorSnapshot::decode(payload).ok()?;
-        ("snapshot", serde_json::to_string(&snap).ok()?)
-    } else {
-        let delta = achtung::SpectatorDelta::decode(payload).ok()?;
-        ("delta", serde_json::to_string(&delta).ok()?)
-    };
-    Some(Event::default().event(name).data(json))
 }
