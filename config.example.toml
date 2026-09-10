@@ -61,7 +61,10 @@ game_host_image = "ghcr.io/ch1nq/achtung-game-host:latest"
 
 agents_per_game = 4
 tick_rate_ms = 50
-game_interval_secs = 10
+# Pause between matches. Teardown of the finished match runs in the background
+# and the next match waits for it before spawning (fixed relay ports), so this
+# is the visible gap when teardown is faster than the pause.
+game_interval_secs = 3
 
 # Arena dimensions passed to each game host (the coordinator is the single source
 # of truth; the host has no arena settings of its own).

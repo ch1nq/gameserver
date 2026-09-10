@@ -176,7 +176,7 @@ impl Default for CoordinatorSettings {
             game_host_image: "ghcr.io/ch1nq/achtung-game-host:latest".to_string(),
             agents_per_game: 4,
             tick_rate_ms: 50,
-            game_interval_secs: 10,
+            game_interval_secs: 3,
             connect_timeout_secs: 60,
             arena_width: 1000,
             arena_height: 1000,

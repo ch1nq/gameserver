@@ -164,8 +164,24 @@ impl<P: MachineProvider> GameCoordinator<P> {
     }
 
     /// Run a single game to completion (used for testing / one-shot runs).
+    ///
+    /// Teardown runs in the background for the loop, but `run_once` awaits it
+    /// so callers see a fully cleaned-up match on return.
     pub async fn run_once(&self) -> Result<(), CoordinatorError> {
-        self.run_single_game().await
+        let (result, teardown) = self.run_single_game().await;
+        if let Some(handle) = teardown {
+            // Teardown errors are already logged inside the task; only surface
+            // a panic / cancellation here.
+            match handle.await {
+                Ok(()) => {}
+                Err(e) => {
+                    return Err(CoordinatorError::GameHost(format!(
+                        "teardown task failed: {e}"
+                    )));
+                }
+            }
+        }
+        result
     }
 
     /// Spawn the coordinator as a background task
@@ -176,11 +192,30 @@ impl<P: MachineProvider> GameCoordinator<P> {
     }
 
     /// Main coordinator loop
+    ///
+    /// Teardown of match N runs in the background while the loop sleeps, and
+    /// the next iteration awaits the previous teardown before spawning. In the
+    /// common case (parallel teardown of ~2s < `game_interval`) that await is
+    /// instant, so the visible gap is just `game_interval`. Awaiting guarantees
+    /// the fixed relay ports (`base + slot`, no allocator) are free before the
+    /// next `spawn_*`; leftovers from a failed/cancelled teardown are still
+    /// collected by the pre-flight sweep and the reaper.
     async fn run(self) {
         tracing::info!("Game coordinator started");
 
+        let mut prev_teardown: Option<JoinHandle<()>> = None;
         loop {
-            match self.run_single_game().await {
+            // Previous teardown ran during the last sleep, so this is usually
+            // instant. Awaiting here (rather than firing and forgetting)
+            // guarantees ports are free before the next spawn.
+            if let Some(handle) = prev_teardown.take()
+                && let Err(e) = handle.await
+            {
+                tracing::warn!(error = %e, "Previous match teardown task failed");
+            }
+
+            let (outcome, teardown) = self.run_single_game().await;
+            match outcome {
                 Ok(()) => {
                     tracing::info!("Game completed successfully");
                 }
@@ -188,19 +223,28 @@ impl<P: MachineProvider> GameCoordinator<P> {
                     tracing::error!("Game failed: {}", e);
                 }
             }
+            prev_teardown = teardown;
 
             tokio::time::sleep(self.config.game_interval).await;
         }
     }
 
-    /// Run a single game from start to finish
-    async fn run_single_game(&self) -> Result<(), CoordinatorError> {
+    /// Run a single game from start to finish.
+    ///
+    /// Returns the game outcome plus a handle to the background teardown task
+    /// (destroy + cleanup). The caller decides when to await it: the loop
+    /// overlaps it with the inter-game sleep, `run_once` awaits it inline.
+    /// `None` means there is nothing to tear down (no match was initialized).
+    async fn run_single_game(&self) -> (Result<(), CoordinatorError>, Option<JoinHandle<()>>) {
         // 1. Pick agents from the roster
-        let agents = self
+        let agents = match self
             .agent_repo
             .get_random_active_agents(self.config.agents_per_game)
             .await
-            .map_err(CoordinatorError::Database)?;
+        {
+            Ok(agents) => agents,
+            Err(e) => return (Err(CoordinatorError::Database(e)), None),
+        };
 
         if agents.len() < self.config.agents_per_game {
             tracing::warn!(
@@ -208,7 +252,7 @@ impl<P: MachineProvider> GameCoordinator<P> {
                 agents.len(),
                 self.config.agents_per_game
             );
-            return Ok(());
+            return (Ok(()), None);
         }
 
         tracing::info!("Starting game with {} agents", agents.len());
@@ -217,46 +261,69 @@ impl<P: MachineProvider> GameCoordinator<P> {
         let match_id = agent_infra::generate_id();
         // Validated once: rejects zero agents and counts that would overflow
         // the u8 wire slot or the relay port range.
-        let layout = MatchLayout::new(agents.len()).map_err(CoordinatorError::MachineSpawn)?;
-        let ctx = self
-            .machine_provider
-            .init_match(&match_id, layout)
-            .await
-            .map_err(CoordinatorError::MachineSpawn)?;
+        let layout = match MatchLayout::new(agents.len()) {
+            Ok(layout) => layout,
+            Err(e) => return (Err(CoordinatorError::MachineSpawn(e)), None),
+        };
+        let ctx = match self.machine_provider.init_match(&match_id, layout).await {
+            Ok(ctx) => ctx,
+            Err(e) => return (Err(CoordinatorError::MachineSpawn(e)), None),
+        };
 
-        // 3. Run the game, then always clean up
-        let game_result = self.run_game_inner(&ctx, layout, &agents).await;
+        // 3. Spawn machines and run the game. This returns the handles without
+        // destroying them, so teardown below can run in the background.
+        let outcome = self.run_match_foreground(&ctx, layout, &agents).await;
 
-        // 4. Cleanup match infrastructure regardless of outcome
-        if let Err(e) = self.machine_provider.cleanup_match(ctx).await {
-            tracing::error!("Failed to cleanup match {}: {}", match_id, e);
-        }
+        // 4. Teardown (destroy + cleanup) always runs in the background, even
+        // on spawn/poll failure — `outcome` carries whatever was created.
+        // The "Game finished" log below fires as soon as the result is known
+        // (~12s earlier than before); completion of the teardown itself is
+        // logged inside the task.
+        let teardown = self.spawn_teardown(ctx, outcome.game_host, outcome.agents, match_id);
 
-        match game_result {
+        match outcome.result {
             Ok(result) => {
-                tracing::info!("Game finished: {:?}", result);
+                tracing::info!(
+                    "Game finished: {:?} (teardown running in background)",
+                    result
+                );
                 // TODO: Record results in database
-                Ok(())
+                (Ok(()), Some(teardown))
             }
-            Err(e) => Err(e),
+            Err(e) => (Err(e), Some(teardown)),
         }
     }
 
-    /// Spawn all machines, run the game, then destroy all machines.
+    /// Spawn all machines and run the game, returning the outcome plus
+    /// whatever machines were created (possibly partial on spawn failure).
     ///
-    /// Returns before `cleanup_match` — the caller handles that so it always runs.
-    async fn run_game_inner(
+    /// Destroying those machines is the caller's job (background teardown), so
+    /// this returns before any `destroy`/`cleanup_match` runs.
+    async fn run_match_foreground(
         &self,
         ctx: &P::MatchContext,
         layout: MatchLayout,
         agents: &[AgentInfo],
-    ) -> Result<GameResult, CoordinatorError> {
+    ) -> MatchOutcome {
         // Spawn game host
-        let game_host_handle = self.spawn_game_host(ctx).await?;
-        tracing::info!("Game host spawned at {}", game_host_handle.private_ip);
+        let game_host_handle = match self.spawn_game_host(ctx).await {
+            Ok(handle) => {
+                tracing::info!("Game host spawned at {}", handle.private_ip);
+                handle
+            }
+            Err(e) => {
+                return MatchOutcome {
+                    result: Err(e),
+                    game_host: None,
+                    agents: Vec::new(),
+                };
+            }
+        };
 
-        // Spawn agents, cleaning up on failure. Slots come from the validated
-        // layout, so they are always in range — no manual `i + 1` arithmetic.
+        // Spawn agents. Slots come from the validated layout, so they are
+        // always in range — no manual `i + 1` arithmetic. On failure the
+        // partial set is returned for the background teardown; nothing is
+        // destroyed here.
         debug_assert_eq!(agents.len(), layout.all_agent_slots().len());
         let mut agent_handles: Vec<(AgentId, MachineHandle)> = Vec::new();
         for (agent, slot) in agents.iter().zip(layout.all_agent_slots()) {
@@ -272,9 +339,11 @@ impl<P: MachineProvider> GameCoordinator<P> {
                 }
                 Err(e) => {
                     tracing::error!(agent_id = agent.id, "Failed to spawn agent: {}", e);
-                    self.destroy_all(ctx, Some(&game_host_handle), &agent_handles)
-                        .await;
-                    return Err(e);
+                    return MatchOutcome {
+                        result: Err(e),
+                        game_host: Some(game_host_handle),
+                        agents: agent_handles,
+                    };
                 }
             }
         }
@@ -282,11 +351,44 @@ impl<P: MachineProvider> GameCoordinator<P> {
         // Run the game
         let game_result = self.run_game(&game_host_handle, &agent_handles).await;
 
-        // Destroy machines regardless of game outcome
-        self.destroy_all(ctx, Some(&game_host_handle), &agent_handles)
-            .await;
+        MatchOutcome {
+            result: game_result,
+            game_host: Some(game_host_handle),
+            agents: agent_handles,
+        }
+    }
 
-        game_result
+    /// Hand owned machines + match context to a background task that destroys
+    /// them concurrently and then runs `cleanup_match`. Best-effort like the
+    /// old foreground path: per-machine errors are logged, not propagated.
+    ///
+    /// Requires `P::MatchContext: 'static` (see [`MachineProvider`]) so the
+    /// task can own it.
+    fn spawn_teardown(
+        &self,
+        ctx: P::MatchContext,
+        game_host: Option<MachineHandle>,
+        agents: Vec<(AgentId, MachineHandle)>,
+        match_id: String,
+    ) -> JoinHandle<()> {
+        let provider = Arc::clone(&self.machine_provider);
+        tokio::spawn(async move {
+            let start = std::time::Instant::now();
+            let machine_count = agents.len() + game_host.as_ref().map_or(0, |_| 1);
+
+            Self::destroy_all(&provider, &ctx, game_host.as_ref(), &agents).await;
+
+            if let Err(e) = provider.cleanup_match(ctx).await {
+                tracing::error!("Failed to cleanup match {}: {}", match_id, e);
+            }
+
+            tracing::debug!(
+                match_id,
+                machines = machine_count,
+                elapsed_ms = start.elapsed().as_millis(),
+                "Background teardown complete"
+            );
+        })
     }
 
     async fn spawn_game_host(
@@ -485,24 +587,48 @@ impl<P: MachineProvider> GameCoordinator<P> {
         }
     }
 
-    /// Destroy all spawned machines. Best-effort: logs errors but does not abort.
+    /// Destroy all spawned machines concurrently. Best-effort: logs errors
+    /// but does not abort.
+    ///
+    /// Sequential `stop + remove` costs ~2s per microVM (~12s for host + 5
+    /// agents); the per-machine destroys are independent (distinct sandbox
+    /// names, idempotent via "already gone" tolerance), so `join_all` pays
+    /// roughly the slowest single destroy instead of the sum.
     async fn destroy_all(
-        &self,
+        provider: &P,
         ctx: &P::MatchContext,
         game_host: Option<&MachineHandle>,
         agents: &[(AgentId, MachineHandle)],
     ) {
-        if let Some(handle) = game_host
-            && let Err(e) = self.machine_provider.destroy(ctx, handle).await
-        {
-            tracing::error!("Failed to destroy game host: {}", e);
+        use futures_util::future::join_all;
+
+        let mut targets: Vec<(String, &MachineHandle)> =
+            Vec::with_capacity(agents.len() + usize::from(game_host.is_some()));
+        if let Some(handle) = game_host {
+            targets.push(("game host".to_string(), handle));
         }
         for (agent_id, handle) in agents {
-            if let Err(e) = self.machine_provider.destroy(ctx, handle).await {
-                tracing::error!("Failed to destroy agent {}: {}", agent_id, e);
-            }
+            targets.push((format!("agent {agent_id}"), handle));
         }
+
+        join_all(targets.into_iter().map(|(label, handle)| async move {
+            if let Err(e) = provider.destroy(ctx, handle).await {
+                tracing::error!("Failed to destroy {label}: {e}");
+            }
+        }))
+        .await;
     }
+}
+
+/// Machines created for one match plus its outcome.
+///
+/// Produced by the foreground phase (spawn + poll) and consumed by the
+/// background teardown task. Handles may be partial when spawning failed
+/// partway through.
+struct MatchOutcome {
+    result: Result<GameResult, CoordinatorError>,
+    game_host: Option<MachineHandle>,
+    agents: Vec<(AgentId, MachineHandle)>,
 }
 
 /// Result of a completed game

@@ -198,7 +198,12 @@ pub enum MachineError {
 pub trait MachineProvider: Send + Sync + 'static {
     /// Backend-specific per-match context produced by `init_match` and
     /// consumed by `spawn_*`, `destroy`, and `cleanup_match`.
-    type MatchContext: Send + Sync;
+    ///
+    /// `'static` so a finished match's teardown (destroy + cleanup) can move
+    /// into a background task and overlap the inter-game sleep instead of
+    /// blocking the next match. Both built-in contexts are owned data and
+    /// already satisfy this.
+    type MatchContext: Send + Sync + 'static;
 
     /// Initialize shared resources for a match.
     ///
