@@ -45,30 +45,32 @@ services:
       dockerfile: apps/website/Dockerfile
     container_name: arcadio-website
     environment:
-      HOST: "0.0.0.0"
-      PORT: "3000"
+      # Website config uses nested keys: levels joined with `__` (see
+      # config.example.toml). Secrets are still substituted from the shell/.env.
+      SERVER__HOST: "0.0.0.0"
+      SERVER__PORT: "3000"
       DATABASE_URL: postgresql://arcadio:arcadio@postgres:5432/arcadio
       TOURNAMENT_MANAGER_URL: http://overseer:50051
-      ENABLE_COORDINATOR: true
-      REGISTRY_SERVICE: registry:5001
-      REGISTRY_URL: http://registry:5001
-      REGISTRY_PRIVATE_KEY: ${REGISTRY_PRIVATE_KEY}
-      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
-      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      COORDINATOR__ENABLED: "true"
+      REGISTRY__SERVICE: registry:5001
+      REGISTRY__URL: http://registry:5001
+      REGISTRY__PRIVATE_KEY: ${REGISTRY_PRIVATE_KEY}
+      GITHUB__CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB__CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
       # Local match backend: every machine is a real microVM (own guest kernel),
       # so agent isolation does not rest on the host kernel. Requires /dev/kvm.
-      MACHINE_PROVIDER: microsandbox
+      COORDINATOR__PROVIDER: microsandbox
       # Match traffic relays through published host ports: slot 0 (game host) on
       # 51000, agents on 51001+. No allocator — one match runs at a time.
-      MSB_HOST_PORT_BASE: "51000"
+      COORDINATOR__MICROSANDBOX__HOST_PORT_BASE: "51000"
       # The local registry speaks plain HTTP.
-      MSB_REGISTRY_INSECURE: "true"
+      COORDINATOR__MICROSANDBOX__REGISTRY_INSECURE: "true"
       # Reached over the compose network, not via the host's published port.
-      DOCKER_REGISTRY_PULL_HOST: registry:5001
+      COORDINATOR__MICROSANDBOX__REGISTRY_PULL_HOST: registry:5001
       # msb keeps its own image cache and cannot see the Docker daemon's images:
       # run `just load-game-host` to put this tag there.
-      GAME_HOST_IMAGE: achtung-game-host:local
-      AGENTS_PER_GAME: "2"
+      COORDINATOR__GAME_HOST_IMAGE: achtung-game-host:local
+      COORDINATOR__AGENTS_PER_GAME: "2"
     ports:
       - "3000:3000"
     devices:

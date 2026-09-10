@@ -12,6 +12,7 @@ dependencies = [
  "futures-util",
  "microsandbox",
  "rand 0.9.2",
+ "serde",
  "thiserror 2.0.18",
  "time",
  "tokio",

@@ -1,4 +1,4 @@
-use crate::config::{Config, CoordinatorSettings, ProviderConfig};
+use crate::config::{Config, CoordinatorSettings, MachineProviderKind};
 use crate::web::layout::pages;
 use crate::{
     users::Backend,
@@ -60,8 +60,8 @@ impl App {
         let db = achtung_core::db::connect_and_migrate(&config.database_url).await?;
 
         let registry_auth_config =
-            RegistryAuthConfig::new(config.registry.private_key_pem, config.registry.service)
-                .map_err(|e| format!("invalid REGISTRY_PRIVATE_KEY / registry auth config: {e}"))?;
+            RegistryAuthConfig::new(config.registry.private_key, config.registry.service)
+                .map_err(|e| format!("invalid registry.private_key / registry auth config: {e}"))?;
 
         let user_manager = UserManager::new(db.clone());
         let agent_manager = AgentManager::new(db.clone());
@@ -92,7 +92,7 @@ impl App {
             state,
             api_state,
             registry_auth_config,
-            coordinator: config.coordinator,
+            coordinator: config.coordinator.enabled.then_some(config.coordinator),
         })
     }
 
@@ -105,8 +105,13 @@ impl App {
             Arc::new(tokio::sync::RwLock::new(None));
 
         if let Some(coordinator) = self.coordinator.clone() {
-            match coordinator.provider.clone() {
-                ProviderConfig::Docker(config) => {
+            match coordinator.provider {
+                MachineProviderKind::Docker => {
+                    // Validated present in `Config::load` when provider is docker.
+                    let config = coordinator
+                        .docker
+                        .clone()
+                        .expect("docker network validated in Config::load");
                     let provider = Arc::new(
                         agent_infra::DockerMachineProvider::new(config).map_err(|e| {
                             format!("Failed to create docker machine provider: {e}")
@@ -119,14 +124,16 @@ impl App {
                     );
                     self.spawn_reaper(&coordinator, provider);
                 }
-                ProviderConfig::Microsandbox(config) => {
+                MachineProviderKind::Microsandbox => {
                     // Resolve the runtime here rather than mid-match: without it
                     // every spawn fails, and the first symptom would be a game
                     // that never starts.
                     agent_infra::ensure_runtime_installed().await.map_err(|e| {
                         format!("microsandbox runtime unavailable (requires /dev/kvm): {e}")
                     })?;
-                    let provider = Arc::new(agent_infra::MicrosandboxMachineProvider::new(config));
+                    let provider = Arc::new(agent_infra::MicrosandboxMachineProvider::new(
+                        coordinator.microsandbox.clone(),
+                    ));
                     self.spawn_coordinator(
                         &coordinator,
                         provider.clone(),
@@ -218,7 +225,7 @@ impl App {
         settings: &CoordinatorSettings,
         provider: Arc<P>,
     ) {
-        let reaper_config = settings.reaper.clone();
+        let reaper_config = settings.reaper_config();
 
         let interval = reaper_config.interval;
         let max_age = reaper_config.max_age;

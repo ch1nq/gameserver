@@ -61,7 +61,11 @@ const HOST_INTERNAL: &str = "host.microsandbox.internal";
 const NAME_PREFIX: &str = "achtung-";
 
 /// Configuration for the microsandbox machine provider.
-#[derive(Debug, Clone)]
+/// Deserializable (via its [`Default`]) so the website config can build it
+/// straight from a `[coordinator.microsandbox]` section, filling any omitted
+/// field from the default.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct MicrosandboxMachineProviderConfig {
     /// vCPU limit per sandbox.
     pub cpus: u8,

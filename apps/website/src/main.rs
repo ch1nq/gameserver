@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let addr = config.server.socket_addr()?;
+    let addr = config.socket_addr()?;
 
     App::new(config).await?.serve(addr).await
 }
