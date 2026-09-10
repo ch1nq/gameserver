@@ -485,13 +485,7 @@ impl<P: MachineProvider> GameCoordinator<P> {
         }
     }
 
-    /// Destroy all spawned machines concurrently. Best-effort: logs errors
-    /// but does not abort.
-    ///
-    /// Sequential `stop + remove` costs ~2s per microVM (~12s for host + 5
-    /// agents); the per-machine destroys are independent (distinct sandbox
-    /// names, idempotent via "already gone" tolerance), so `join_all` pays
-    /// roughly the slowest single destroy instead of the sum.
+    /// Destroy all spawned machines. Best-effort: logs errors but does not abort.
     async fn destroy_all(
         &self,
         ctx: &P::MatchContext,
