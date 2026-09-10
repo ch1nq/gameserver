@@ -485,23 +485,36 @@ impl<P: MachineProvider> GameCoordinator<P> {
         }
     }
 
-    /// Destroy all spawned machines. Best-effort: logs errors but does not abort.
+    /// Destroy all spawned machines concurrently. Best-effort: logs errors
+    /// but does not abort.
+    ///
+    /// Sequential `stop + remove` costs ~2s per microVM (~12s for host + 5
+    /// agents); the per-machine destroys are independent (distinct sandbox
+    /// names, idempotent via "already gone" tolerance), so `join_all` pays
+    /// roughly the slowest single destroy instead of the sum.
     async fn destroy_all(
         &self,
         ctx: &P::MatchContext,
         game_host: Option<&MachineHandle>,
         agents: &[(AgentId, MachineHandle)],
     ) {
-        if let Some(handle) = game_host
-            && let Err(e) = self.machine_provider.destroy(ctx, handle).await
-        {
-            tracing::error!("Failed to destroy game host: {}", e);
+        use futures_util::future::join_all;
+
+        let mut targets: Vec<(String, &MachineHandle)> =
+            Vec::with_capacity(agents.len() + usize::from(game_host.is_some()));
+        if let Some(handle) = game_host {
+            targets.push(("game host".to_string(), handle));
         }
         for (agent_id, handle) in agents {
-            if let Err(e) = self.machine_provider.destroy(ctx, handle).await {
-                tracing::error!("Failed to destroy agent {}: {}", agent_id, e);
-            }
+            targets.push((format!("agent {agent_id}"), handle));
         }
+
+        join_all(targets.into_iter().map(|(label, handle)| async move {
+            if let Err(e) = self.machine_provider.destroy(ctx, handle).await {
+                tracing::error!("Failed to destroy {label}: {e}");
+            }
+        }))
+        .await;
     }
 }
 
