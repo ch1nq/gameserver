@@ -51,6 +51,15 @@ pub(crate) const SETUP_TIMEOUT: Duration = Duration::from_secs(5);
 /// dropped and forced to reconnect (which re-snapshots).
 const SPECTATOR_BUFFER: usize = 1024;
 
+/// Game-specific spectator encoding: proto bytes for compat plus
+/// pre-rendered browser JSON. The JSON is rendered once by the [`GameAdapter`],
+/// where the game-specific schema lives; the website relay forwards it
+/// opaquely so it stays game-agnostic.
+pub struct SpectatorPayload {
+    pub proto: Vec<u8>,
+    pub json: String,
+}
+
 /// The per-game seam. Owns only the typed bits: how to build the engine, how to
 /// talk to this game's agents, and how the engine's `PlayerId`/`GameAction`
 /// types map onto that game's agent proto.
@@ -80,18 +89,12 @@ pub trait GameAdapter: Send + Sync + 'static {
     /// Seed spectator state from the freshly built engine (tick 0).
     fn init_spectator(&self, engine: &Self::Engine) -> Self::Spectator;
 
-    /// Advance `spec` to `engine`'s current tick and return the encoded delta
-    /// as `(proto bytes, browser JSON)`. The JSON is rendered once here, where
-    /// the game-specific schema lives; the website relay forwards it opaquely.
-    fn tick_spectator(
-        &self,
-        spec: &mut Self::Spectator,
-        engine: &Self::Engine,
-    ) -> (Vec<u8>, String);
+    /// Advance `spec` to `engine`'s current tick and return the encoded delta.
+    fn tick_spectator(&self, spec: &mut Self::Spectator, engine: &Self::Engine)
+        -> SpectatorPayload;
 
-    /// Encode the full accumulated state as `(snapshot proto bytes, browser
-    /// JSON)` for a joining spectator.
-    fn encode_snapshot(&self, spec: &Self::Spectator) -> (Vec<u8>, String);
+    /// Encode the full accumulated state as a snapshot for a joining spectator.
+    fn encode_snapshot(&self, spec: &Self::Spectator) -> SpectatorPayload;
 
     /// Currently-alive players. Diffed across ticks to derive elimination order.
     fn active_players(&self, engine: &Self::Engine) -> Vec<<Self::Engine as GameState>::PlayerId>;
@@ -259,12 +262,12 @@ impl<G: GameAdapter> GameHost for GrpcGameServer<G> {
             let spec = self.spectator.lock().await;
             let rx = self.spectator_tx.subscribe();
             let snapshot = spec.as_ref().map(|s| {
-                let (payload, json) = self.adapter.encode_snapshot(s);
+                let encoded = self.adapter.encode_snapshot(s);
                 SpectatorFrame {
                     tick: 0,
                     is_snapshot: true,
-                    payload,
-                    json,
+                    payload: encoded.proto,
+                    json: encoded.json,
                 }
             });
             (snapshot, rx)
@@ -385,12 +388,12 @@ async fn run_game<G: GameAdapter>(
         {
             let mut spec = spectator.lock().await;
             if let Some(s) = spec.as_mut() {
-                let (payload, json) = adapter.tick_spectator(s, &engine);
+                let encoded = adapter.tick_spectator(s, &engine);
                 let _ = spectator_tx.send(SpectatorFrame {
                     tick: current_tick,
                     is_snapshot: false,
-                    payload,
-                    json,
+                    payload: encoded.proto,
+                    json: encoded.json,
                 });
             }
         }

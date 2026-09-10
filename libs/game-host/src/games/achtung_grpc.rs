@@ -21,7 +21,7 @@ use std::sync::OnceLock;
 use crate::game::GameState as _;
 use crate::games::achtung::{Achtung, AchtungConfig, ArenaSize, BlobView, GameAction, PlayerId};
 use crate::grpc::gamehost::GameConfig;
-use crate::grpc::{GameAdapter, SETUP_TIMEOUT};
+use crate::grpc::{GameAdapter, SpectatorPayload, SETUP_TIMEOUT};
 
 pub mod agentpb {
     tonic::include_proto!("achtung.agent");
@@ -209,7 +209,7 @@ impl GameAdapter for AchtungGrpc {
         AchtungSpectator::from_engine(engine)
     }
 
-    fn tick_spectator(&self, spec: &mut AchtungSpectator, engine: &Achtung) -> (Vec<u8>, String) {
+    fn tick_spectator(&self, spec: &mut AchtungSpectator, engine: &Achtung) -> SpectatorPayload {
         spec.tick = engine.tick();
         let players = engine
             .spectator_view()
@@ -245,10 +245,13 @@ impl GameAdapter for AchtungGrpc {
         // A serialization failure can only come from an in-memory struct, so
         // fall back to `{}` rather than dropping the tick.
         let json = serde_json::to_string(&delta).unwrap_or_else(|_| "{}".to_string());
-        (delta.encode_to_vec(), json)
+        SpectatorPayload {
+            proto: delta.encode_to_vec(),
+            json,
+        }
     }
 
-    fn encode_snapshot(&self, spec: &AchtungSpectator) -> (Vec<u8>, String) {
+    fn encode_snapshot(&self, spec: &AchtungSpectator) -> SpectatorPayload {
         let players = spec
             .players
             .iter()
@@ -268,7 +271,10 @@ impl GameAdapter for AchtungGrpc {
             players,
         };
         let json = serde_json::to_string(&snapshot).unwrap_or_else(|_| "{}".to_string());
-        (snapshot.encode_to_vec(), json)
+        SpectatorPayload {
+            proto: snapshot.encode_to_vec(),
+            json,
+        }
     }
 
     fn active_players(&self, engine: &Achtung) -> Vec<PlayerId> {

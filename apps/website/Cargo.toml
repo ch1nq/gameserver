@@ -17,7 +17,6 @@ axum-login = { workspace = true }
 figment = { workspace = true }
 maud = { workspace = true }
 oauth2 = { workspace = true }
-prost = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -36,6 +35,3 @@ tracing-subscriber = { workspace = true }
 [dev-dependencies]
 # `Jail` (hermetic env + file fixtures for config tests) is behind this feature.
 figment = { workspace = true, features = ["test"] }
-
-[build-dependencies]
-tonic-build = { workspace = true }
