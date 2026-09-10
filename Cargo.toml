@@ -38,6 +38,9 @@ reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 
+# Configuration (typed, file + env, fail-fast)
+figment = { version = "0.10", features = ["env", "toml"] }
+
 
 # Authentication & Crypto
 bcrypt = "0.17"

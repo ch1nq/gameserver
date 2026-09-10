@@ -36,7 +36,11 @@ use crate::{
 };
 
 /// Configuration for the local Docker machine provider.
-#[derive(Debug, Clone)]
+///
+/// Deserializable so the website config can build it straight from a
+/// `[coordinator.docker]` section. `network` has no default (it is required);
+/// the rest fall back to the same local-dev defaults the website used to apply.
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct DockerMachineProviderConfig {
     /// Docker network to attach match containers to. Must be the same network
     /// the website/coordinator container is on so it can resolve them by name.
@@ -44,10 +48,20 @@ pub struct DockerMachineProviderConfig {
     /// Registry host used to build private image pull refs, reachable by the
     /// Docker daemon (e.g. `localhost:5001`, which the daemon treats as
     /// insecure automatically).
+    #[serde(default = "default_registry_pull_host")]
     pub registry_pull_host: String,
     /// Prefix for container names (e.g. `achtung-`). Shared with the reaper's
     /// match prefix so spawned names and reaped names stay in lock-step.
+    #[serde(default = "default_name_prefix")]
     pub name_prefix: String,
+}
+
+fn default_registry_pull_host() -> String {
+    "localhost:5001".to_string()
+}
+
+fn default_name_prefix() -> String {
+    "achtung-".to_string()
 }
 
 /// Per-match context. Docker needs no shared per-match resources (containers

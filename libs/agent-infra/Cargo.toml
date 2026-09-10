@@ -15,6 +15,7 @@ common = { path = "../common" }
 futures-util = { workspace = true }
 microsandbox = { workspace = true }
 rand = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true }

@@ -1,0 +1,110 @@
+# Example website configuration.
+#
+# Copy to `config.toml` (git-ignored) and edit. Every value can also be set as an
+# environment variable: uppercase the keys and join nesting levels with `__`, so
+# `[github] client_id` becomes `GITHUB__CLIENT_ID` and
+# `[coordinator.docker] network` becomes `COORDINATOR__DOCKER__NETWORK`. The
+# environment overrides the file, which is handy for injecting secrets in a
+# deployment while keeping non-secret defaults here.
+#
+# Point at a different file with the CONFIG_FILE environment variable.
+
+# Postgres connection string (required).
+database_url = "postgres://postgres:postgres@localhost:5432/gameserver"
+
+# ─── Server bind ──────────────────────────────────────────────────────────────
+[server]
+# Defaults shown.
+# host = "0.0.0.0"
+# port = 3000
+
+# ─── GitHub OAuth ─────────────────────────────────────────────────────────────
+# Create a GitHub OAuth app at https://github.com/settings/developers
+[github]
+client_id = "your_github_client_id"
+client_secret = "your_github_client_secret"
+
+# ─── Registry authentication (as seen by the website) ─────────────────────────
+[registry]
+# RSA private key (PEM) used to mint registry auth tokens (required). Generate a
+# key/cert with:
+#   openssl req -x509 -newkey rsa:2048 -nodes \
+#     -keyout private_key.pem -out certificate.pem \
+#     -days 3650 -subj "/CN=registry-auth"
+# TOML multi-line basic strings preserve the newlines directly.
+private_key = """
+-----BEGIN PRIVATE KEY-----
+MIIE...
+-----END PRIVATE KEY-----
+"""
+# service must match the registry's REGISTRY_AUTH_TOKEN_SERVICE (compose sets
+# both to `registry:5001` for in-network DNS). url is how the website reaches the
+# registry API. public_host is rendered into user-facing `docker login/tag/push`
+# hints — it must be reachable from the user's machine (`localhost:5001`), not
+# the in-network name. Defaults shown.
+# service = "registry:5001"
+# url = "http://localhost:5001"
+# public_host = "localhost:5001"
+
+# ─── Coordinator ──────────────────────────────────────────────────────────────
+[coordinator]
+# Run the game coordinator. When false the server runs without spawning matches.
+enabled = true
+
+# Which machine backend to use:
+#   "microsandbox" — real microVMs, own guest kernel per machine (needs /dev/kvm)
+#   "docker"       — local dev: shared network, no sandboxing
+provider = "microsandbox"
+
+# Game host image (public OCI image implementing the gRPC GameHost service).
+game_host_image = "ghcr.io/ch1nq/achtung-game-host:latest"
+
+agents_per_game = 4
+tick_rate_ms = 50
+game_interval_secs = 10
+
+# Arena dimensions passed to each game host (the coordinator is the single source
+# of truth; the host has no arena settings of its own).
+arena_width = 1000
+arena_height = 1000
+
+# How long to keep retrying the first connection to a freshly spawned game host.
+# A deadline on a retry loop, not a fixed wait: the coordinator proceeds as soon
+# as the host answers, so a high value costs nothing on a fast backend.
+connect_timeout_secs = 60
+
+# ─── Docker backend (provider = "docker", local dev) ──────────────────────────
+# Containers share one user-defined network and are addressed by name via
+# Docker's embedded DNS. NOTE: no isolation between agents beyond stock runc.
+# Required when the coordinator is enabled with provider = "docker".
+# [coordinator.docker]
+# network = "gameserver_default"          # required for the docker backend
+# registry_pull_host = "localhost:5001"   # default
+# name_prefix = "achtung-"                # default; shared with the reaper prefix
+
+# ─── microsandbox backend (provider = "microsandbox") ─────────────────────────
+# Every machine is a real microVM with its own guest kernel. REQUIRES /dev/kvm.
+# Match traffic relays through published host ports (slot 0 = game host on
+# host_port_base, agents on host_port_base + n). Defaults shown.
+[coordinator.microsandbox]
+# cpus = 1
+# memory_mib = 512
+host_port_base = 51000
+# Host address the AGENT relay ports bind to (slot 0 always binds loopback). Set
+# to "0.0.0.0" only if the game host can't reach agents via a loopback-bound port.
+# host_bind = "127.0.0.1"
+# Registry host prefixed onto private image pull refs.
+registry_pull_host = "localhost:5001"
+# Pull private agent images over plain HTTP. Local dev only (token in cleartext).
+registry_insecure = false
+# Hard per-sandbox lifetime cap in seconds, host-enforced. Unset means no cap and
+# the reaper is the only cleanup.
+# max_duration_secs = 900
+
+# ─── Reaper ───────────────────────────────────────────────────────────────────
+[coordinator.reaper]
+interval_secs = 300
+max_age_secs = 3600
+# Substring used to match this backend's resources for orphan cleanup, matching
+# containers/sandboxes "achtung-<match>-slot-N". Default "achtung-".
+# prefix = "achtung-"

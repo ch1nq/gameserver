@@ -1,3 +1,4 @@
+use crate::config::{Config, CoordinatorSettings, MachineProviderKind};
 use crate::web::layout::pages;
 use crate::{
     users::Backend,
@@ -8,20 +9,16 @@ use achtung_core::agents::manager::AgentManager;
 use achtung_core::api_tokens::ApiTokenManager;
 use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
-use agent_infra::{
-    DockerMachineProviderConfig, MachineProvider, MicrosandboxMachineProviderConfig, Reaper,
-    ReaperConfig,
-};
+use agent_infra::{MachineProvider, Reaper};
 use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
 use axum_login::{
     AuthManagerLayerBuilder, login_required,
     tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite},
 };
-use coordinator::{CoordinatorConfig, GameCoordinator, ImageUrl};
+use coordinator::GameCoordinator;
 use oauth2::{AuthUrl, ClientId, ClientSecret, TokenUrl, basic::BasicClient};
 use registry_auth::RegistryAuthConfig;
 use sqlx::PgPool;
-use std::env;
 use std::sync::Arc;
 use time::Duration;
 use tower_http::services::ServeDir;
@@ -47,56 +44,38 @@ pub struct App {
     state: AppState,
     api_state: ApiState,
     registry_auth_config: RegistryAuthConfig,
+    /// Coordinator settings, present only when the coordinator is enabled.
+    coordinator: Option<CoordinatorSettings>,
 }
 
 impl App {
-    pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let client_id = env::var("GITHUB_CLIENT_ID")
-            .map(ClientId::new)
-            .expect("GITHUB_CLIENT_ID should be provided.");
-        let client_secret = env::var("GITHUB_CLIENT_SECRET")
-            .map(ClientSecret::new)
-            .expect("GITHUB_CLIENT_SECRET should be provided");
-        let private_key_pem = env::var("REGISTRY_PRIVATE_KEY")
-            .expect("REGISTRY_PRIVATE_KEY must be set for registry authentication (RSA private key in PEM format)");
-        // JWT audience; must equal the registry's REGISTRY_AUTH_TOKEN_SERVICE
-        // (compose sets both to `registry:5001`).
-        let registry_service =
-            env::var("REGISTRY_SERVICE").unwrap_or_else(|_| "registry:5001".to_string());
-        // How this server reaches the registry API. Defaults to the host's
-        // published port so `cargo run` outside compose works; compose
-        // overrides it to `http://registry:5001` for in-network DNS.
-        let registry_url =
-            env::var("REGISTRY_URL").unwrap_or_else(|_| "http://localhost:5001".to_string());
-        // Host rendered into user-facing `docker login/tag/push` hints. Users
-        // run Docker on their own machine, so this is the externally reachable
-        // address (`localhost:5001`), never the in-network name.
-        let registry_public_host =
-            env::var("REGISTRY_PUBLIC_HOST").unwrap_or_else(|_| "localhost:5001".to_string());
+    pub async fn new(config: Config) -> Result<Self, Box<dyn std::error::Error>> {
+        let client_id = ClientId::new(config.github.client_id);
+        let client_secret = ClientSecret::new(config.github.client_secret);
 
         let auth_url = AuthUrl::new("https://github.com/login/oauth/authorize".to_string())?;
         let token_url = TokenUrl::new("https://github.com/login/oauth/access_token".to_string())?;
         let client = BasicClient::new(client_id, Some(client_secret), auth_url, Some(token_url));
 
-        let db_connection_str = std::env::var("DATABASE_URL").expect("Database url not defined");
-        let db = achtung_core::db::connect_and_migrate(&db_connection_str).await?;
+        let db = achtung_core::db::connect_and_migrate(&config.database_url).await?;
 
-        let registry_auth_config = RegistryAuthConfig::new(private_key_pem, registry_service)
-            .expect("Failed to create registry auth config");
+        let registry_auth_config =
+            RegistryAuthConfig::new(config.registry.private_key, config.registry.service)
+                .map_err(|e| format!("invalid registry.private_key / registry auth config: {e}"))?;
 
         let user_manager = UserManager::new(db.clone());
         let agent_manager = AgentManager::new(db.clone());
         let api_token_manager = ApiTokenManager::new(db.clone());
         let registry_token_manager =
             RegistryTokenManager::new(db.clone(), registry_auth_config.clone());
-        let registry_client = RegistryClient::new(registry_url);
+        let registry_client = RegistryClient::new(config.registry.url);
 
         let state = AppState {
             agent_manager: agent_manager.clone(),
             api_token_manager: api_token_manager.clone(),
             registry_token_manager: registry_token_manager.clone(),
             registry_client: registry_client.clone(),
-            registry_public_host,
+            registry_public_host: config.registry.public_host,
         };
 
         let api_state = ApiState {
@@ -113,6 +92,7 @@ impl App {
             state,
             api_state,
             registry_auth_config,
+            coordinator: config.coordinator.enabled.then_some(config.coordinator),
         })
     }
 
@@ -124,37 +104,42 @@ impl App {
         let spectator_registry: coordinator::SpectatorRegistry =
             Arc::new(tokio::sync::RwLock::new(None));
 
-        if env::var("ENABLE_COORDINATOR").is_ok() {
-            let name_prefix = agent_name_prefix();
-            // Defaults to the production microVM backend when unset.
-            let provider = env::var("MACHINE_PROVIDER").unwrap_or_else(|_| "microsandbox".into());
-            match provider.as_str() {
-                "docker" => {
-                    let config = docker_config_from_env(name_prefix.clone());
+        if let Some(coordinator) = self.coordinator.clone() {
+            match coordinator.provider {
+                MachineProviderKind::Docker => {
+                    // Validated present in `Config::load` when provider is docker.
+                    let config = coordinator
+                        .docker
+                        .clone()
+                        .expect("docker network validated in Config::load");
                     let provider = Arc::new(
                         agent_infra::DockerMachineProvider::new(config).map_err(|e| {
                             format!("Failed to create docker machine provider: {e}")
                         })?,
                     );
-                    self.spawn_coordinator(provider.clone(), spectator_registry.clone());
-                    self.spawn_reaper(provider, &name_prefix);
+                    self.spawn_coordinator(
+                        &coordinator,
+                        provider.clone(),
+                        spectator_registry.clone(),
+                    );
+                    self.spawn_reaper(&coordinator, provider);
                 }
-                "microsandbox" => {
+                MachineProviderKind::Microsandbox => {
                     // Resolve the runtime here rather than mid-match: without it
                     // every spawn fails, and the first symptom would be a game
                     // that never starts.
-                    agent_infra::ensure_runtime_installed()
-                        .await
-                        .expect("microsandbox runtime unavailable (requires /dev/kvm)");
-                    let config = microsandbox_config_from_env();
-                    let provider = Arc::new(agent_infra::MicrosandboxMachineProvider::new(config));
-                    self.spawn_coordinator(provider.clone(), spectator_registry.clone());
-                    self.spawn_reaper(provider, &name_prefix);
-                }
-                other => {
-                    panic!(
-                        "Unknown MACHINE_PROVIDER={other:?} (expected \"docker\" or \"microsandbox\")"
-                    )
+                    agent_infra::ensure_runtime_installed().await.map_err(|e| {
+                        format!("microsandbox runtime unavailable (requires /dev/kvm): {e}")
+                    })?;
+                    let provider = Arc::new(agent_infra::MicrosandboxMachineProvider::new(
+                        coordinator.microsandbox.clone(),
+                    ));
+                    self.spawn_coordinator(
+                        &coordinator,
+                        provider.clone(),
+                        spectator_registry.clone(),
+                    );
+                    self.spawn_reaper(&coordinator, provider);
                 }
             }
         }
@@ -219,46 +204,12 @@ impl App {
 
     fn spawn_coordinator<P: MachineProvider + 'static>(
         &self,
+        settings: &CoordinatorSettings,
         provider: Arc<P>,
         spectator_registry: coordinator::SpectatorRegistry,
     ) {
-        let game_host_image = env::var("GAME_HOST_IMAGE")
-            .unwrap_or_else(|_| "ghcr.io/ch1nq/achtung-game-host:latest".to_string());
-        let game_host_image =
-            ImageUrl::new(game_host_image).expect("GAME_HOST_IMAGE must be a valid image URL");
-
-        let config = CoordinatorConfig {
-            game_host_image,
-            agents_per_game: env::var("AGENTS_PER_GAME")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(4),
-            tick_rate_ms: env::var("GAME_TICK_RATE_MS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(50),
-            game_interval: std::time::Duration::from_secs(
-                env::var("GAME_INTERVAL_SECS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(10),
-            ),
-            poll_interval: std::time::Duration::from_secs(1),
-            game_host_grpc_port: 50051,
-            agent_grpc_port: 50052,
-            // Generous enough to cover a microVM boot plus a cold image pull;
-            // the coordinator retries and proceeds as soon as the host answers,
-            // so a high ceiling costs nothing on a fast backend.
-            game_host_connect_timeout: std::time::Duration::from_secs(
-                env::var("GAME_HOST_CONNECT_TIMEOUT_SECS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(60),
-            ),
-        };
-
         let coordinator = GameCoordinator::new(
-            config,
+            settings.coordinator_config(),
             provider,
             Box::new(self.state.agent_manager.clone()),
             Box::new(self.state.registry_token_manager.clone()),
@@ -271,24 +222,10 @@ impl App {
 
     fn spawn_reaper<P: MachineProvider + 'static>(
         &self,
+        settings: &CoordinatorSettings,
         provider: Arc<P>,
-        reaper_prefix_default: &str,
     ) {
-        let reaper_config = ReaperConfig {
-            interval: std::time::Duration::from_secs(
-                env::var("REAPER_INTERVAL_SECS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(300),
-            ),
-            max_age: std::time::Duration::from_secs(
-                env::var("REAPER_MAX_AGE_SECS")
-                    .ok()
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(3600),
-            ),
-            prefix: env::var("REAPER_PREFIX").unwrap_or_else(|_| reaper_prefix_default.to_string()),
-        };
+        let reaper_config = settings.reaper_config();
 
         let interval = reaper_config.interval;
         let max_age = reaper_config.max_age;
@@ -303,64 +240,5 @@ impl App {
             max_age,
             prefix
         );
-    }
-}
-
-fn docker_config_from_env(name_prefix: String) -> DockerMachineProviderConfig {
-    DockerMachineProviderConfig {
-        network: env::var("DOCKER_NETWORK")
-            .expect("DOCKER_NETWORK required when the coordinator is enabled"),
-        registry_pull_host: env::var("DOCKER_REGISTRY_PULL_HOST")
-            .unwrap_or_else(|_| "localhost:5001".to_string()),
-        name_prefix,
-    }
-}
-
-/// Prefix applied to spawned match/agent container names, and also used as the
-/// reaper's default match prefix. Sourced from one place so the naming and the
-/// reaping cannot drift apart. Override with `AGENT_NAME_PREFIX`.
-fn agent_name_prefix() -> String {
-    env::var("AGENT_NAME_PREFIX").unwrap_or_else(|_| agent_name_prefix_default().to_string())
-}
-
-fn agent_name_prefix_default() -> &'static str {
-    "achtung-"
-}
-
-fn microsandbox_config_from_env() -> MicrosandboxMachineProviderConfig {
-    let cpus: u8 = env::var("MACHINE_CPUS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
-    let memory_mib: u32 = env::var("MACHINE_MEM_MIB")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(512);
-    // Whether a guest can reach a loopback-bound published port is undocumented.
-    // If the game host cannot reach agents, widen this to 0.0.0.0 rather than
-    // patching the provider.
-    let host_bind = env::var("MSB_HOST_BIND")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
-
-    MicrosandboxMachineProviderConfig {
-        cpus,
-        memory_mib,
-        host_port_base: env::var("MSB_HOST_PORT_BASE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(51000),
-        host_bind,
-        registry_pull_host: env::var("DOCKER_REGISTRY_PULL_HOST")
-            .unwrap_or_else(|_| "localhost:5001".to_string()),
-        registry_insecure: env::var("MSB_REGISTRY_INSECURE")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false),
-        // Host-enforced backstop for a match that never reports completion; the
-        // reaper is the slower second line of defence.
-        max_duration_secs: env::var("MSB_MAX_DURATION_SECS")
-            .ok()
-            .and_then(|s| s.parse().ok()),
     }
 }

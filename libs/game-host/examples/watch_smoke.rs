@@ -27,7 +27,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     address: "127.0.0.1:50053".into(),
                 },
             ],
-            config: Some(GameConfig { tick_rate_ms: 50 }),
+            config: Some(GameConfig {
+                tick_rate_ms: 50,
+                arena_width: 0,
+                arena_height: 0,
+            }),
         })
         .await?;
     println!("StartGame OK");

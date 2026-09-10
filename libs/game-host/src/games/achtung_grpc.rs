@@ -16,8 +16,11 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
 
+use std::sync::OnceLock;
+
 use crate::game::GameState as _;
 use crate::games::achtung::{Achtung, AchtungConfig, ArenaSize, BlobView, GameAction, PlayerId};
+use crate::grpc::gamehost::GameConfig;
 use crate::grpc::{GameAdapter, SETUP_TIMEOUT};
 
 pub mod agentpb {
@@ -62,29 +65,56 @@ impl Drop for LivenessGuard {
     }
 }
 
-/// Achtung game-host adapter. Holds the arena configuration used to build the
-/// engine and initialize agents.
+/// Achtung game-host adapter.
+///
+/// Arena size is owned by the coordinator and delivered per-match in the
+/// `StartGame` [`GameConfig`]; there are no arena env vars. Since a host process
+/// runs exactly one match, the resolved config is memoised in `config` on the
+/// first `init_engine` so agent initialization (`open_link`) sees the very same
+/// dimensions the engine was built with.
 pub struct AchtungGrpc {
-    config: AchtungConfig,
+    /// Fallback used for any dimension the coordinator leaves unset (zero), and
+    /// for standalone runs that never receive a `GameConfig`.
+    default_config: AchtungConfig,
+    /// Resolved config for this host's single match, set once in `init_engine`.
+    config: OnceLock<AchtungConfig>,
+}
+
+impl Default for AchtungGrpc {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AchtungGrpc {
-    /// Build an adapter, reading arena dimensions from `ARENA_WIDTH` /
-    /// `ARENA_HEIGHT` (default 1000² if unset/unparseable). Edge wrapping off.
-    pub fn from_env() -> Self {
-        let dim = |key: &str| {
-            std::env::var(key)
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .filter(|&v| v > 0)
-                .unwrap_or(1000)
-        };
+    /// Build an adapter with default arena dimensions (1000²). Edge wrapping off.
+    /// Per-match dimensions arrive later via [`GameAdapter::init_engine`].
+    pub fn new() -> Self {
         Self {
-            config: AchtungConfig {
-                arena_width: dim("ARENA_WIDTH"),
-                arena_height: dim("ARENA_HEIGHT"),
+            default_config: AchtungConfig {
+                arena_width: 1000,
+                arena_height: 1000,
                 edge_wrapping: false,
             },
+            config: OnceLock::new(),
+        }
+    }
+
+    /// Arena config for this match: coordinator-provided dimensions, falling
+    /// back to the default for any unset (zero) field.
+    fn match_config(&self, cfg: &GameConfig) -> AchtungConfig {
+        AchtungConfig {
+            arena_width: if cfg.arena_width > 0 {
+                cfg.arena_width
+            } else {
+                self.default_config.arena_width
+            },
+            arena_height: if cfg.arena_height > 0 {
+                cfg.arena_height
+            } else {
+                self.default_config.arena_height
+            },
+            edge_wrapping: self.default_config.edge_wrapping,
         }
     }
 }
@@ -168,8 +198,11 @@ impl GameAdapter for AchtungGrpc {
     type Link = AchtungAgentLink;
     type Spectator = AchtungSpectator;
 
-    fn init_engine(&self, num_players: usize) -> Achtung {
-        Achtung::init_game(&self.config, num_players)
+    fn init_engine(&self, num_players: usize, cfg: &GameConfig) -> Achtung {
+        // Memoise the resolved config so `open_link` initializes agents with the
+        // exact arena the engine uses (a host runs a single match).
+        let config = self.config.get_or_init(|| self.match_config(cfg));
+        Achtung::init_game(config, num_players)
     }
 
     fn init_spectator(&self, engine: &Achtung) -> AchtungSpectator {
@@ -263,9 +296,10 @@ impl GameAdapter for AchtungGrpc {
         player_slot: usize,
         num_players: usize,
     ) -> Result<Self::Link, String> {
+        let config = self.config.get().unwrap_or(&self.default_config);
         let arena = Some(agentpb::ArenaConfig {
-            width: self.config.arena_width,
-            height: self.config.arena_height,
+            width: config.arena_width,
+            height: config.arena_height,
         });
         tokio::time::timeout(
             SETUP_TIMEOUT,
@@ -428,7 +462,8 @@ mod tests {
 
     fn adapter() -> AchtungGrpc {
         AchtungGrpc {
-            config: AchtungConfig::default(),
+            default_config: AchtungConfig::default(),
+            config: OnceLock::new(),
         }
     }
 

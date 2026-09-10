@@ -44,6 +44,11 @@ message AgentEndpoint {
 message GameConfig {
   // Tick rate in milliseconds (how often the game updates)
   uint64 tick_rate_ms = 1;
+
+  // Arena dimensions. The coordinator is the single source of truth for these;
+  // the game host builds its engine from them (0 means "use the host default").
+  uint32 arena_width = 2;
+  uint32 arena_height = 3;
 }
 
 message StartGameResponse {}

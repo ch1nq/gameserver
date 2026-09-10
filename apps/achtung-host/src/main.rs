@@ -2,7 +2,8 @@
 //!
 //! All orchestration lives in `arcadio`'s generic [`GrpcGameServer`]; this just
 //! wires up the Achtung adapter and serves it. `PORT` selects the listen port
-//! (default 50051); arena dimensions come from `ARENA_WIDTH`/`ARENA_HEIGHT`.
+//! (default 50051). Arena dimensions are not read here: the coordinator owns
+//! them and delivers them per-match in the `StartGame` config.
 
 use arcadio::games::achtung_grpc::AchtungGrpc;
 use arcadio::grpc::GrpcGameServer;
@@ -21,7 +22,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(50051);
 
-    GrpcGameServer::new(AchtungGrpc::from_env())
-        .serve(port)
-        .await
+    GrpcGameServer::new(AchtungGrpc::new()).serve(port).await
 }
