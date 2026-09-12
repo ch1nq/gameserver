@@ -46,26 +46,70 @@ impl std::fmt::Display for GameHostAddr {
     }
 }
 
-/// The game host currently hosting a match, or `None` between games. Written by
-/// the coordinator, read by the spectator relay. One game runs at a time, so a
-/// single slot suffices.
-pub type SpectatorRegistry = Arc<RwLock<Option<GameHostAddr>>>;
+/// One player slot in the current match, in `StartGame` order (slot `i` is
+/// controlled by `agents[i]` and renders with `PLAYER_COLORS[i]` in the browser).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LineupEntry {
+    pub slot: usize,
+    pub agent_id: AgentId,
+    pub name: String,
+}
 
-/// Publishes a game host to the [`SpectatorRegistry`] for its lifetime and
-/// clears it on drop, so a cancelled or panicking match never leaves a stale
-/// address pointing at a destroyed host. Clearing an explicit `None` at the end
-/// of the happy path is not enough: match tasks can be cancelled (e.g. a match
-/// timeout) between publish and clear.
+/// Terminal result of a match, published for spectators. Mirrors the
+/// `GameResult` proto but is `Clone + Serialize` for SSE fan-out.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SpectatorResult {
+    pub placements: Vec<AgentPlacement>,
+    pub error: String,
+}
+
+/// What the coordinator shares with the website's spectator relay. One game
+/// runs at a time, so a single slot suffices. `addr` is `Some` while a game
+/// host is live; `lineup` describes the current (or most recent) match and
+/// `last_result` retains the terminal result so late joiners and the relay's
+/// game-over path can display it after the host is destroyed.
+#[derive(Debug, Clone, Default)]
+pub struct SpectatorMatch {
+    pub addr: Option<GameHostAddr>,
+    pub lineup: Vec<LineupEntry>,
+    pub last_result: Option<SpectatorResult>,
+}
+
+/// Shared between the coordinator (writer) and the spectator relay (reader).
+pub type SpectatorRegistry = Arc<RwLock<SpectatorMatch>>;
+
+/// Publishes a game host + lineup to the [`SpectatorRegistry`] for its lifetime
+/// and clears the address on drop, so a cancelled or panicking match never
+/// leaves a stale address pointing at a destroyed host. Clearing an explicit
+/// `None` at the end of the happy path is not enough: match tasks can be
+/// cancelled (e.g. a match timeout) between publish and clear. The lineup and
+/// last result are retained so spectators still see who played and who won.
 struct SpectatorRegistryGuard {
     registry: SpectatorRegistry,
     addr: GameHostAddr,
 }
 
 impl SpectatorRegistryGuard {
-    /// Publish `addr` and return a guard that clears it on drop.
-    async fn publish(registry: SpectatorRegistry, addr: GameHostAddr) -> Self {
-        *registry.write().await = Some(addr.clone());
+    /// Publish `addr` + `lineup` (clearing any stale result) and return a guard
+    /// that clears the address on drop.
+    async fn publish(
+        registry: SpectatorRegistry,
+        addr: GameHostAddr,
+        lineup: Vec<LineupEntry>,
+    ) -> Self {
+        {
+            let mut slot = registry.write().await;
+            slot.addr = Some(addr.clone());
+            slot.lineup = lineup;
+            slot.last_result = None;
+        }
         Self { registry, addr }
+    }
+
+    /// Record the terminal result so the relay can emit a `result` SSE event
+    /// even after the game host is destroyed.
+    async fn set_result(&self, result: SpectatorResult) {
+        self.registry.write().await.last_result = Some(result);
     }
 }
 
@@ -73,12 +117,13 @@ impl Drop for SpectatorRegistryGuard {
     fn drop(&mut self) {
         // Drop can't await, so hand the clear to the runtime. Only clear if we
         // are still the published address, so a newer game isn't clobbered.
+        // Lineup + result are kept for the between-games overlay.
         let registry = self.registry.clone();
         let addr = std::mem::take(&mut self.addr);
         tokio::spawn(async move {
             let mut slot = registry.write().await;
-            if slot.as_ref() == Some(&addr) {
-                *slot = None;
+            if slot.addr.as_ref() == Some(&addr) {
+                slot.addr = None;
             }
         });
     }
@@ -279,8 +324,10 @@ impl<P: MachineProvider> GameCoordinator<P> {
             }
         }
 
-        // Run the game
-        let game_result = self.run_game(&game_host_handle, &agent_handles).await;
+        // Run the game (lineup order == StartGame agent order == player slots).
+        let game_result = self
+            .run_game(&game_host_handle, &agent_handles, agents)
+            .await;
 
         // Destroy machines regardless of game outcome
         self.destroy_all(ctx, Some(&game_host_handle), &agent_handles)
@@ -336,6 +383,7 @@ impl<P: MachineProvider> GameCoordinator<P> {
         &self,
         game_host: &MachineHandle,
         agents: &[(AgentId, MachineHandle)],
+        lineup_info: &[AgentInfo],
     ) -> Result<GameResult, CoordinatorError> {
         // A backend that relays through a published host port reports the port
         // to dial; otherwise the machine is addressed directly on the port its
@@ -380,18 +428,51 @@ impl<P: MachineProvider> GameCoordinator<P> {
 
         tracing::info!("Game started");
 
-        // Publish the game host so the website's spectator relay can stream it.
-        // The guard clears the registry when it drops — on normal completion,
-        // early return, cancellation, or panic — so a stale game host never
-        // lingers between games. Reuse the exact address form used to dial above.
-        let _registry_guard = SpectatorRegistryGuard::publish(
+        // Publish the game host + lineup so the website's spectator relay can
+        // stream frames and render a color legend. The guard clears the address
+        // when it drops — on normal completion, early return, cancellation, or
+        // panic — so a stale game host never lingers between games, while the
+        // lineup + terminal result are retained for the overlay. Reuse the exact
+        // address form used to dial above.
+        let lineup: Vec<LineupEntry> = lineup_info
+            .iter()
+            .enumerate()
+            .map(|(slot, a)| LineupEntry {
+                slot,
+                agent_id: a.id,
+                name: a.name.clone(),
+            })
+            .collect();
+        let registry_guard = SpectatorRegistryGuard::publish(
             self.spectator_registry.clone(),
             GameHostAddr::new(game_host_addr),
+            lineup,
         )
         .await;
 
-        // Poll until the game ends.
-        self.poll_until_done(&mut client).await
+        // Poll until the game ends. The result is published to the registry
+        // *before* returning so the relay can emit a `result` SSE event even
+        // though the game host is destroyed right after this returns.
+        match self.poll_until_done(&mut client).await {
+            Ok(result) => {
+                registry_guard
+                    .set_result(SpectatorResult {
+                        placements: result.placements.clone(),
+                        error: String::new(),
+                    })
+                    .await;
+                Ok(result)
+            }
+            Err(e) => {
+                registry_guard
+                    .set_result(SpectatorResult {
+                        placements: Vec::new(),
+                        error: e.to_string(),
+                    })
+                    .await;
+                Err(e)
+            }
+        }
     }
 
     /// Dial the game host, retrying until it answers or
@@ -513,13 +594,13 @@ impl<P: MachineProvider> GameCoordinator<P> {
 }
 
 /// Result of a completed game
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GameResult {
     pub winner_agent_id: Option<AgentId>,
     pub placements: Vec<AgentPlacement>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AgentPlacement {
     pub agent_id: AgentId,
     pub position: u32,
@@ -543,4 +624,65 @@ pub enum CoordinatorError {
 
     #[error("Game host error: {0}")]
     GameHost(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The guard clears the address on drop (stale hosts never linger) but
+    /// retains the lineup + terminal result for the spectator overlay.
+    #[tokio::test]
+    async fn registry_guard_retains_lineup_and_result_on_drop() {
+        let registry: SpectatorRegistry = Arc::new(RwLock::new(SpectatorMatch::default()));
+        let lineup = vec![LineupEntry {
+            slot: 0,
+            agent_id: 1,
+            name: "alpha".into(),
+        }];
+        let guard = SpectatorRegistryGuard::publish(
+            registry.clone(),
+            GameHostAddr::new("http://game-host:50051"),
+            lineup.clone(),
+        )
+        .await;
+        assert_eq!(
+            registry.read().await.addr,
+            Some(GameHostAddr::new("http://game-host:50051"))
+        );
+        assert_eq!(registry.read().await.lineup, lineup);
+        assert!(registry.read().await.last_result.is_none());
+
+        guard
+            .set_result(SpectatorResult {
+                placements: vec![AgentPlacement {
+                    agent_id: 1,
+                    position: 1,
+                    score: 10,
+                }],
+                error: String::new(),
+            })
+            .await;
+
+        drop(guard);
+        // Drop hands the clear to the runtime; poll briefly for it.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            {
+                let m = registry.read().await;
+                if m.addr.is_none() {
+                    assert_eq!(m.lineup, lineup);
+                    let result = m.last_result.as_ref().expect("result retained");
+                    assert_eq!(result.placements.len(), 1);
+                    assert_eq!(result.placements[0].agent_id, 1);
+                    return;
+                }
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "registry address was not cleared after guard drop"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
 }

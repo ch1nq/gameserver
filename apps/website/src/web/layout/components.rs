@@ -113,11 +113,18 @@ impl Render for AchtungLive {
     fn render(&self) -> Markup {
         html! {
             div class="flex flex-col lg:flex-row gap-4" {
-                div class="border rounded-lg aspect-square overflow-hidden w-full max-w-lg dark:border-gray-700" {
-                    canvas id="achtung-canvas" width="1000" height="1000" class="max-h-full h-full max-w-full w-full";
-                    script src="/static/spectator.js" {};
-                    script { "init_spectator('achtung-canvas');" };
+                div class="relative border rounded-lg aspect-square overflow-hidden w-full max-w-lg dark:border-gray-700" {
+                    canvas id="achtung-canvas" width="1000" height="1000" class="max-h-full h-full max-w-full w-full" {}
+                    div id="spectator-result" class="hidden absolute inset-x-0 bottom-0 max-h-[45%] overflow-y-auto bg-gray-900/85 text-white text-sm p-3" {};
                 }
+                div class="flex flex-col gap-2 w-full max-w-lg" {
+                    div id="spectator-tick" class="text-sm text-gray-500 dark:text-gray-400" { "Waiting for a game…" }
+                    ul id="spectator-legend" class="flex flex-col gap-1 text-sm text-gray-900 dark:text-white" {}
+                }
+                // Scripts last: init_spectator grabs all of the above by id at
+                // call time, so they must already be parsed.
+                script src="/static/spectator.js" {};
+                script { "init_spectator('achtung-canvas');" };
             }
         }
     }
