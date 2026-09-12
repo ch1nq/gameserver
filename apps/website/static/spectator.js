@@ -32,33 +32,76 @@ function init_spectator(canvasId) {
     let state = null;
     // slot -> {agent_id, name}
     let lineup = new Map();
+    // Persistent trail layer: trails are append-only, so deltas paint only
+    // their new blobs here; each frame composites trail + heads. Snapshot
+    // repaints it from scratch.
+    const trailCanvas = document.createElement("canvas");
+    const trailCtx = trailCanvas.getContext("2d");
+    let arenaW = 0;
+    let arenaH = 0;
+    let paintQueued = false;
+
+    function paintBlob(target, blob) {
+        target.beginPath();
+        target.arc(blob.x, blob.y, blob.size, 0, 2 * Math.PI);
+        target.fill();
+    }
+
+    function setupCanvases(arena) {
+        const dpr = window.devicePixelRatio || 1;
+        arenaW = arena.width;
+        arenaH = arena.height;
+        canvas.width = arenaW * dpr;
+        canvas.height = arenaH * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        trailCanvas.width = arenaW * dpr;
+        trailCanvas.height = arenaH * dpr;
+        trailCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function repaintTrailFromState() {
+        trailCtx.save();
+        trailCtx.setTransform(1, 0, 0, 1, 0, 0);
+        trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
+        trailCtx.restore();
+        for (const [id, player] of state.players) {
+            trailCtx.fillStyle = playerColor(id);
+            for (const blob of player.body) paintBlob(trailCtx, blob);
+        }
+    }
 
     function drawMessage(text) {
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = "#000033";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
         ctx.fillStyle = "#8890b5";
         ctx.font = "20px sans-serif";
         ctx.fillText(text, 20, 36);
     }
 
-    function draw() {
+    function paint() {
+        paintQueued = false;
         if (!state) return;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.fillStyle = "#000033";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        for (const [id, player] of state.players) {
-            ctx.fillStyle = playerColor(id);
-            for (const blob of player.body) {
-                ctx.beginPath();
-                ctx.arc(blob.x, blob.y, blob.size, 0, 2 * Math.PI);
-                ctx.fill();
-            }
+        ctx.restore();
+        if (arenaW > 0 && arenaH > 0) ctx.drawImage(trailCanvas, 0, 0, arenaW, arenaH);
+        for (const player of state.players.values()) {
             if (player.alive && player.head) {
                 ctx.fillStyle = "#ffffff";
-                ctx.beginPath();
-                ctx.arc(player.head.x, player.head.y, player.head.size, 0, 2 * Math.PI);
-                ctx.fill();
+                paintBlob(ctx, player.head);
             }
         }
+    }
+
+    function requestPaint() {
+        if (paintQueued) return;
+        paintQueued = true;
+        requestAnimationFrame(paint);
     }
 
     function setTick(tick) {
@@ -124,10 +167,7 @@ function init_spectator(canvasId) {
 
     function applySnapshot(snap) {
         const arena = snap.arena;
-        if (arena) {
-            canvas.width = arena.width;
-            canvas.height = arena.height;
-        }
+        if (arena) setupCanvases(arena);
         const players = new Map();
         for (const p of snap.players || []) {
             players.set(p.player_id, {
@@ -137,8 +177,9 @@ function init_spectator(canvasId) {
             });
         }
         state = { arena: arena || null, players };
+        if (arena) repaintTrailFromState();
         setTick(snap.tick);
-        draw();
+        requestPaint();
     }
 
     function applyDelta(delta) {
@@ -151,15 +192,25 @@ function init_spectator(canvasId) {
             }
             player.alive = p.alive;
             player.head = p.head || player.head;
-            for (const blob of p.new_body || []) player.body.push(blob);
+            if (p.new_body && p.new_body.length > 0) {
+                trailCtx.fillStyle = playerColor(p.player_id);
+                for (const blob of p.new_body) {
+                    player.body.push(blob);
+                    paintBlob(trailCtx, blob);
+                }
+            }
         }
         setTick(delta.tick);
-        draw();
+        requestPaint();
     }
 
     function resetToWaiting() {
         state = null;
         lineup = new Map();
+        trailCtx.save();
+        trailCtx.setTransform(1, 0, 0, 1, 0, 0);
+        trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
+        trailCtx.restore();
         if (legendEl) legendEl.innerHTML = "";
         if (tickEl) tickEl.textContent = "Waiting for a game…";
         clearResult();
