@@ -4,6 +4,7 @@ use crate::{AgentId, AgentImageUrl, ContainerImageUrl, RegistryToken};
 #[derive(Debug, Clone)]
 pub struct AgentInfo {
     pub id: AgentId,
+    pub name: String,
     pub image_url: AgentImageUrl,
 }
 

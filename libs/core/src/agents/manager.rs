@@ -156,9 +156,9 @@ impl AgentManager {
         &self,
         count: usize,
     ) -> Result<Vec<AgentInfo>, AgentManagerError> {
-        let agents = sqlx::query_as::<_, (i64, i64, String)>(
+        let agents = sqlx::query_as::<_, (i64, i64, String, String)>(
             r#"
-            SELECT id, user_id, image_url
+            SELECT id, user_id, name, image_url
             FROM agents
             WHERE status = 'active'
             ORDER BY RANDOM()
@@ -171,7 +171,7 @@ impl AgentManager {
 
         Ok(agents
             .into_iter()
-            .map(|(id, user_id, image_url_str)| {
+            .map(|(id, user_id, name, image_url_str)| {
                 // Parse image URL - should always succeed since we validated on creation
                 let image_url =
                     AgentImageUrl::parse_full(&image_url_str, user_id).unwrap_or_else(|e| {
@@ -183,7 +183,11 @@ impl AgentManager {
                         panic!("Invalid agent image in database: {}", e);
                     });
 
-                AgentInfo { id, image_url }
+                AgentInfo {
+                    id,
+                    name,
+                    image_url,
+                }
             })
             .collect())
     }

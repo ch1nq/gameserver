@@ -101,8 +101,9 @@ impl App {
         // relay (reader). Created unconditionally so the browser endpoint exists
         // even when the coordinator is disabled (it just returns UNAVAILABLE
         // until a game is running).
-        let spectator_registry: coordinator::SpectatorRegistry =
-            Arc::new(tokio::sync::RwLock::new(None));
+        let spectator_registry: coordinator::SpectatorRegistry = Arc::new(
+            tokio::sync::RwLock::new(coordinator::SpectatorMatch::default()),
+        );
 
         if let Some(coordinator) = self.coordinator.clone() {
             match coordinator.provider {
