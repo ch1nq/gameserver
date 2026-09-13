@@ -20,7 +20,7 @@ impl<'a> Render for Base<'a> {
                     link rel="preconnect" href="https://fonts.gstatic.com" crossorigin {}
                     link href="https://fonts.googleapis.com/css2?family=Geologica:wght,CRSV@100..900,0&display=swap" rel="stylesheet" {}
                 }
-                body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white" {
+                body class="bg-[#f1f1ef] dark:bg-gray-900 text-gray-900 dark:text-white font-[Geologica,system-ui,sans-serif]" {
                     (self.content)
                     script src="https://cdn.jsdelivr.net/npm/flowbite@4.0.1/dist/flowbite.min.js" {};
                     script src="https://cdn.jsdelivr.net/npm/flowbite@4.0.1/dist/flowbite.min.js" {};

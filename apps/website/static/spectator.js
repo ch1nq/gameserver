@@ -34,7 +34,7 @@ function init_spectator(canvasId) {
     let lineup = new Map();
 
     function drawMessage(text) {
-        ctx.fillStyle = "#000033";
+        ctx.fillStyle = "#0A0B10";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = "#8890b5";
         ctx.font = "20px sans-serif";
@@ -43,7 +43,7 @@ function init_spectator(canvasId) {
 
     function draw() {
         if (!state) return;
-        ctx.fillStyle = "#000033";
+        ctx.fillStyle = "#0A0B10";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         for (const [id, player] of state.players) {
             ctx.fillStyle = playerColor(id);
@@ -167,7 +167,15 @@ function init_spectator(canvasId) {
     function resetToWaiting() {
         state = null;
         lineup = new Map();
-        if (legendEl) legendEl.innerHTML = "";
+        if (legendEl) {
+            // Muted placeholder holds the "Playing now" layout until the
+            // first lineup arrives (renderLegend clears it).
+            legendEl.innerHTML = "";
+            const li = document.createElement("li");
+            li.className = "text-[13px] text-gray-500 dark:text-gray-400";
+            li.textContent = "No game running.";
+            legendEl.appendChild(li);
+        }
         if (tickEl) tickEl.textContent = "Waiting for a game…";
         clearResult();
         drawMessage("Waiting for a game…");
