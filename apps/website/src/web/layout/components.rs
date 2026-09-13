@@ -103,7 +103,7 @@ impl<'a> Render for Navbar<'a> {
     fn render(&self) -> Markup {
         let link = "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700 px-2.5 py-2 rounded text-sm font-semibold";
         html! {
-            nav class="bg-white dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700" {
+            nav class="border-b border-gray-300 dark:border-gray-700" {
                 div class="mx-auto w-full max-w-[1280px] px-7 flex items-center gap-4 flex-wrap py-2.5" {
                     a href="/" class="flex items-center gap-2.5" {
                         (AchtungLogo)
