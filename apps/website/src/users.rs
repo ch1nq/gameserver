@@ -10,7 +10,7 @@ use oauth2::{
 use serde::Deserialize;
 use sqlx::PgPool;
 
-pub use achtung_core::users::{User, UserId};
+pub use achtung_core::users::{User, UserId, Username};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Credentials {
@@ -91,6 +91,7 @@ impl AuthnBackend for Backend {
             .map_err(Self::Error::Reqwest)?;
 
         // Persist user in our database so we can use `get_user`.
+        let username = Username::from(user_info.login);
         let user = sqlx::query_as(
             r#"
             insert into users (username, access_token)
@@ -100,7 +101,7 @@ impl AuthnBackend for Backend {
             returning *
             "#,
         )
-        .bind(user_info.login)
+        .bind(username)
         .bind(token_res.access_token().secret())
         .fetch_one(&self.db)
         .await

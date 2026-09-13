@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool};
 
-pub use common::UserId;
+pub use common::{UserId, Username};
 
 #[derive(Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
     pub id: UserId,
-    pub username: String,
+    pub username: Username,
     pub access_token: String,
 }
 

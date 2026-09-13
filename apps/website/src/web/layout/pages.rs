@@ -74,7 +74,7 @@ pub fn settings<'a>(
                     div id="profile-picture" class="flex items-center gap-4" {
                         img class="w-16 h-16 rounded-full" src=(components::profile_picture_url(&user)) alt="user photo";
                         div {
-                            p { "Username: " (user.username) }
+                            p { "Username: " (&*user.username) }
                         }
                     }
                 }

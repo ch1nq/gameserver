@@ -1,7 +1,7 @@
 use crate::agents::agent::{Agent, AgentId, AgentImageUrl, AgentName, AgentStatus};
-use crate::users::UserId;
+use crate::users::{UserId, Username};
 use common::{AgentInfo, AgentRepository, ContainerImageUrl};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 
 #[derive(Debug, Clone)]
 pub struct AgentManager {
@@ -12,6 +12,13 @@ pub struct AgentManager {
 pub enum AgentManagerError {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
+}
+
+/// An agent plus its owner's username, for list pages that show `@author`.
+#[derive(Debug, Clone)]
+pub struct AgentWithAuthor {
+    pub agent: Agent,
+    pub username: Username,
 }
 
 impl AgentManager {
@@ -128,6 +135,44 @@ impl AgentManager {
         .fetch_all(&self.db_pool)
         .await?;
         Ok(agents)
+    }
+
+    /// All agents joined with their owner's username, newest first.
+    /// Used by the landing leaderboard to render `@author` + avatar.
+    pub async fn get_agents_with_authors(&self) -> Result<Vec<AgentWithAuthor>, AgentManagerError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT a.id, a.name, a.user_id, a.status, a.image_url, u.username
+            FROM agents a
+            JOIN users u ON u.id = a.user_id
+            ORDER BY a.id DESC
+            "#,
+        )
+        .fetch_all(&self.db_pool)
+        .await?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: AgentId = row.try_get("id")?;
+            let name: String = row.try_get("name")?;
+            let user_id: UserId = row.try_get("user_id")?;
+            let status: AgentStatus = row.try_get("status")?;
+            let image_url_str: String = row.try_get("image_url")?;
+            let username: Username = row.try_get("username")?;
+            let image_url = AgentImageUrl::parse_full(&image_url_str, user_id)
+                .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+            out.push(AgentWithAuthor {
+                agent: Agent {
+                    id,
+                    name: AgentName::from(name),
+                    user_id,
+                    status,
+                    image_url,
+                },
+                username,
+            });
+        }
+        Ok(out)
     }
 
     pub async fn delete_agent(
