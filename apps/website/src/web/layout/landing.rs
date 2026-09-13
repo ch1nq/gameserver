@@ -19,14 +19,10 @@ impl Render for HeroLive {
             section class="flex flex-wrap gap-5 items-start" {
                 div class="flex-[2_1_460px] min-w-0 w-full max-w-[760px] aspect-square relative bg-[#0A0B10] border border-gray-300 dark:border-gray-700 rounded overflow-hidden" {
                     canvas id="achtung-canvas" width="1000" height="1000" class="absolute inset-0 w-full h-full block" {}
-                    div id="spectator-result" class="hidden absolute inset-x-0 bottom-0 max-h-[45%] overflow-y-auto bg-gray-900/85 text-white text-sm p-3" {}
                 }
                 div class="flex-1 min-w-[280px] flex flex-col gap-8" {
-                    div class="flex items-center gap-2.5 flex-wrap" {
+                    div {
                         (Badge { label: "Live" })
-                        span id="spectator-tick" class="text-[13px] text-gray-600 dark:text-gray-400 font-semibold tabular-nums" {
-                            "Waiting for a game…"
-                        }
                     }
                     div class="flex flex-col gap-2" {
                         span class="text-[11px] font-bold tracking-[0.1em] uppercase text-gray-500 dark:text-gray-400" {
