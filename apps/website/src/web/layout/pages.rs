@@ -1,18 +1,24 @@
 use crate::users::{AuthSession, User, UserId};
-use crate::web::layout::components::{self, Page};
+use crate::web::layout::{
+    components::{self, Page},
+    landing,
+};
 use achtung_core::agents::agent::{Agent, AgentImageUrl, AgentStatus};
+use achtung_core::agents::manager::AgentWithAuthor;
 use achtung_core::api_tokens::ApiToken;
 use achtung_core::registry::RegistryToken;
 use achtung_ui::error::Error;
 use maud::{Markup, PreEscaped, Render, html};
 
-pub fn home(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
+pub fn home(session: &AuthSession, entries: Vec<AgentWithAuthor>) -> Page<'_> {
     Page {
-        title: "Achtung! battle",
+        title: "Achtung, die Bots",
         content: html! {
-            div class="flex flex-col lg:flex-row gap-4" {
-                (components::AchtungLive)
-                (components::Leaderboard { agents })
+            div class="flex flex-col gap-11" {
+                (landing::HeroLive)
+                (landing::LeaderboardSection { entries: &entries })
+                (landing::ExplainerSection)
+                (landing::BotFileSection)
             }
         },
         session,
