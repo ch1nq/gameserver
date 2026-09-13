@@ -5,9 +5,10 @@
 //! win-rate and match counts render as em-dashes until ranking lands.
 
 use achtung_core::agents::manager::AgentWithAuthor;
-use achtung_ui::avatar::AuthorAvatar;
-use achtung_ui::badge::LiveBadge;
-use achtung_ui::code::{CodeTab, CodeTabs};
+use achtung_ui::avatar::Avatar;
+use achtung_ui::badge::Badge;
+use achtung_ui::code::CodeBlock;
+use achtung_ui::tabs::{Tab, Tabs};
 use maud::{Markup, Render, html};
 
 pub struct HeroLive;
@@ -22,7 +23,7 @@ impl Render for HeroLive {
                 }
                 div class="flex-1 min-w-[280px] flex flex-col gap-8" {
                     div class="flex items-center gap-2.5 flex-wrap" {
-                        (LiveBadge)
+                        (Badge { label: "Live" })
                         span id="spectator-tick" class="text-[13px] text-gray-600 dark:text-gray-400 font-semibold tabular-nums" {
                             "Waiting for a game…"
                         }
@@ -100,7 +101,7 @@ impl Render for LeaderboardSection<'_> {
                                     }
                                     td class="px-3.5 py-3 text-gray-600 dark:text-gray-300" {
                                         span class="flex items-center gap-2" {
-                                            (AuthorAvatar { username: &entry.username })
+                                            (github_avatar(&entry.username))
                                             span { "@" (&*entry.username) }
                                         }
                                     }
@@ -142,6 +143,20 @@ fn placeholder_cell_right_bold() -> Markup {
     }
 }
 
+/// GitHub-specific avatar: builds the `github.com/{}.png` URL and the
+/// initial fallback, then renders the generic [`Avatar`].
+fn github_avatar(username: &str) -> Markup {
+    let initial = username
+        .chars()
+        .next()
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_else(|| "?".to_string());
+    let src = format!("https://github.com/{username}.png?size=40");
+    html! {
+        (Avatar { src: Some(&src), fallback: &initial })
+    }
+}
+
 pub struct ExplainerSection;
 
 impl Render for ExplainerSection {
@@ -178,6 +193,18 @@ const JS_INSTALL: &str = "$ npm i -g achtung-cli\n$ achtung init --node         
 
 pub struct BotFileSection;
 
+fn code_panel(code: &str, install: &str) -> Markup {
+    html! {
+        (CodeBlock { code })
+        div class="flex flex-col gap-2 pt-4" {
+            span class="text-[13px] text-gray-500 dark:text-gray-400" {
+                "Install the CLI once, then build and push the image:"
+            }
+            (CodeBlock { code: install })
+        }
+    }
+}
+
 impl Render for BotFileSection {
     fn render(&self) -> Markup {
         html! {
@@ -188,12 +215,12 @@ impl Render for BotFileSection {
                 p class="m-0 text-[15px] leading-relaxed text-gray-600 dark:text-gray-300 max-w-[68ch]" {
                     "Bots run as containers, so the language is up to you — the SDK just speaks the match protocol for you. Package the program as an OCI image and push it to the registry on this site; the CLI wraps the build and push into one command, and each push becomes a new version you can roll back to."
                 }
-                (CodeTabs {
+                (Tabs {
                     group: "lang",
                     tabs: vec![
-                        CodeTab { id: "python", label: "Python", code: PYTHON_CODE, install: PYTHON_INSTALL },
-                        CodeTab { id: "rust", label: "Rust", code: RUST_CODE, install: RUST_INSTALL },
-                        CodeTab { id: "javascript", label: "JavaScript", code: JS_CODE, install: JS_INSTALL },
+                        Tab { id: "python", label: "Python", content: code_panel(PYTHON_CODE, PYTHON_INSTALL) },
+                        Tab { id: "rust", label: "Rust", content: code_panel(RUST_CODE, RUST_INSTALL) },
+                        Tab { id: "javascript", label: "JavaScript", content: code_panel(JS_CODE, JS_INSTALL) },
                     ],
                 })
                 p class="m-0 text-[13px] text-gray-500 dark:text-gray-400" {

@@ -1,6 +1,5 @@
 use crate::users::{AuthSession, User};
 use achtung_ui::error::Error;
-use achtung_ui::logo::{AchtungLogo, GithubMark};
 use maud::{Markup, Render, html};
 
 // Re-export components from the shared library for convenience
@@ -84,6 +83,22 @@ pub struct Navbar<'a> {
     pub session: &'a AuthSession,
 }
 
+/// Brand mark for the navbar. Lives in the website (not `achtung-ui`)
+/// because it is product-specific, not a reusable primitive.
+pub struct AchtungLogo;
+
+impl Render for AchtungLogo {
+    fn render(&self) -> Markup {
+        html! {
+            svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" class="block flex-none" {
+                rect x="0.5" y="0.5" width="23" height="23" rx="4" fill="#0A0B10" {}
+                path d="M4 18 C 8 18, 7 6, 12 6 C 17 6, 16 16, 20 13" stroke="#e0338a" stroke-width="2.4" fill="none" stroke-linecap="round" {}
+                circle cx="20" cy="13" r="1.9" fill="#ffd84a" {}
+            }
+        }
+    }
+}
+
 impl<'a> Render for Navbar<'a> {
     fn render(&self) -> Markup {
         let link = "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700 px-2.5 py-2 rounded text-sm font-semibold";
@@ -100,7 +115,7 @@ impl<'a> Render for Navbar<'a> {
                         a href="#board" class=(link) { "Leaderboard" }
                         a href="#bot-file" class=(link) { "Docs" }
                         a href="https://github.com" class=(format!("{link} inline-flex items-center gap-1.5")) {
-                            (GithubMark)
+                            (Icon::GithubLogo)
                             "Star"
                         }
                         @if let Some(user) = &self.session.user {
