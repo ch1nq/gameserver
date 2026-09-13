@@ -1,6 +1,6 @@
 use crate::users::{AuthSession, User};
-use achtung_core::agents::agent::Agent;
 use achtung_ui::error::Error;
+use achtung_ui::logo::{AchtungLogo, GithubMark};
 use maud::{Markup, Render, html};
 
 // Re-export components from the shared library for convenience
@@ -31,13 +31,11 @@ impl<'a> Render for Page<'a> {
             title: self.title,
             content: html! {
                 (Navbar { session: self.session })
-                div class="container mx-10 mt-10" {
+                div class="mx-auto w-full max-w-[1280px] px-7 pt-6 pb-16" {
                     @for error in &self.errors {
                         (error)
                     }
-                    div class="mx-auto" {
-                        (self.content)
-                    }
+                    (self.content)
                 }
             },
         }
@@ -88,67 +86,34 @@ pub struct Navbar<'a> {
 
 impl<'a> Render for Navbar<'a> {
     fn render(&self) -> Markup {
-        let item_styles = "block py-2 px-3 text-gray-900 border-b border-gray-100 hover:bg-gray-50 md:hover:bg-transparent md:border-0 md:hover:text-blue-600 md:p-0 dark:text-white md:dark:hover:text-blue-500 dark:hover:bg-gray-700 dark:hover:text-blue-500 md:dark:hover:bg-transparent dark:border-gray-700";
+        let link = "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700 px-2.5 py-2 rounded text-sm font-semibold";
         html! {
-            nav class="bg-white py-2 px-10 border-b border-gray-200 dark:bg-gray-800 dark:border-gray-700" {
-                div class="container flex justify-between items-center" {
-                    a href="/" class="text-2xl font-bold text-gray-900 dark:text-white font-[Geologica] tracking-tighter" { "Achtung battle" }
-                    div class="flex items-center gap-4" {
+            nav class="bg-white dark:bg-gray-800 border-b border-gray-300 dark:border-gray-700" {
+                div class="mx-auto w-full max-w-[1280px] px-7 flex items-center gap-4 flex-wrap py-2.5" {
+                    a href="/" class="flex items-center gap-2.5" {
+                        (AchtungLogo)
+                        span class="font-[Geologica] font-semibold text-[19px] tracking-tight text-gray-900 dark:text-white" {
+                            "Achtung, die Bots"
+                        }
+                    }
+                    div class="ml-auto flex items-center gap-2 flex-wrap" {
+                        a href="#board" class=(link) { "Leaderboard" }
+                        a href="#bot-file" class=(link) { "Docs" }
+                        a href="https://github.com" class=(format!("{link} inline-flex items-center gap-1.5")) {
+                            (GithubMark)
+                            "Star"
+                        }
                         @if let Some(user) = &self.session.user {
                             (UserDropdown { user });
                         }
                         @else {
-                            a href="/login" class=(item_styles) { "Sign in"}
+                            a href="/login" class="text-sm font-semibold text-white dark:text-gray-900 bg-gray-900 dark:bg-white hover:bg-blue-700 dark:hover:bg-blue-200 px-3.5 py-2 rounded" {
+                                "Sign in"
+                            }
                         }
                     }
                 }
             }
         }
-    }
-}
-
-pub struct AchtungLive;
-
-impl Render for AchtungLive {
-    fn render(&self) -> Markup {
-        html! {
-            div class="flex flex-col lg:flex-row gap-4" {
-                div class="relative border rounded-lg aspect-square overflow-hidden w-full max-w-lg dark:border-gray-700" {
-                    canvas id="achtung-canvas" width="1000" height="1000" class="max-h-full h-full max-w-full w-full" {}
-                    div id="spectator-result" class="hidden absolute inset-x-0 bottom-0 max-h-[45%] overflow-y-auto bg-gray-900/85 text-white text-sm p-3" {};
-                }
-                div class="flex flex-col gap-2 w-full max-w-lg" {
-                    div id="spectator-tick" class="text-sm text-gray-500 dark:text-gray-400" { "Waiting for a game…" }
-                    ul id="spectator-legend" class="flex flex-col gap-1 text-sm text-gray-900 dark:text-white" {}
-                }
-                // Scripts last: init_spectator grabs all of the above by id at
-                // call time, so they must already be parsed.
-                script src="/static/spectator.js" {};
-                script { "init_spectator('achtung-canvas');" };
-            }
-        }
-    }
-}
-
-pub struct Leaderboard {
-    pub agents: Vec<Agent>,
-}
-
-impl Render for Leaderboard {
-    fn render(&self) -> Markup {
-        table::Table {
-            headers: vec!["Name"],
-            rows: html! {
-                @for agent in &self.agents {
-                    (table::Row {
-                        content: html! {
-                            (table::Cell { content: html! { (&*agent.name) }, is_primary: true })
-                        }
-                    })
-                }
-            },
-            extra_classes: Some("w-full max-w-lg"),
-        }
-        .render()
     }
 }
