@@ -100,7 +100,6 @@ version = "0.1.0"
 name = "achtung-ui"
 version = "0.1.0"
 dependencies = [
- "common",
  "maud",
 ]
 

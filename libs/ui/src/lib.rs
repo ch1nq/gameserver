@@ -7,9 +7,9 @@ pub mod code;
 pub mod error;
 pub mod form;
 pub mod icon;
-pub mod logo;
 pub mod modal;
 pub mod table;
+pub mod tabs;
 
 // Re-export commonly used types
 pub use icon::Icon;
