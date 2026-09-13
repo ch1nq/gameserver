@@ -66,20 +66,27 @@ function init_spectator(canvasId) {
         if (tickEl) tickEl.textContent = `Tick ${tick}`;
     }
 
+    // Landing "Playing now" rows: color bar + name + #agent_id,
+    // styled like the mockup player tiles (bordered, tabular meta).
     function renderLegend() {
         if (!legendEl) return;
         legendEl.innerHTML = "";
         const slots = [...lineup.entries()].sort((a, b) => a[0] - b[0]);
         for (const [slot, entry] of slots) {
             const li = document.createElement("li");
-            li.className = "flex items-center gap-2";
-            const dot = document.createElement("span");
-            dot.className = "inline-block h-3 w-3 rounded-full";
-            dot.style.backgroundColor = playerColor(slot);
+            li.className = "h-[26px] flex items-center gap-2 px-2.5 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800";
+            const bar = document.createElement("span");
+            bar.className = "block flex-none w-4 h-[3px] rounded";
+            bar.style.backgroundColor = playerColor(slot);
             const label = document.createElement("span");
-            label.textContent = `${entry.name} (#${entry.agent_id})`;
-            li.appendChild(dot);
+            label.className = "flex-1 min-w-0 font-semibold text-xs text-gray-900 dark:text-white overflow-hidden text-ellipsis whitespace-nowrap";
+            label.textContent = entry.name;
+            const meta = document.createElement("span");
+            meta.className = "flex-none text-[11px] text-gray-500 dark:text-gray-400 tabular-nums";
+            meta.textContent = `#${entry.agent_id}`;
+            li.appendChild(bar);
             li.appendChild(label);
+            li.appendChild(meta);
             legendEl.appendChild(li);
         }
     }
