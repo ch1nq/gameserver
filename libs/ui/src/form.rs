@@ -45,15 +45,15 @@ impl<'a> Render for TextInput<'a> {
     fn render(&self) -> Markup {
         html! {
             div class="col-span-2" {
-                label for=(self.id) class="block mb-2 text-sm font-medium text-gray-900 dark:text-white" {
+                label for=(self.id) class="block mb-2 text-sm font-medium text-[var(--ink)]" {
                     (self.label) @if self.required { " *" }
                 }
                 input type="text" name=(self.id) id=(self.id)
-                    class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500"
+                    class="block w-full p-2.5 text-sm rounded-lg bg-[var(--surface-2)] border border-[var(--line)] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none focus:border-[var(--accent)]"
                     placeholder=(self.placeholder)
                     required[self.required] {}
                 @if let Some(text) = self.helper_text {
-                    p class="mt-1 text-xs text-gray-500 dark:text-gray-400" { (text) }
+                    p class="mt-1 text-xs text-[var(--muted)]" { (text) }
                 }
             }
         }
@@ -86,10 +86,10 @@ impl<'a> Render for SelectInput<'a> {
     fn render(&self) -> Markup {
         html! {
             div class="col-span-2" {
-                label for=(self.id) class="block mb-2.5 text-sm font-medium text-heading" {
+                label for=(self.id) class="block mb-2.5 text-sm font-medium text-[var(--ink)]" {
                     (self.label) @if self.required { " *" }
                 }
-                select id=(self.id) name=(self.id) required[self.required] class="block w-full px-3 py-2.5 bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-primary-600 focus:border-primary-600 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white dark:focus:ring-primary-500 dark:focus:border-primary-500" {
+                select id=(self.id) name=(self.id) required[self.required] class="block w-full px-3 py-2.5 text-sm rounded-lg bg-[var(--surface-2)] border border-[var(--line)] text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]" {
                     option value="" { (self.default_label) }
                     @for opt in &self.options {
                         option value=(opt.value) { (opt.label) }
@@ -107,7 +107,7 @@ pub struct HelperText<'a> {
 impl<'a> Render for HelperText<'a> {
     fn render(&self) -> Markup {
         html! {
-            p class="mb-4 text-sm text-gray-500 dark:text-gray-400" { (self.text) }
+            p class="mb-4 text-sm text-[var(--muted)]" { (self.text) }
         }
     }
 }

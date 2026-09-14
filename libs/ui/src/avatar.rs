@@ -13,7 +13,7 @@ impl Render for Avatar<'_> {
     fn render(&self) -> Markup {
         html! {
             span class="relative block w-5 h-5 flex-none" {
-                span class="absolute inset-0 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-300 text-[10px] font-bold flex items-center justify-center" {
+                span class="absolute inset-0 rounded-full bg-[var(--avatar)] text-[var(--muted)] text-[10px] font-bold flex items-center justify-center" {
                     (self.fallback)
                 }
                 @if let Some(src) = self.src {

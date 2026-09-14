@@ -40,16 +40,16 @@ pub fn login(next: Option<String>, message: Option<String>) -> Markup {
         title: "Login",
         content: html! {
             div class="flex items-center justify-center h-screen" {
-                div class="max-w-sm p-6 bg-white border border-gray-200 rounded-lg shadow-sm dark:bg-gray-800 dark:border-gray-700" {
-                    h5 class="mb-2 text-2xl font-bold tracking-tight text-gray-900 dark:text-white" { "Login" }
-                    p class="mb-3 font-normal text-gray-700 dark:text-gray-400" { "Sign in with your Github account." }
+                div class="max-w-sm p-6 bg-[var(--surface)] border border-[var(--line)] rounded-lg shadow-sm" {
+                    h5 class="mb-2 text-2xl font-bold tracking-tight text-[var(--ink)]" { "Login" }
+                    p class="mb-3 font-normal text-[var(--mid)]" { "Sign in with your Github account." }
 
                     @if let Some(message) = message {
                         span { (message) }
                     }
 
                     form method="post" {
-                        button type="submit" class="text-white bg-[#24292F] hover:bg-[#24292F]/90 focus:ring-4 focus:outline-none focus:ring-[#24292F]/50 font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center dark:focus:ring-gray-500 dark:hover:bg-[#050708]/30 me-2 mb-2" {
+                        button type="submit" class="text-white bg-[#24292F] hover:bg-[#24292F]/90 focus:ring-4 focus:outline-none font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center me-2 mb-2" {
                             (components::Icon::GithubLogo)
                             "Sign in with Github"
                         }
@@ -148,7 +148,7 @@ pub fn api_token_created(
         &plaintext_token,
         html! {
             p class="font-medium mb-2" { "CLI config (~/.config/achtung/config.toml):" }
-            code class="text-xs block bg-gray-100 dark:bg-gray-700 p-3 rounded-lg" {
+            code class="text-xs block bg-[var(--fill)] text-[var(--mid)] p-3 rounded-lg" {
                 "api_url = \"http://localhost:3000\"\n"
                 "user_id = " (user_id) "\n"
                 "api_token = \"" (plaintext_token) "\""
@@ -196,13 +196,13 @@ fn token_created_page(
 
             (components::alert::Alert::warning("Important!", "Make sure to copy your token now. You won't be able to see it again!"))
 
-            p class="text-base leading-relaxed text-gray-500 dark:text-gray-400" {
+            p class="text-base leading-relaxed text-[var(--muted)]" {
                 (description)
             }
 
             div class="relative" {
-                input type="text" id="token-value" readonly="" value=(plaintext_token) class="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 pr-20 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white font-mono" {}
-                button onclick="copyToken()" class="absolute end-2 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg p-2 inline-flex items-center justify-center" {
+                input type="text" id="token-value" readonly="" value=(plaintext_token) class="bg-[var(--surface-2)] border border-[var(--line)] text-[var(--ink)] text-sm rounded-lg focus:outline-none focus:border-[var(--accent)] block w-full p-2.5 pr-20 font-mono" {}
+                button onclick="copyToken()" class="absolute end-2 top-1/2 -translate-y-1/2 text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--ink)] rounded-lg p-2 inline-flex items-center justify-center" {
                     span id="default-icon" {
                         (components::Icon::Copy)
                     }
@@ -215,7 +215,7 @@ fn token_created_page(
             (usage_snippet)
 
             div class="flex justify-end" {
-                a href="/settings" class="text-white bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800" {
+                a href="/settings" class="font-semibold rounded-[3px] text-sm px-5 py-2.5 text-center text-[var(--accent-ink)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] focus:ring-4 focus:outline-none" style="color:var(--accent-ink);" {
                     "Done"
                 }
             }
@@ -273,7 +273,7 @@ fn token_section(
                                     (components::table::Cell {
                                         content: html! {
                                             form method="post" action=(format!("{}/{}/revoke", revoke_base_url, token.id)) onsubmit="return confirm('Are you sure you want to revoke this token? This action cannot be undone.');" {
-                                                button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" {
+                                                button type="submit" class="text-[var(--pink)]" {
                                                     "Revoke"
                                                 }
                                             }
@@ -332,7 +332,7 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
                 (components::table::Cell { content: html! { (&*agent.name) }, is_primary: true })
                 (components::table::Cell {
                     content: html! {
-                        span class="text-gray-500 dark:text-gray-400 text-xs font-mono truncate max-w-xs" {
+                        span class="text-[var(--muted)] text-xs font-mono truncate max-w-xs" {
                             (agent.image_url.as_ref())
                         }
                     },
@@ -345,7 +345,7 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
                             AgentStatus::Inactive => "bg-gray-400",
                         };
                         span class=(format!("h-3 w-3 rounded-full inline-block me-1 {}", status_color)) {}
-                        span class="text-gray-900 dark:text-white" { (format!("{:?}", agent.status)) }
+                        span class="text-[var(--ink)]" { (format!("{:?}", agent.status)) }
                     },
                     is_primary: false
                 })
@@ -355,17 +355,17 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
                             @match agent.status {
                                 AgentStatus::Active => {
                                     form method="post" action=(format!("/agents/{}/deactivate", agent.id)) {
-                                        button type="submit" class="text-yellow-600 hover:text-yellow-800 dark:text-yellow-400" { "Deactivate" }
+                                        button type="submit" class="text-yellow-600 hover:text-yellow-800" { "Deactivate" }
                                     }
                                 }
                                 AgentStatus::Inactive => {
                                     form method="post" action=(format!("/agents/{}/activate", agent.id)) {
-                                        button type="submit" class="text-green-600 hover:text-green-800 dark:text-green-400" { "Activate" }
+                                        button type="submit" class="text-green-600 hover:text-green-800" { "Activate" }
                                     }
                                 }
                             }
                             form method="post" action=(format!("/agents/{}/delete", agent.id)) onsubmit="return confirm('Are you sure you want to delete this agent?');" {
-                                button type="submit" class="text-red-600 hover:text-red-800 dark:text-red-400" { "Delete" }
+                                button type="submit" class="text-[var(--pink)]" { "Delete" }
                             }
                         }
                     },

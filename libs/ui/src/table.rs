@@ -23,8 +23,8 @@ impl<'a> Render for Table<'a> {
 
         html! {
             div class=(wrapper_class) {
-                table class="w-full text-sm text-left rtl:text-right text-gray-500 dark:text-gray-400" {
-                    thead class="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400" {
+                table class="w-full text-sm text-left rtl:text-right text-[var(--muted)]" {
+                    thead class="text-xs uppercase bg-[var(--surface-2)] text-[var(--muted)]" {
                         tr {(headers)}
                     }
                     tbody {(self.rows)}
@@ -54,7 +54,7 @@ pub struct Cell {
 impl Render for Cell {
     fn render(&self) -> Markup {
         let class = if self.is_primary {
-            "px-6 py-4 font-medium text-gray-900 whitespace-nowrap dark:text-white"
+            "px-6 py-4 font-medium whitespace-nowrap text-[var(--ink)]"
         } else {
             "px-6 py-4"
         };
@@ -72,7 +72,7 @@ pub struct Row {
 impl Render for Row {
     fn render(&self) -> Markup {
         html! {
-            tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 border-gray-200" {
+            tr class="bg-[var(--surface)] border-b border-[var(--line-soft)]" {
                 (self.content)
             }
         }
@@ -87,8 +87,8 @@ pub struct EmptyRow<'a> {
 impl<'a> Render for EmptyRow<'a> {
     fn render(&self) -> Markup {
         html! {
-            tr class="bg-white border-b dark:bg-gray-800 dark:border-gray-700 border-gray-200" {
-                td colspan=(self.colspan) class="px-6 py-4 text-center text-gray-500 dark:text-gray-400" {
+            tr class="bg-[var(--surface)] border-b border-[var(--line-soft)]" {
+                td colspan=(self.colspan) class="px-6 py-4 text-center text-[var(--muted)]" {
                     (self.message)
                 }
             }

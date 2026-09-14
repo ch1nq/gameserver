@@ -8,7 +8,7 @@ pub struct CodeBlock<'a> {
 impl Render for CodeBlock<'_> {
     fn render(&self) -> Markup {
         html! {
-            div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded p-4 max-w-[760px] overflow-x-auto font-mono text-[13.5px] leading-[1.75] text-gray-700 dark:text-gray-300" {
+            div class="bg-[var(--surface-2)] border border-[var(--line)] rounded px-[18px] py-4 max-w-[760px] overflow-x-auto font-mono text-[13.5px] leading-[1.75] text-[var(--mid)]" {
                 pre class="whitespace-pre m-0" { (self.code) }
             }
         }

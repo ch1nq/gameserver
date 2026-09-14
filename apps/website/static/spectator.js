@@ -14,8 +14,8 @@
 // Distinct-ish colors per player slot; wraps if there are more players.
 // Must match the slot order of the `lineup` event (slot i == player_id i).
 const PLAYER_COLORS = [
-    "#ff4d4d", "#4dd2ff", "#7cff4d", "#ffd24d",
-    "#c04dff", "#ff8c4d", "#4dffbf", "#ff4da6",
+    "#5fc9ff", "#ff6fa8", "#ffd84a", "#7bf0a8",
+    "#b78cff", "#ff9a4d", "#4de0d0", "#f45b5b",
 ];
 
 function playerColor(id) {
@@ -90,7 +90,7 @@ function init_spectator(canvasId) {
         for (const [slot, entry] of slots) {
             const li = document.createElement("li");
             const bar = document.createElement("span");
-            bar.className = "block flex-none w-4 h-[3px] rounded";
+            bar.className = "block flex-none w-4 h-[3px] rounded-[2px]";
             bar.style.backgroundColor = playerColor(slot);
             const label = document.createElement("span");
             label.textContent = entry.name;
@@ -115,24 +115,24 @@ function init_spectator(canvasId) {
             const alive = !player || player.alive;
             const place = placements.get(slot);
             if (!alive) {
-                row.li.className = "h-[26px] flex items-center gap-2 px-2.5 border border-gray-300 dark:border-gray-700 rounded bg-transparent";
+                row.li.className = "h-[26px] flex items-center gap-[9px] px-2.5 border border-[var(--line)] rounded bg-transparent";
                 row.bar.style.opacity = "0.35";
-                row.name.className = "flex-1 min-w-0 font-semibold text-xs text-gray-500 dark:text-gray-400 overflow-hidden text-ellipsis whitespace-nowrap";
-                row.meta.className = "flex-none text-[11px] font-bold text-gray-500 dark:text-gray-400 tabular-nums";
+                row.name.className = "flex-1 min-w-0 font-semibold text-xs text-[var(--muted)] overflow-hidden text-ellipsis whitespace-nowrap";
+                row.meta.className = "flex-none text-[11px] font-bold text-[var(--muted)] tabular-nums";
                 row.meta.textContent = place === undefined ? "–" : place;
             } else if (place !== undefined) {
                 // Sole survivor: surface tile like the mockup winner row,
                 // placement in green.
-                row.li.className = "h-[26px] flex items-center gap-2 px-2.5 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800";
+                row.li.className = "h-[26px] flex items-center gap-[9px] px-2.5 border border-[var(--line)] rounded bg-[var(--surface)]";
                 row.bar.style.opacity = "";
-                row.name.className = "flex-1 min-w-0 font-semibold text-xs text-gray-900 dark:text-white overflow-hidden text-ellipsis whitespace-nowrap";
-                row.meta.className = "flex-none text-[11px] font-bold text-[#146b45] dark:text-[#4cc38a] tabular-nums";
+                row.name.className = "flex-1 min-w-0 font-semibold text-xs text-[var(--ink)] overflow-hidden text-ellipsis whitespace-nowrap";
+                row.meta.className = "flex-none text-[11px] font-bold text-[var(--green)] tabular-nums";
                 row.meta.textContent = place;
             } else {
-                row.li.className = "h-[26px] flex items-center gap-2 px-2.5 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800";
+                row.li.className = "h-[26px] flex items-center gap-[9px] px-2.5 border border-[var(--line)] rounded bg-[var(--surface)]";
                 row.bar.style.opacity = "";
-                row.name.className = "flex-1 min-w-0 font-semibold text-xs text-gray-900 dark:text-white overflow-hidden text-ellipsis whitespace-nowrap";
-                row.meta.className = "flex-none text-[11px] text-gray-500 dark:text-gray-400 tabular-nums";
+                row.name.className = "flex-1 min-w-0 font-semibold text-xs text-[var(--ink)] overflow-hidden text-ellipsis whitespace-nowrap";
+                row.meta.className = "flex-none text-[11px] text-[var(--muted)] tabular-nums";
                 row.meta.textContent = `#${entry.agent_id}`;
             }
         }
@@ -208,7 +208,7 @@ function init_spectator(canvasId) {
             // first lineup arrives (renderLegend clears it).
             legendEl.innerHTML = "";
             const li = document.createElement("li");
-            li.className = "text-[13px] text-gray-500 dark:text-gray-400";
+            li.className = "text-[13px] text-[var(--muted)]";
             li.textContent = "No game running.";
             legendEl.appendChild(li);
         }
