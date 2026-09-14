@@ -75,4 +75,7 @@ bollard = "0.18"
 
 # microsandbox backend (real microVMs; requires KVM). Default features drop
 # `keyring`, which would pull dbus/libsecret into the server image.
-microsandbox = { version = "0.6.15", default-features = false, features = ["net", "prebuilt"] }
+# 0.6.16+ recycles network-slot leases instead of using the monotonic sandbox
+# id (which wedged every spawn past 65535 sandboxes); ensure_runtime_installed
+# self-upgrades the `msb` binary so reused volumes pick the fixed runtime up.
+microsandbox = { version = "0.6.18", default-features = false, features = ["net", "prebuilt"] }

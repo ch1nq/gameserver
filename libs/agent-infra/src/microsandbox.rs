@@ -470,19 +470,26 @@ impl std::fmt::Display for MachineName {
     }
 }
 
-/// Ensure the `msb` runtime and `libkrunfw` are present, downloading them to
-/// `~/.microsandbox` if not.
+/// Ensure the `msb` runtime and `libkrunfw` match this build, downloading them to
+/// `~/.microsandbox` when missing or stale.
 ///
 /// Call this before constructing a provider so a missing runtime fails at
 /// startup: without it every spawn fails, and the first symptom would be a
-/// match that never starts. Idempotent — a matching install is reused.
+/// match that never starts.
+///
+/// Always delegates to `setup::install` rather than short-circuiting on
+/// `setup::is_installed`: that check is presence-only, while `install` also
+/// compares the installed `msb --version` against the crate version and
+/// re-downloads on mismatch. That self-upgrade is load-bearing — the
+/// network-slot exhaustion outage (monotonic sandbox ids past 65535 in 0.6.15,
+/// recycled slot leases from 0.6.16 on) was fixed runtime-side, so a stale
+/// `msb` binary in a reused volume would keep aborting spawns after a crate
+/// bump. A matching install is a cheap no-op (two file stats plus
+/// `msb --version`).
 ///
 /// Exposed here so callers need not depend on the `microsandbox` crate directly.
 pub async fn ensure_runtime_installed() -> Result<(), MachineError> {
-    if microsandbox::setup::is_installed() {
-        return Ok(());
-    }
-    tracing::warn!("microsandbox runtime missing; installing to ~/.microsandbox");
+    tracing::debug!("ensuring microsandbox runtime matches this build");
     microsandbox::setup::install()
         .await
         .map_err(|e| MachineError::MatchInit(format!("install microsandbox runtime: {e}")))
