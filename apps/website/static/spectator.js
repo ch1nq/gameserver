@@ -90,11 +90,13 @@ function init_spectator(canvasId) {
         for (const [slot, entry] of slots) {
             const li = document.createElement("li");
             const bar = document.createElement("span");
-            bar.className = "block flex-none w-4 h-[3px] rounded-[2px]";
+            bar.className = "legend-bar";
             bar.style.backgroundColor = playerColor(slot);
             const label = document.createElement("span");
+            label.className = "legend-name";
             label.textContent = entry.name;
             const meta = document.createElement("span");
+            meta.className = "legend-meta";
             meta.textContent = `#${entry.agent_id}`;
             li.appendChild(bar);
             li.appendChild(label);
@@ -115,24 +117,18 @@ function init_spectator(canvasId) {
             const alive = !player || player.alive;
             const place = placements.get(slot);
             if (!alive) {
-                row.li.className = "h-[26px] flex items-center gap-[9px] px-2.5 border border-[var(--line)] rounded bg-transparent";
+                row.li.className = "legend-row is-dead";
                 row.bar.style.opacity = "0.35";
-                row.name.className = "flex-1 min-w-0 font-semibold text-xs text-[var(--muted)] overflow-hidden text-ellipsis whitespace-nowrap";
-                row.meta.className = "flex-none text-[11px] font-bold text-[var(--muted)] tabular-nums";
                 row.meta.textContent = place === undefined ? "–" : place;
             } else if (place !== undefined) {
                 // Sole survivor: surface tile like the mockup winner row,
                 // placement in green.
-                row.li.className = "h-[26px] flex items-center gap-[9px] px-2.5 border border-[var(--line)] rounded bg-[var(--surface)]";
+                row.li.className = "legend-row is-winner";
                 row.bar.style.opacity = "";
-                row.name.className = "flex-1 min-w-0 font-semibold text-xs text-[var(--ink)] overflow-hidden text-ellipsis whitespace-nowrap";
-                row.meta.className = "flex-none text-[11px] font-bold text-[var(--green)] tabular-nums";
                 row.meta.textContent = place;
             } else {
-                row.li.className = "h-[26px] flex items-center gap-[9px] px-2.5 border border-[var(--line)] rounded bg-[var(--surface)]";
+                row.li.className = "legend-row";
                 row.bar.style.opacity = "";
-                row.name.className = "flex-1 min-w-0 font-semibold text-xs text-[var(--ink)] overflow-hidden text-ellipsis whitespace-nowrap";
-                row.meta.className = "flex-none text-[11px] text-[var(--muted)] tabular-nums";
                 row.meta.textContent = `#${entry.agent_id}`;
             }
         }
@@ -208,7 +204,7 @@ function init_spectator(canvasId) {
             // first lineup arrives (renderLegend clears it).
             legendEl.innerHTML = "";
             const li = document.createElement("li");
-            li.className = "text-[13px] text-[var(--muted)]";
+            li.className = "legend-empty";
             li.textContent = "No game running.";
             legendEl.appendChild(li);
         }

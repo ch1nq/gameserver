@@ -8,13 +8,13 @@ use achtung_core::agents::manager::AgentWithAuthor;
 use achtung_core::api_tokens::ApiToken;
 use achtung_core::registry::RegistryToken;
 use achtung_ui::error::Error;
-use maud::{Markup, PreEscaped, Render, html};
+use maud::{Markup, Render, html};
 
 pub fn home(session: &AuthSession, entries: Vec<AgentWithAuthor>) -> Page<'_> {
     Page {
         title: "Achtung, die Bots",
         content: html! {
-            div class="flex flex-col gap-11" {
+            div class="home" {
                 (landing::HeroLive)
                 (landing::LeaderboardSection { entries: &entries })
                 (landing::ExplainerSection)
@@ -39,17 +39,17 @@ pub fn login(next: Option<String>, message: Option<String>) -> Markup {
     achtung_ui::base::Base {
         title: "Login",
         content: html! {
-            div class="flex items-center justify-center h-screen" {
-                div class="max-w-sm p-6 bg-[var(--surface)] border border-[var(--line)] rounded-lg shadow-sm" {
-                    h5 class="mb-2 text-2xl font-bold tracking-tight text-[var(--ink)]" { "Login" }
-                    p class="mb-3 font-normal text-[var(--mid)]" { "Sign in with your Github account." }
+            div class="login-wrap" {
+                div class="login-card" {
+                    h5 class="login-title" { "Login" }
+                    p class="login-text" { "Sign in with your Github account." }
 
                     @if let Some(message) = message {
                         span { (message) }
                     }
 
                     form method="post" {
-                        button type="submit" class="text-white bg-[#24292F] hover:bg-[#24292F]/90 focus:ring-4 focus:outline-none font-medium rounded-lg text-sm px-5 py-2.5 text-center inline-flex items-center me-2 mb-2" {
+                        button type="submit" class="github-btn" {
                             (components::Icon::GithubLogo)
                             "Sign in with Github"
                         }
@@ -61,7 +61,8 @@ pub fn login(next: Option<String>, message: Option<String>) -> Markup {
                 }
             }
         },
-    }.render()
+    }
+    .render()
 }
 
 pub fn settings<'a>(
@@ -73,12 +74,12 @@ pub fn settings<'a>(
     Page {
         title: "Settings",
         content: html! {
-            div class="flex flex-col gap-8" {
+            div class="settings-stack" {
                 // Profile section
                 div {
-                    h1 class="text-2xl font-semibold mb-4" { "Profile settings" }
-                    div id="profile-picture" class="flex items-center gap-4" {
-                        img class="w-16 h-16 rounded-full" src=(components::profile_picture_url(&user)) alt="user photo";
+                    h1 class="page-title" { "Profile settings" }
+                    div id="profile-picture" class="profile-row" {
+                        img class="avatar-lg" src=(components::profile_picture_url(&user)) alt="user photo";
                         div {
                             p { "Username: " (&*user.username) }
                         }
@@ -128,9 +129,11 @@ pub fn token_created(
         "Your deploy token has been created. Use this token to authenticate when pushing Docker images to the Arcadio registry:",
         &plaintext_token,
         html! {
-            p class="font-medium mb-2" { "Docker login command:" }
-            code class="text-xs" {
-                "docker login " (registry_host) " -u user-" (user_id) " -p " (plaintext_token)
+            div class="usage" {
+                p class="usage-title" { "Docker login command:" }
+                code class="usage-code" {
+                    "docker login " (registry_host) " -u user-" (user_id) " -p " (plaintext_token)
+                }
             }
         },
         auth_session,
@@ -147,11 +150,13 @@ pub fn api_token_created(
         "Your API token has been created. Add it to your CLI config or use it as an environment variable:",
         &plaintext_token,
         html! {
-            p class="font-medium mb-2" { "CLI config (~/.config/achtung/config.toml):" }
-            code class="text-xs block bg-[var(--fill)] text-[var(--mid)] p-3 rounded-lg" {
-                "api_url = \"http://localhost:3000\"\n"
-                "user_id = " (user_id) "\n"
-                "api_token = \"" (plaintext_token) "\""
+            div class="usage" {
+                p class="usage-title" { "CLI config (~/.config/achtung/config.toml):" }
+                code class="usage-code" {
+                    "api_url = \"http://localhost:3000\"\n"
+                    "user_id = " (user_id) "\n"
+                    "api_token = \"" (plaintext_token) "\""
+                }
             }
         },
         auth_session,
@@ -165,57 +170,24 @@ fn token_created_page(
     usage_snippet: Markup,
     auth_session: &AuthSession,
 ) -> Markup {
-    let copy_token_script = PreEscaped(
-        r#"
-        async function copyToken() {
-            const tokenInput = document.getElementById('token-value');
-            const defaultIcon = document.getElementById('default-icon');
-            const successIcon = document.getElementById('success-icon');
-            try {
-                await navigator.clipboard.writeText(tokenInput.value);
-                defaultIcon.classList.add('hidden');
-                successIcon.classList.remove('hidden');
-                setTimeout(() => {
-                    defaultIcon.classList.remove('hidden');
-                    successIcon.classList.add('hidden');
-                }, 2000);
-            } catch (err) {
-                console.error('Failed to copy:', err);
-                alert('Failed to copy token. Please copy manually.');
-            }
-        }
-        "#,
-    );
-
     let content = html! {
-        script {(copy_token_script)}
-        div class="flex flex-col gap-4" {
-            h1 class="mb-3 text-2xl font-semibold tracking-tight text-heading leading-8" {
+        div class="token-box" {
+            h1 class="page-title" {
                 (title)
             }
 
             (components::alert::Alert::warning("Important!", "Make sure to copy your token now. You won't be able to see it again!"))
 
-            p class="text-base leading-relaxed text-[var(--muted)]" {
+            p class="lede" {
                 (description)
             }
 
-            div class="relative" {
-                input type="text" id="token-value" readonly="" value=(plaintext_token) class="bg-[var(--surface-2)] border border-[var(--line)] text-[var(--ink)] text-sm rounded-lg focus:outline-none focus:border-[var(--accent)] block w-full p-2.5 pr-20 font-mono" {}
-                button onclick="copyToken()" class="absolute end-2 top-1/2 -translate-y-1/2 text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--ink)] rounded-lg p-2 inline-flex items-center justify-center" {
-                    span id="default-icon" {
-                        (components::Icon::Copy)
-                    }
-                    span id="success-icon" class="hidden" {
-                        (components::Icon::Checkmark)
-                    }
-                }
-            }
+            input type="text" id="token-value" readonly="" value=(plaintext_token) class="token-value" {}
 
             (usage_snippet)
 
-            div class="flex justify-end" {
-                a href="/settings" class="font-semibold rounded-[3px] text-sm px-5 py-2.5 text-center text-[var(--accent-ink)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] focus:ring-4 focus:outline-none" style="color:var(--accent-ink);" {
+            div class="form-actions" {
+                a href="/settings" class="btn" {
                     "Done"
                 }
             }
@@ -250,7 +222,7 @@ fn token_section(
 ) -> Markup {
     html! {
         div {
-            h2 class="text-xl font-semibold mb-4" { (title) }
+            h2 class="page-title-sm" { (title) }
             (components::form::HelperText { text: description })
 
             (components::table::Table {
@@ -272,8 +244,8 @@ fn token_section(
                                     })
                                     (components::table::Cell {
                                         content: html! {
-                                            form method="post" action=(format!("{}/{}/revoke", revoke_base_url, token.id)) onsubmit="return confirm('Are you sure you want to revoke this token? This action cannot be undone.');" {
-                                                button type="submit" class="text-[var(--pink)]" {
+                                            form method="post" action=(format!("{}/{}/revoke", revoke_base_url, token.id)) {
+                                                button type="submit" class="link-danger" {
                                                     "Revoke"
                                                 }
                                             }
@@ -285,10 +257,10 @@ fn token_section(
                         }
                     }
                 },
-                extra_classes: Some("mb-4"),
+                extra_classes: None,
             })
 
-            div class="flex justify-end" {
+            div class="form-actions" {
                 (new_token_modal(modal_id, modal_title, modal_action, modal_helper_text))
             }
         }
@@ -305,7 +277,7 @@ fn new_token_modal(modal_id: &str, title: &str, action: &str, helper_text: &str)
             method: "post",
             helper_text: Some(helper_text),
             fields: html! {
-                div class="grid gap-4 mb-4 grid-cols-1" {
+                div {
                     (components::form::TextInput {
                         id: "name",
                         label: "Token Name",
@@ -332,7 +304,7 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
                 (components::table::Cell { content: html! { (&*agent.name) }, is_primary: true })
                 (components::table::Cell {
                     content: html! {
-                        span class="text-[var(--muted)] text-xs font-mono truncate max-w-xs" {
+                        span class="mono" {
                             (agent.image_url.as_ref())
                         }
                     },
@@ -340,32 +312,32 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
                 })
                 (components::table::Cell {
                     content: html! {
-                        @let status_color = match agent.status {
-                            AgentStatus::Active => "bg-green-400",
-                            AgentStatus::Inactive => "bg-gray-400",
+                        @let dot_class = match agent.status {
+                            AgentStatus::Active => "status-dot is-active",
+                            AgentStatus::Inactive => "status-dot is-inactive",
                         };
-                        span class=(format!("h-3 w-3 rounded-full inline-block me-1 {}", status_color)) {}
-                        span class="text-[var(--ink)]" { (format!("{:?}", agent.status)) }
+                        span class=(dot_class) {}
+                        span { (format!("{:?}", agent.status)) }
                     },
                     is_primary: false
                 })
                 (components::table::Cell {
                     content: html! {
-                        div class="flex gap-2" {
+                        div class="row-actions" {
                             @match agent.status {
                                 AgentStatus::Active => {
                                     form method="post" action=(format!("/agents/{}/deactivate", agent.id)) {
-                                        button type="submit" class="text-yellow-600 hover:text-yellow-800" { "Deactivate" }
+                                        button type="submit" class="btn-deactivate" { "Deactivate" }
                                     }
                                 }
                                 AgentStatus::Inactive => {
                                     form method="post" action=(format!("/agents/{}/activate", agent.id)) {
-                                        button type="submit" class="text-green-600 hover:text-green-800" { "Activate" }
+                                        button type="submit" class="btn-activate" { "Activate" }
                                     }
                                 }
                             }
-                            form method="post" action=(format!("/agents/{}/delete", agent.id)) onsubmit="return confirm('Are you sure you want to delete this agent?');" {
-                                button type="submit" class="text-[var(--pink)]" { "Delete" }
+                            form method="post" action=(format!("/agents/{}/delete", agent.id)) {
+                                button type="submit" class="link-danger" { "Delete" }
                             }
                         }
                     },
@@ -387,10 +359,10 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
     Page {
         title: "Agents",
         content: html! {
-            div class="flex flex-col justify-end mt-4 gap-4" {
-                h1 class="text-2xl font-semibold" { "Agents" }
+            div class="agents-head" {
+                h1 class="page-title" { "Agents" }
                 (table)
-                div class="flex justify-end" {
+                div class="form-actions" {
                     (components::button::Primary { text: "New agent", url: "/agents/new", icon: None })
                 }
             }
@@ -442,7 +414,7 @@ pub fn not_found() -> Markup {
     achtung_ui::base::Base {
         title: "Not Found",
         content: html! {
-            div class="text-center mt-20" {
+            div class="empty-center" {
                 h1 { "Not Found" }
                 p { "The page you are looking for does not exist." }
             }

@@ -57,17 +57,23 @@ impl Alert {
 
 impl Render for Alert {
     fn render(&self) -> Markup {
-        let icon = Icon::Info; // TODO: base on severity
+        let class = match self.severity {
+            AlertSeverity::Default => "alert",
+            AlertSeverity::Info => "alert alert-info",
+            AlertSeverity::Warning => "alert alert-warning",
+            AlertSeverity::Danger => "alert alert-danger",
+            AlertSeverity::Success => "alert alert-success",
+        };
         html! {
-            div class="p-4 mb-4 text-sm text-fg-warning rounded-base bg-warning-soft border border-warning-subtle" {
-                div class="flex items-center justify-between" {
-                    div class="flex items-center" {
-                        (icon)
+            div class=(class) role="alert" {
+                div class="alert-head" {
+                    div class="alert-title" {
+                        (Icon::Info)
                         span class="sr-only"{ "Info" }
-                        h3 class="font-medium" { (self.title) }
+                        h3 { (self.title) }
                     }
                 }
-                div class="mt-2 mb-4" { (self.message) }
+                div class="alert-body" { (self.message) }
             }
         }
     }

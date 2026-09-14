@@ -36,11 +36,11 @@ impl Render for Tabs<'_> {
             div {
                 style { (PreEscaped(css)) }
                 @for (i, tab) in self.tabs.iter().enumerate() {
-                    input type="radio" name=(self.group) id=(format!("{}-{}", self.group, tab.id)) class="hidden" checked[i == 0] {}
+                    input type="radio" name=(self.group) id=(format!("{}-{}", self.group, tab.id)) class="sr-only" checked[i == 0] {}
                 }
-                div id=(format!("{}-bar", self.group)) class="flex gap-0.5 border-b border-[var(--line)] max-w-[760px]" {
+                div id=(format!("{}-bar", self.group)) class="tabs-bar" {
                     @for tab in &self.tabs {
-                        label for=(format!("{}-{}", self.group, tab.id)) class="cursor-pointer bg-transparent border-b-2 border-transparent text-[var(--muted)] text-sm font-medium px-3.5 py-[13px] -mb-px" {
+                        label for=(format!("{}-{}", self.group, tab.id)) class="tab-label" {
                             (tab.label)
                         }
                     }
@@ -49,7 +49,7 @@ impl Render for Tabs<'_> {
                 // inputs (no wrapper div): the `:checked ~ #panel-…`
                 // selectors below only match following siblings.
                 @for tab in &self.tabs {
-                    div id=(format!("panel-{}-{}", self.group, tab.id)) class="lang-panel pt-4" {
+                    div id=(format!("panel-{}-{}", self.group, tab.id)) class="lang-panel" {
                         (tab.content.clone())
                     }
                 }
