@@ -72,6 +72,7 @@ services:
       COORDINATOR__GAME_HOST_IMAGE: achtung-game-host:local
       COORDINATOR__AGENTS_PER_GAME: "4"
       COORDINATOR__TICK_RATE_MS: "16"
+      COORDINATOR__GAME_INTERVAL_SECS: "1"
     ports:
       - "3000:3000"
     devices:

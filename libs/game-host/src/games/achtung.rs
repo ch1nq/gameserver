@@ -140,7 +140,7 @@ impl Player {
             turning_speed: 0.1,
             size: initial_size,
             action: GameAction::Forward,
-            skip_frequency: 50,
+            skip_frequency: 200,
             skip_duration: 15,
         }
     }
