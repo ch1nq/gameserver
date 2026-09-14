@@ -38,6 +38,9 @@ pub fn error_page(error: Error, session: &AuthSession) -> Page<'_> {
 pub fn login(next: Option<String>, message: Option<String>) -> Markup {
     achtung_ui::base::Base {
         title: "Login",
+        head_extra: html! {
+            link href="/static/app.css" rel="stylesheet" {}
+        },
         content: html! {
             div class="login-wrap" {
                 div class="login-card" {
@@ -413,6 +416,9 @@ pub fn new_agent_page(user_images: Vec<AgentImageUrl>, session: &AuthSession) ->
 pub fn not_found() -> Markup {
     achtung_ui::base::Base {
         title: "Not Found",
+        head_extra: html! {
+            link href="/static/app.css" rel="stylesheet" {}
+        },
         content: html! {
             div class="empty-center" {
                 h1 { "Not Found" }

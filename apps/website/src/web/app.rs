@@ -10,7 +10,7 @@ use achtung_core::api_tokens::ApiTokenManager;
 use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
 use agent_infra::{MachineProvider, Reaper};
-use axum::{handler::HandlerWithoutStateExt, http::StatusCode};
+use axum::{handler::HandlerWithoutStateExt, http::StatusCode, routing::get};
 use axum_login::{
     AuthManagerLayerBuilder, login_required,
     tower_sessions::{Expiry, SessionManagerLayer, cookie::SameSite},
@@ -191,6 +191,18 @@ impl App {
         let app = axum::Router::new()
             .merge(spectator_router)
             .nest("/api/v1", api_router)
+            // Component stylesheet owned by achtung-ui (see `achtung_ui::styles`).
+            // Exact route wins over the `/static` dir service below; covered by
+            // `static_ui_css_route_does_not_conflict_with_static_dir`.
+            .route(
+                "/static/ui.css",
+                get(|| async {
+                    (
+                        [("content-type", "text/css; charset=utf-8")],
+                        achtung_ui::styles::CSS,
+                    )
+                }),
+            )
             .nest_service("/static", static_service)
             .fallback_service(fallback_service)
             .merge(services);
@@ -241,5 +253,28 @@ impl App {
             max_age,
             prefix
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The ui stylesheet route must coexist with the `/static` dir service
+    /// (axum panics on conflicting routes at registration time, so merely
+    /// building this router exercises the guarantee).
+    #[test]
+    fn static_ui_css_route_does_not_conflict_with_static_dir() {
+        let _: axum::Router = axum::Router::new()
+            .route(
+                "/static/ui.css",
+                get(|| async {
+                    (
+                        [("content-type", "text/css; charset=utf-8")],
+                        achtung_ui::styles::CSS,
+                    )
+                }),
+            )
+            .nest_service("/static", tower_http::services::ServeDir::new("static"));
     }
 }

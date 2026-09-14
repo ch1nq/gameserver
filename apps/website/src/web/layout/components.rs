@@ -28,6 +28,11 @@ impl<'a> Render for Page<'a> {
     fn render(&self) -> Markup {
         achtung_ui::base::Base {
             title: self.title,
+            // App stylesheet after the ui stylesheet (see `achtung_ui::styles`):
+            // page styles may use the library's `:root` vars.
+            head_extra: html! {
+                link href="/static/app.css" rel="stylesheet" {}
+            },
             content: html! {
                 (Navbar { session: self.session })
                 div class="page" {
