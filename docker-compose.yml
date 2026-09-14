@@ -70,7 +70,7 @@ services:
       # msb keeps its own image cache and cannot see the Docker daemon's images:
       # run `just load-game-host` to put this tag there.
       COORDINATOR__GAME_HOST_IMAGE: achtung-game-host:local
-      COORDINATOR__AGENTS_PER_GAME: "4"
+      COORDINATOR__AGENTS_PER_GAME: "8"
       COORDINATOR__TICK_RATE_MS: "16"
       COORDINATOR__GAME_INTERVAL_SECS: "1"
     ports:
