@@ -22,12 +22,7 @@ impl Render for Tabs<'_> {
         let mut css = String::from(".lang-panel{display:none}");
         for tab in &self.tabs {
             css.push_str(&format!(
-                "#{g}-{id}:checked~#{g}-bar label[for=\"{g}-{id}\"]{{color:#111827;border-bottom-color:#111827;font-weight:600}}",
-                g = self.group,
-                id = tab.id
-            ));
-            css.push_str(&format!(
-                "@media (prefers-color-scheme:dark){{#{g}-{id}:checked~#{g}-bar label[for=\"{g}-{id}\"]{{color:#fff;border-bottom-color:#fff}}}}",
+                "#{g}-{id}:checked~#{g}-bar label[for=\"{g}-{id}\"]{{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}}",
                 g = self.group,
                 id = tab.id
             ));
@@ -43,9 +38,9 @@ impl Render for Tabs<'_> {
                 @for (i, tab) in self.tabs.iter().enumerate() {
                     input type="radio" name=(self.group) id=(format!("{}-{}", self.group, tab.id)) class="hidden" checked[i == 0] {}
                 }
-                div id=(format!("{}-bar", self.group)) class="flex gap-0.5 border-b border-gray-300 dark:border-gray-700 max-w-[760px]" {
+                div id=(format!("{}-bar", self.group)) class="flex gap-0.5 border-b border-[var(--line)] max-w-[760px]" {
                     @for tab in &self.tabs {
-                        label for=(format!("{}-{}", self.group, tab.id)) class="cursor-pointer bg-transparent border-b-2 border-transparent text-gray-500 dark:text-gray-400 text-sm font-medium px-3.5 py-3 -mb-px" {
+                        label for=(format!("{}-{}", self.group, tab.id)) class="cursor-pointer bg-transparent border-b-2 border-transparent text-[var(--muted)] text-sm font-medium px-3.5 py-[13px] -mb-px" {
                             (tab.label)
                         }
                     }

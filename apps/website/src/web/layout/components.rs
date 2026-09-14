@@ -30,7 +30,7 @@ impl<'a> Render for Page<'a> {
             title: self.title,
             content: html! {
                 (Navbar { session: self.session })
-                div class="mx-auto w-full max-w-[1280px] px-7 pt-6 pb-16" {
+                div class="mx-auto w-full max-w-[1280px] px-7 pt-[26px] pb-[70px]" {
                     @for error in &self.errors {
                         (error)
                     }
@@ -53,7 +53,7 @@ struct UserDropdown<'a> {
 impl<'a> Render for UserDropdown<'a> {
     fn render(&self) -> Markup {
         html! {
-            button id="dropdownAvatarNameButton" data-dropdown-toggle="dropdownAvatarName" class="flex items-center text-sm pe-1 font-medium text-gray-900 rounded-full hover:text-blue-600 dark:hover:text-blue-500 md:me-0 focus:ring-4 focus:ring-gray-100 dark:focus:ring-gray-700 dark:text-white" type="button" {
+            button id="dropdownAvatarNameButton" data-dropdown-toggle="dropdownAvatarName" class="flex items-center text-sm pe-1 font-medium rounded-full text-[var(--ink)] hover:text-[var(--accent)] md:me-0 focus:ring-4 focus:ring-gray-100" type="button" {
                 span class="sr-only" { "Open user menu" }
                     img class="w-8 h-8 me-2 rounded-full" src=(profile_picture_url(self.user)) alt="user photo";
                     (&*self.user.username)
@@ -62,17 +62,17 @@ impl<'a> Render for UserDropdown<'a> {
                     }
                 }
 
-            div id="dropdownAvatarName" class="z-10 hidden bg-white divide-y divide-gray-100 rounded-lg shadow-sm w-44 dark:bg-gray-700 dark:divide-gray-600" {
-                ul class="py-2 text-sm text-gray-700 dark:text-gray-200" aria-labelledby="dropdownInformdropdownAvatarNameButtonationButton" {
+            div id="dropdownAvatarName" class="z-10 hidden divide-y divide-[var(--line-soft)] rounded-lg shadow-sm w-44 bg-[var(--surface)]" {
+                ul class="py-2 text-sm text-[var(--mid)]" aria-labelledby="dropdownInformdropdownAvatarNameButtonationButton" {
                     li {
-                        a href="/agents" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white" { "Manage agents" }
+                        a href="/agents" class="block px-4 py-2 hover:bg-[var(--hover)] hover:text-[var(--ink)]" { "Manage agents" }
                     }
                     li {
-                        a href="/settings" class="block px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 dark:hover:text-white" { "Settings" }
+                        a href="/settings" class="block px-4 py-2 hover:bg-[var(--hover)] hover:text-[var(--ink)]" { "Settings" }
                     }
                 }
                 div class="py-2" {
-                    a href="/logout" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 dark:text-gray-200 dark:hover:text-white" { "Sign out" }
+                    a href="/logout" class="block px-4 py-2 text-sm text-[var(--mid)] hover:bg-[var(--hover)] hover:text-[var(--ink)]" { "Sign out" }
                 }
             }
         }
@@ -92,8 +92,8 @@ impl Render for AchtungLogo {
         html! {
             svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" class="block flex-none" {
                 rect x="0.5" y="0.5" width="23" height="23" rx="4" fill="#0A0B10" {}
-                path d="M4 18 C 8 18, 7 6, 12 6 C 17 6, 16 16, 20 13" stroke="#e0338a" stroke-width="2.4" fill="none" stroke-linecap="round" {}
-                circle cx="20" cy="13" r="1.9" fill="#ffd84a" {}
+                path d="M4 18 C 8 18, 7 6, 12 6 C 17 6, 16 16, 20 13" stroke-width="2.4" fill="none" stroke-linecap="round" style="stroke:var(--brand);" {}
+                circle cx="20" cy="13" r="1.9" style="fill:var(--yellow);" {}
             }
         }
     }
@@ -101,13 +101,14 @@ impl Render for AchtungLogo {
 
 impl<'a> Render for Navbar<'a> {
     fn render(&self) -> Markup {
-        let link = "text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700 px-2.5 py-2 rounded text-sm font-semibold";
+        // Mockup tokens: muted links, hover fill + ink, 3px radius.
+        let link = "text-[14px] font-semibold text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--hover)] px-2.5 py-2 rounded-[3px]";
         html! {
-            nav class="border-b border-gray-300 dark:border-gray-700" {
-                div class="mx-auto w-full max-w-[1280px] px-7 flex items-center gap-4 flex-wrap py-2.5" {
-                    a href="/" class="flex items-center gap-2.5" {
+            nav class="border-b border-[var(--line)]" {
+                div class="mx-auto w-full max-w-[1280px] px-7 flex items-center gap-[18px] flex-wrap py-2.5" {
+                    a href="/" class="flex items-center gap-2.5" style="color:var(--ink);" {
                         (AchtungLogo)
-                        span class="font-[Geologica] font-semibold text-[19px] tracking-tight text-gray-900 dark:text-white" {
+                        span class="font-[Geologica] font-semibold text-[19px] tracking-[-0.02em] text-[var(--ink)]" {
                             "Achtung, die Bots"
                         }
                     }
@@ -118,14 +119,46 @@ impl<'a> Render for Navbar<'a> {
                             (Icon::GithubLogo)
                             "Star"
                         }
+                        (ThemeToggle)
                         @if let Some(user) = &self.session.user {
                             (UserDropdown { user });
                         }
                         @else {
-                            a href="/login" class="text-sm font-semibold text-white dark:text-gray-900 bg-gray-900 dark:bg-white hover:bg-blue-700 dark:hover:bg-blue-200 px-3.5 py-2 rounded" {
+                            a href="/login" class="text-sm font-semibold px-3.5 py-2 rounded-[3px] text-[var(--invert-ink)] bg-[var(--invert-bg)] hover:bg-[var(--accent)]" style="color:var(--invert-ink);" {
                                 "Sign in"
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Manual light/dark switch from the mockup. Flips `html[data-theme]`
+/// (see `achtung_ui::base`) and persists to localStorage.
+pub struct ThemeToggle;
+
+impl Render for ThemeToggle {
+    fn render(&self) -> Markup {
+        html! {
+            button
+                type="button"
+                data-theme-toggle=""
+                onclick="toggleAchtungTheme()"
+                aria-label="Switch to dark theme"
+                title="Switch to dark theme"
+                class="flex items-center justify-center w-8 h-8 flex-none rounded-[3px] text-[var(--muted)] hover:text-[var(--ink)] hover:bg-[var(--hover)]"
+                style="appearance:none;cursor:pointer;background:transparent;border:none;" {
+                span data-icon-moon="" {
+                    svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" class="block" {
+                        path d="M13.3 10.6A5.8 5.8 0 0 1 5.4 2.7a5.8 5.8 0 1 0 7.9 7.9Z" {}
+                    }
+                }
+                span data-icon-sun="" {
+                    svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true" class="block" {
+                        circle cx="8" cy="8" r="3" {}
+                        path d="M8 1.1v1.5M8 13.4v1.5M1.1 8h1.5M13.4 8h1.5M3.2 3.2l1.1 1.1M11.7 11.7l1.1 1.1M12.8 3.2l-1.1 1.1M4.3 11.7l-1.1 1.1" stroke-linecap="round" {}
                     }
                 }
             }

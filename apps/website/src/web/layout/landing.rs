@@ -16,25 +16,28 @@ pub struct HeroLive;
 impl Render for HeroLive {
     fn render(&self) -> Markup {
         html! {
-            section class="flex flex-wrap gap-5 items-start" {
-                div class="flex-[2_1_460px] min-w-0 w-full max-w-[760px] aspect-square relative bg-[#0A0B10] border border-gray-300 dark:border-gray-700 rounded overflow-hidden" {
+            section class="flex flex-wrap gap-[22px] items-start" {
+                div class="flex-[2_1_460px] min-w-0 w-full max-w-[760px] aspect-square relative bg-[#0A0B10] border border-[var(--line)] rounded overflow-hidden" {
                     canvas id="achtung-canvas" width="1000" height="1000" class="absolute inset-0 w-full h-full block" {}
                 }
-                div class="flex-1 min-w-[280px] flex flex-col gap-8" {
-                    div {
+                div class="flex-1 min-w-[280px] flex flex-col gap-[34px]" {
+                    div class="flex items-center gap-2.5 flex-wrap" {
                         (Badge { label: "Live" })
-                    }
-                    div class="flex flex-col gap-2" {
-                        span class="text-[11px] font-bold tracking-[0.1em] uppercase text-gray-500 dark:text-gray-400" {
-                            "Playing now"
+                        span id="spectator-round" class="text-[13px] text-[var(--mid)] font-semibold tabular-nums" {
+                            "Round 1 · ranked"
                         }
-                        ul id="spectator-legend" class="flex flex-col gap-1.5" {}
                     }
                     div class="flex flex-col gap-3" {
-                        p class="font-semibold text-[15px] text-gray-900 dark:text-white" {
+                        span class="text-[11px] font-bold tracking-[0.1em] uppercase text-[var(--muted)]" {
+                            "Playing now"
+                        }
+                        ul id="spectator-legend" class="flex flex-col gap-[5px]" {}
+                    }
+                    div class="flex flex-col gap-3.5" {
+                        p class="font-semibold text-[15px] tracking-[-0.015em] text-[var(--ink)]" {
                             "Think you can beat these bots?"
                         }
-                        a href="/agents/new" class="self-start font-semibold text-sm text-white bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 px-4 py-2.5 rounded" {
+                        a href="/agents/new" class="self-start font-semibold text-sm text-[var(--accent-ink)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] px-4 py-2.5 rounded-[3px]" style="color:var(--accent-ink);" {
                             "Enter the competition"
                         }
                     }
@@ -55,47 +58,47 @@ pub struct LeaderboardSection<'a> {
 impl Render for LeaderboardSection<'_> {
     fn render(&self) -> Markup {
         html! {
-            section id="board" class="border-t border-gray-300 dark:border-gray-700 pt-6 flex flex-col gap-3.5" {
+            section id="board" class="border-t border-[var(--line)] pt-[26px] flex flex-col gap-3.5" {
                 div class="flex items-baseline gap-3 flex-wrap" {
-                    h2 class="m-0 font-[Geologica] font-semibold text-[19px] tracking-tight text-gray-900 dark:text-white" {
+                    h2 class="m-0 font-[Geologica] font-semibold text-[19px] tracking-[-0.025em] text-[var(--ink)]" {
                         "Leaderboard"
                     }
-                    span class="text-sm text-gray-500 dark:text-gray-400" {
+                    span class="text-sm text-[var(--muted)]" {
                         (self.entries.len()) " bots ranked"
                     }
                 }
-                div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded overflow-hidden overflow-x-auto" {
+                div class="bg-[var(--surface)] border border-[var(--line)] rounded overflow-hidden overflow-x-auto" {
                     table class="w-full text-[13px] min-w-[740px] border-collapse" {
                         thead {
-                            tr class="text-[11px] font-bold tracking-[0.1em] uppercase text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700" {
-                                th class="text-right font-bold px-2.5 py-2.5 pl-4 w-[50px]" { "#" }
-                                th class="text-left font-bold px-3.5 py-2.5" { "Bot" }
-                                th class="text-left font-bold px-3.5 py-2.5" { "Author" }
-                                th class="text-left font-bold px-3.5 py-2.5" { "Lang" }
-                                th class="text-right font-bold px-3.5 py-2.5" { "Elo" }
-                                th class="text-right font-bold px-3.5 py-2.5" { "Win" }
-                                th class="text-right font-bold px-3.5 py-2.5 pr-4" { "Matches" }
+                            tr class="text-[11px] font-bold tracking-[0.1em] uppercase text-[var(--muted)] border-b border-[var(--line)]" {
+                                th class="text-right font-bold px-2.5 py-[11px] pl-[18px] w-[50px]" { "#" }
+                                th class="text-left font-bold px-3.5 py-[11px]" { "Bot" }
+                                th class="text-left font-bold px-3.5 py-[11px]" { "Author" }
+                                th class="text-left font-bold px-3.5 py-[11px]" { "Lang" }
+                                th class="text-right font-bold px-3.5 py-[11px]" { "Elo" }
+                                th class="text-right font-bold px-3.5 py-[11px]" { "Win" }
+                                th class="text-right font-bold pl-3.5 pr-[18px] py-[11px]" { "Matches" }
                             }
                         }
                         tbody {
                             @if self.entries.is_empty() {
-                                tr class="border-t border-gray-100 dark:border-gray-700" {
-                                    td colspan="7" class="px-4 py-4 text-center text-gray-500 dark:text-gray-400" {
+                                tr class="border-t border-[var(--line-soft)]" {
+                                    td colspan="7" class="px-4 py-4 text-center text-[var(--muted)]" {
                                         "No bots yet — upload the first one."
                                     }
                                 }
                             }
                             @for (i, entry) in self.entries.iter().enumerate() {
-                                tr class="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700" {
-                                    td class="text-right px-2.5 py-3 pl-4 text-gray-500 dark:text-gray-400 tabular-nums" {
+                                tr class="border-t border-[var(--line-soft)] hover:bg-[var(--row-hover)]" {
+                                    td class="text-right px-2.5 py-[13px] pl-[18px] text-[var(--muted)] tabular-nums" {
                                         (i + 1)
                                     }
-                                    td class="px-3.5 py-3" {
-                                        span class="text-gray-900 dark:text-white font-semibold" {
+                                    td class="px-3.5 py-[13px]" {
+                                        span class="text-[var(--ink)] font-semibold" {
                                             (&*entry.agent.name)
                                         }
                                     }
-                                    td class="px-3.5 py-3 text-gray-600 dark:text-gray-300" {
+                                    td class="px-3.5 py-[13px] text-[var(--mid)]" {
                                         span class="flex items-center gap-2" {
                                             (github_avatar(&entry.username))
                                             span { "@" (&*entry.username) }
@@ -104,14 +107,14 @@ impl Render for LeaderboardSection<'_> {
                                     (placeholder_cell())
                                     (placeholder_cell_right_bold())
                                     (placeholder_cell_right())
-                                    (placeholder_cell_right())
+                                    (placeholder_cell_right_last())
                                 }
                             }
                         }
                     }
                 }
-                p class="m-0 text-[13px] text-gray-500 dark:text-gray-400" {
-                    "Elo and match stats land with ranking — new bots will start at 1200."
+                p class="m-0 text-[13px] text-[var(--muted)]" {
+                    "New bots start at 1200 and stay provisional for 20 matches."
                 }
             }
         }
@@ -121,21 +124,28 @@ impl Render for LeaderboardSection<'_> {
 /// Left-aligned em-dash cell (Lang).
 fn placeholder_cell() -> Markup {
     html! {
-        td class="px-3.5 py-3 text-gray-400 dark:text-gray-500" { "—" }
+        td class="px-3.5 py-[13px] text-[var(--muted)]" { "—" }
     }
 }
 
 /// Right-aligned em-dash cell (Win, Matches).
 fn placeholder_cell_right() -> Markup {
     html! {
-        td class="text-right px-3.5 py-3 text-gray-400 dark:text-gray-500 tabular-nums" { "—" }
+        td class="text-right px-3.5 py-[13px] text-[var(--muted)] tabular-nums" { "—" }
+    }
+}
+
+/// Last column keeps the mockup's extra right padding.
+fn placeholder_cell_right_last() -> Markup {
+    html! {
+        td class="text-right pl-3.5 pr-[18px] py-[13px] text-[var(--muted)] tabular-nums" { "—" }
     }
 }
 
 /// Right-aligned bold em-dash cell (Elo keeps the column's emphasis).
 fn placeholder_cell_right_bold() -> Markup {
     html! {
-        td class="text-right px-3.5 py-3 font-bold text-gray-400 dark:text-gray-500 tabular-nums" { "—" }
+        td class="text-right px-3.5 py-[13px] font-bold text-[var(--muted)] tabular-nums" { "—" }
     }
 }
 
@@ -158,18 +168,18 @@ pub struct ExplainerSection;
 impl Render for ExplainerSection {
     fn render(&self) -> Markup {
         html! {
-            section class="border-t border-gray-300 dark:border-gray-700 pt-6 flex flex-col gap-3.5" {
-                h2 class="m-0 font-[Geologica] font-semibold text-[19px] tracking-tight text-gray-900 dark:text-white" {
+            section class="border-t border-[var(--line)] pt-[26px] flex flex-col gap-3.5" {
+                h2 class="m-0 font-[Geologica] font-semibold text-[19px] tracking-[-0.025em] text-[var(--ink)]" {
                     "Every curve up there is a program"
                 }
-                p class="m-0 text-[15px] leading-relaxed text-gray-600 dark:text-gray-300 max-w-[68ch]" {
-                    "A bot is one function: it gets the board each tick and returns -1, 0 or 1 to steer. Upload one and it plays ranked rounds against everyone else's."
+                p class="m-0 text-[15px] leading-[1.6] text-[var(--mid)] max-w-[68ch]" {
+                    "A bot is one function: it gets the board each tick and returns -1, 0 or 1 to steer. Upload one and it plays ranked rounds against everyone else's, with its Elo moving after each result."
                 }
                 div class="flex gap-3.5 items-center flex-wrap pt-0.5" {
-                    a href="/agents/new" class="font-semibold text-sm text-white bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-700 px-4 py-2.5 rounded" {
+                    a href="/agents/new" class="font-semibold text-sm text-[var(--accent-ink)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] px-4 py-2.5 rounded-[3px]" style="color:var(--accent-ink);" {
                         "Upload an example bot"
                     }
-                    a href="#bot-file" class="text-sm text-blue-700 dark:text-blue-400 font-semibold" {
+                    a href="#bot-file" class="text-sm text-[var(--accent)] font-semibold" {
                         "Read the docs"
                     }
                 }
@@ -192,8 +202,8 @@ pub struct BotFileSection;
 fn code_panel(code: &str, install: &str) -> Markup {
     html! {
         (CodeBlock { code })
-        div class="flex flex-col gap-2 pt-4" {
-            span class="text-[13px] text-gray-500 dark:text-gray-400" {
+        div class="flex flex-col gap-2 pt-1" {
+            span class="text-[13px] text-[var(--muted)]" {
                 "Install the CLI once, then build and push the image:"
             }
             (CodeBlock { code: install })
@@ -204,11 +214,11 @@ fn code_panel(code: &str, install: &str) -> Markup {
 impl Render for BotFileSection {
     fn render(&self) -> Markup {
         html! {
-            section id="bot-file" class="border-t border-gray-300 dark:border-gray-700 pt-6 flex flex-col gap-3.5" {
-                h2 class="m-0 font-[Geologica] font-semibold text-[19px] tracking-tight text-gray-900 dark:text-white" {
+            section id="bot-file" class="border-t border-[var(--line)] pt-[26px] flex flex-col gap-3.5" {
+                h2 class="m-0 font-[Geologica] font-semibold text-[19px] tracking-[-0.025em] text-[var(--ink)]" {
                     "A bot in one file"
                 }
-                p class="m-0 text-[15px] leading-relaxed text-gray-600 dark:text-gray-300 max-w-[68ch]" {
+                p class="m-0 text-[15px] leading-[1.6] text-[var(--mid)] max-w-[68ch]" {
                     "Bots run as containers, so the language is up to you — the SDK just speaks the match protocol for you. Package the program as an OCI image and push it to the registry on this site; the CLI wraps the build and push into one command, and each push becomes a new version you can roll back to."
                 }
                 (Tabs {
@@ -219,9 +229,9 @@ impl Render for BotFileSection {
                         Tab { id: "javascript", label: "JavaScript", content: code_panel(JS_CODE, JS_INSTALL) },
                     ],
                 })
-                p class="m-0 text-[13px] text-gray-500 dark:text-gray-400" {
+                p class="m-0 text-[13px] text-[var(--muted)]" {
                     "Missing your language? "
-                    a href="https://github.com" class="text-blue-700 dark:text-blue-400 font-semibold" {
+                    a href="https://github.com" class="text-[var(--accent)] font-semibold" {
                         "Open a PR"
                     }
                     "."
