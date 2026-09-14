@@ -9,11 +9,8 @@ pub struct Table<'a> {
 
 impl<'a> Render for Table<'a> {
     fn render(&self) -> Markup {
-        let wrapper_class = if let Some(extra) = self.extra_classes {
-            format!("relative overflow-x-auto {}", extra)
-        } else {
-            "relative overflow-x-auto".to_string()
-        };
+        // Kept for back-compat; prefer semantic `.tbl-wrap` styling.
+        let _ = self.extra_classes;
 
         let headers = self
             .headers
@@ -22,9 +19,9 @@ impl<'a> Render for Table<'a> {
             .fold(html! {}, |acc, h| html! { (acc) (h) });
 
         html! {
-            div class=(wrapper_class) {
-                table class="w-full text-sm text-left rtl:text-right text-[var(--muted)]" {
-                    thead class="text-xs uppercase bg-[var(--surface-2)] text-[var(--muted)]" {
+            div class="tbl-wrap" {
+                table class="tbl" {
+                    thead {
                         tr {(headers)}
                     }
                     tbody {(self.rows)}
@@ -41,7 +38,7 @@ pub struct HeaderCell<'a> {
 impl<'a> Render for HeaderCell<'a> {
     fn render(&self) -> Markup {
         html! {
-            th scope="col" class="px-6 py-3" { (self.text) }
+            th scope="col" { (self.text) }
         }
     }
 }
@@ -53,14 +50,12 @@ pub struct Cell {
 
 impl Render for Cell {
     fn render(&self) -> Markup {
-        let class = if self.is_primary {
-            "px-6 py-4 font-medium whitespace-nowrap text-[var(--ink)]"
-        } else {
-            "px-6 py-4"
-        };
-
         html! {
-            td class=(class) { (self.content) }
+            @if self.is_primary {
+                td class="primary" { (self.content) }
+            } @else {
+                td { (self.content) }
+            }
         }
     }
 }
@@ -72,7 +67,7 @@ pub struct Row {
 impl Render for Row {
     fn render(&self) -> Markup {
         html! {
-            tr class="bg-[var(--surface)] border-b border-[var(--line-soft)]" {
+            tr {
                 (self.content)
             }
         }
@@ -87,8 +82,8 @@ pub struct EmptyRow<'a> {
 impl<'a> Render for EmptyRow<'a> {
     fn render(&self) -> Markup {
         html! {
-            tr class="bg-[var(--surface)] border-b border-[var(--line-soft)]" {
-                td colspan=(self.colspan) class="px-6 py-4 text-center text-[var(--muted)]" {
+            tr {
+                td colspan=(self.colspan) class="center" {
                     (self.message)
                 }
             }

@@ -15,17 +15,17 @@ pub struct ModalForm<'a> {
 impl<'a> Render for ModalForm<'a> {
     fn render(&self) -> Markup {
         html! {
-            form class="p-4 md:p-5" method=(self.method) action=(self.action) {
+            form class="form" method=(self.method) action=(self.action) {
                 @if let Some(text) = self.helper_text {
                     (HelperText { text })
                 }
 
-                div class="flex flex-col gap-4 pb-4" {
+                div class="form-fields" {
                     (self.fields)
                 }
 
                 // Submit button
-                div class="flex justify-end" {
+                div class="form-actions" {
                     (FormSubmit { text: self.submit_text, icon: self.submit_icon.clone() })
                 }
             }
@@ -44,16 +44,16 @@ pub struct TextInput<'a> {
 impl<'a> Render for TextInput<'a> {
     fn render(&self) -> Markup {
         html! {
-            div class="col-span-2" {
-                label for=(self.id) class="block mb-2 text-sm font-medium text-[var(--ink)]" {
+            div class="field" {
+                label for=(self.id) class="label" {
                     (self.label) @if self.required { " *" }
                 }
                 input type="text" name=(self.id) id=(self.id)
-                    class="block w-full p-2.5 text-sm rounded-lg bg-[var(--surface-2)] border border-[var(--line)] text-[var(--ink)] placeholder:text-[var(--faint)] focus:outline-none focus:border-[var(--accent)]"
+                    class="input"
                     placeholder=(self.placeholder)
                     required[self.required] {}
                 @if let Some(text) = self.helper_text {
-                    p class="mt-1 text-xs text-[var(--muted)]" { (text) }
+                    p class="hint" { (text) }
                 }
             }
         }
@@ -85,11 +85,11 @@ pub struct SelectInput<'a> {
 impl<'a> Render for SelectInput<'a> {
     fn render(&self) -> Markup {
         html! {
-            div class="col-span-2" {
-                label for=(self.id) class="block mb-2.5 text-sm font-medium text-[var(--ink)]" {
+            div class="field" {
+                label for=(self.id) class="label" {
                     (self.label) @if self.required { " *" }
                 }
-                select id=(self.id) name=(self.id) required[self.required] class="block w-full px-3 py-2.5 text-sm rounded-lg bg-[var(--surface-2)] border border-[var(--line)] text-[var(--ink)] focus:outline-none focus:border-[var(--accent)]" {
+                select id=(self.id) name=(self.id) required[self.required] class="select" {
                     option value="" { (self.default_label) }
                     @for opt in &self.options {
                         option value=(opt.value) { (opt.label) }
@@ -107,7 +107,7 @@ pub struct HelperText<'a> {
 impl<'a> Render for HelperText<'a> {
     fn render(&self) -> Markup {
         html! {
-            p class="mb-4 text-sm text-[var(--muted)]" { (self.text) }
+            p class="helper" { (self.text) }
         }
     }
 }

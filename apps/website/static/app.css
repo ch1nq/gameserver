@@ -1,0 +1,96 @@
+/* Website page/product styles. Component styles (vars, .btn, .tbl, .form,
+   .modal, .alert, .badge, .avatar, .code, .tabs, .icon) ship with achtung-ui
+   and load first via /static/ui.css (see `achtung_ui::styles`), so the
+   `:root` vars below are usable here. Dark mode follows the OS. */
+
+.nav-link .icon{ width:16px; height:16px; }
+.github-btn .icon{ width:16px; height:16px; }
+.avatar-lg{ width:64px; height:64px; border-radius:999px; object-fit:cover; }
+
+/* ---------- layout ---------- */
+.page{ margin:0 auto; width:100%; max-width:1280px; padding:26px 28px 70px; }
+.stack{ display:flex; flex-direction:column; gap:12px; }
+.section{ border-top:1px solid var(--line); padding-top:26px; display:flex; flex-direction:column; gap:14px; }
+.section-head{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+.section-title{ margin:0; font-family:Geologica,system-ui,sans-serif; font-weight:600; font-size:19px; letter-spacing:-0.025em; color:var(--ink); }
+.section-sub{ font-size:14px; color:var(--muted); }
+.lede{ margin:0; font-size:15px; line-height:1.6; color:var(--mid); max-width:68ch; }
+.note{ margin:0; font-size:13px; color:var(--muted); }
+.eyebrow{ font-size:11px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); }
+
+/* ---------- navbar ---------- */
+.navbar{ border-bottom:1px solid var(--line); }
+.navbar-inner{ margin:0 auto; width:100%; max-width:1280px; padding:10px 28px; display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.brand{ display:flex; align-items:center; gap:10px; color:var(--ink); }
+.brand-mark{ display:block; flex:none; }
+.nav-link{ display:inline-flex; align-items:center; gap:6px; font-size:14px; font-weight:600; color:var(--muted); padding:8px 10px; border-radius:3px; }
+.brand-name{ font-family:Geologica,system-ui,sans-serif; font-weight:600; font-size:19px; letter-spacing:-0.02em; color:var(--ink); }
+.nav-links{ margin-left:auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.nav-link:hover{ color:var(--ink); background:var(--hover); }
+.signin-btn{ font-size:14px; font-weight:600; padding:8px 14px; border-radius:3px; color:var(--invert-ink); background:var(--invert-bg); }
+.signin-btn:hover{ background:var(--accent); color:var(--accent-ink); }
+
+/* details-based user menu (zero JS) */
+.dropdown{ position:relative; }
+.dropdown-toggle{ display:flex; align-items:center; gap:8px; font-size:14px; font-weight:500; color:var(--ink); border-radius:999px; padding:4px 4px 4px 0; cursor:pointer; list-style:none; }
+.dropdown-toggle::-webkit-details-marker{ display:none; }
+.dropdown-toggle:hover{ color:var(--accent); }
+.dropdown-toggle img{ width:32px; height:32px; border-radius:999px; margin-right:8px; }
+.dropdown-menu{ position:absolute; right:0; top:calc(100% + 8px); width:176px; background:var(--surface); border:1px solid var(--line-soft); border-radius:8px; box-shadow:0 4px 16px rgb(0 0 0 / 0.12); overflow:hidden; z-index:50; }
+.dropdown-menu ul{ list-style:none; margin:0; padding:8px 0; font-size:14px; color:var(--mid); }
+.dropdown-menu a{ display:block; padding:8px 16px; color:var(--mid); }
+.dropdown-menu a:hover{ background:var(--hover); color:var(--ink); }
+.dropdown-div{ border-top:1px solid var(--line-soft); padding:8px 0; }
+
+/* ---------- page-level buttons / links (used by website pages only) ---------- */
+.link-accent{ font-size:14px; color:var(--accent); font-weight:600; }
+.link-danger{ color:var(--pink); background:none; border:none; padding:0; font:inherit; cursor:pointer; }
+.link-danger:hover{ text-decoration:underline; }
+.btn-activate{ color:#a16207; background:none; border:none; padding:0; font:inherit; cursor:pointer; }
+.btn-activate:hover{ color:#713f12; text-decoration:underline; }
+.btn-deactivate{ color:#15803d; background:none; border:none; padding:0; font:inherit; cursor:pointer; }
+.btn-deactivate:hover{ color:#14532d; text-decoration:underline; }
+@media (prefers-color-scheme: dark){
+  .btn-activate{ color:#facc15; } .btn-deactivate{ color:#4ade80; }
+}
+.github-btn{ display:inline-flex; align-items:center; gap:8px; color:#fff; background:#24292F; font-weight:500; border-radius:8px; font-size:14px; padding:10px 20px; border:none; cursor:pointer; }
+.github-btn:hover{ background:rgb(36 41 47 / 0.9); color:#fff; }
+
+/* ---------- landing ---------- */
+.hero{ display:flex; flex-wrap:wrap; gap:22px; align-items:flex-start; }
+.hero-media{ flex:2 1 460px; min-width:0; width:100%; max-width:760px; aspect-ratio:1; position:relative; background:#0A0B10; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+.hero-canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; }
+.hero-side{ flex:1; min-width:280px; display:flex; flex-direction:column; gap:34px; }
+.live-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.round-label{ font-size:13px; color:var(--mid); font-weight:600; font-variant-numeric:tabular-nums; }
+.legend{ display:flex; flex-direction:column; gap:5px; list-style:none; margin:0; padding:0; }
+.legend-row{ height:26px; display:flex; align-items:center; gap:9px; padding:0 10px; border:1px solid var(--line); border-radius:4px; background:var(--surface); }
+.legend-row.is-dead{ background:transparent; }
+.legend-bar{ display:block; flex:none; width:16px; height:3px; border-radius:2px; }
+.legend-name{ flex:1; min-width:0; font-weight:600; font-size:12px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.legend-row.is-dead .legend-name{ color:var(--muted); }
+.legend-meta{ flex:none; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.legend-row.is-winner .legend-meta{ color:var(--green); font-weight:700; }
+.legend-empty{ font-size:13px; color:var(--muted); }
+.cta-title{ font-weight:600; font-size:15px; letter-spacing:-0.015em; color:var(--ink); margin:0; }
+.cta-col{ display:flex; flex-direction:column; gap:14px; align-items:flex-start; }
+.actions-row{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding-top:2px; }
+.install-note{ display:flex; flex-direction:column; gap:8px; padding-top:4px; }
+.install-note span{ font-size:13px; color:var(--muted); }
+
+/* ---------- pages ---------- */
+.home{ display:flex; flex-direction:column; gap:44px; }
+.page-title{ font-size:24px; font-weight:600; margin:0 0 16px; }
+.page-title-sm{ font-size:20px; font-weight:600; margin:0 0 16px; }
+.login-wrap{ display:flex; align-items:center; justify-content:center; min-height:100vh; }
+.login-card{ max-width:384px; width:100%; padding:24px; background:var(--surface); border:1px solid var(--line); border-radius:8px; box-shadow:0 2px 8px rgb(0 0 0 / 0.06); }
+.login-title{ margin:0 0 8px; font-size:24px; font-weight:700; letter-spacing:-0.01em; color:var(--ink); }
+.login-text{ margin:0 0 12px; color:var(--mid); }
+.profile-row{ display:flex; align-items:center; gap:16px; }
+.token-box{ display:flex; flex-direction:column; gap:16px; }
+.token-value{ display:block; width:100%; padding:10px 12px; font-size:14px; font-family:ui-monospace,monospace; border-radius:8px; background:var(--surface-2); border:1px solid var(--line); color:var(--ink); }
+.usage{ margin:0; } .usage-title{ font-weight:500; margin:0 0 8px; }
+.usage-code{ display:block; font-size:12px; font-family:ui-monospace,monospace; background:var(--fill); color:var(--mid); padding:12px; border-radius:8px; white-space:pre-wrap; }
+.settings-stack{ display:flex; flex-direction:column; gap:32px; }
+.agents-head{ display:flex; flex-direction:column; gap:16px; margin-top:16px; }
+.empty-center{ text-align:center; margin-top:80px; }
