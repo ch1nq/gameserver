@@ -35,6 +35,32 @@ function init_spectator(canvasId) {
     let placements = new Map();
     // slot -> {li, bar, name, meta} row elements, rebuilt per game.
     let rows = new Map();
+    // Slot currently hovered (from canvas or legend), or null. Shared so
+    // hovering an agent trail highlights its legend row and vice versa.
+    let hoveredSlot = null;
+    // Coalesce canvas mousemove hit-tests to one per animation frame: body
+    // arrays grow to hundreds of blobs per player.
+    let hoverQueued = false;
+    let hoverEvent = null;
+
+    function rowClass(base, slot) {
+        return slot === hoveredSlot ? `${base} is-hover` : base;
+    }
+
+    function setHover(slot) {
+        if (slot === hoveredSlot) return;
+        const prev = hoveredSlot;
+        hoveredSlot = slot;
+        for (const s of [prev, slot]) {
+            if (s === null || s === undefined) continue;
+            const row = rows.get(s);
+            if (!row) continue;
+            const base = row.li.className.replace(" is-hover", "");
+            row.li.className = rowClass(base, s);
+        }
+        canvas.style.cursor = slot === null ? "" : "pointer";
+        draw();
+    }
 
     function drawMessage(text) {
         ctx.fillStyle = "#0A0B10";
@@ -48,7 +74,9 @@ function init_spectator(canvasId) {
         if (!state) return;
         ctx.fillStyle = "#0A0B10";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const dimmed = hoveredSlot !== null && state.players.has(hoveredSlot);
         for (const [id, player] of state.players) {
+            ctx.globalAlpha = dimmed && id !== hoveredSlot ? 0.25 : 1;
             ctx.fillStyle = playerColor(id);
             for (const blob of player.body) {
                 ctx.beginPath();
@@ -60,6 +88,18 @@ function init_spectator(canvasId) {
                 ctx.beginPath();
                 ctx.arc(player.head.x, player.head.y, player.head.size, 0, 2 * Math.PI);
                 ctx.fill();
+            }
+        }
+        ctx.globalAlpha = 1;
+        // Highlight ring around the hovered agent's head.
+        if (dimmed) {
+            const player = state.players.get(hoveredSlot);
+            if (player && player.alive && player.head) {
+                ctx.strokeStyle = playerColor(hoveredSlot);
+                ctx.lineWidth = Math.max(2, player.head.size * 0.4);
+                ctx.beginPath();
+                ctx.arc(player.head.x, player.head.y, player.head.size + 6, 0, 2 * Math.PI);
+                ctx.stroke();
             }
         }
     }
@@ -89,6 +129,9 @@ function init_spectator(canvasId) {
         const slots = [...lineup.entries()].sort((a, b) => a[0] - b[0]);
         for (const [slot, entry] of slots) {
             const li = document.createElement("li");
+            li.dataset.slot = String(slot);
+            li.addEventListener("mouseenter", () => setHover(slot));
+            li.addEventListener("mouseleave", () => setHover(null));
             const bar = document.createElement("span");
             bar.className = "legend-bar";
             bar.style.backgroundColor = playerColor(slot);
@@ -117,17 +160,17 @@ function init_spectator(canvasId) {
             const alive = !player || player.alive;
             const place = placements.get(slot);
             if (!alive) {
-                row.li.className = "legend-row is-dead";
+                row.li.className = rowClass("legend-row is-dead", slot);
                 row.bar.style.opacity = "0.35";
                 row.meta.textContent = place === undefined ? "–" : place;
             } else if (place !== undefined) {
                 // Sole survivor: surface tile like the mockup winner row,
                 // placement in green.
-                row.li.className = "legend-row is-winner";
+                row.li.className = rowClass("legend-row is-winner", slot);
                 row.bar.style.opacity = "";
                 row.meta.textContent = place;
             } else {
-                row.li.className = "legend-row";
+                row.li.className = rowClass("legend-row", slot);
                 row.bar.style.opacity = "";
                 row.meta.textContent = `#${entry.agent_id}`;
             }
@@ -194,11 +237,57 @@ function init_spectator(canvasId) {
         draw();
     }
 
+    // Nearest agent trail/blob to arena coords (mx, my), or null. All
+    // blobs are scanned so overlapping trails resolve to the closest one.
+    function hitTest(mx, my) {
+        if (!state) return null;
+        let bestSlot = null;
+        let bestDist = Infinity;
+        for (const [id, player] of state.players) {
+            if (player.alive && player.head) {
+                const dx = player.head.x - mx;
+                const dy = player.head.y - my;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist <= Math.max(player.head.size + 4, 8) && dist < bestDist) {
+                    bestDist = dist;
+                    bestSlot = id;
+                }
+            }
+            for (const blob of player.body) {
+                const dx = blob.x - mx;
+                const dy = blob.y - my;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist <= Math.max(blob.size + 4, 8) && dist < bestDist) {
+                    bestDist = dist;
+                    bestSlot = id;
+                }
+            }
+        }
+        return bestSlot;
+    }
+
+    function onCanvasHover(e) {
+        hoverEvent = e;
+        if (hoverQueued) return;
+        hoverQueued = true;
+        requestAnimationFrame(() => {
+            hoverQueued = false;
+            if (!hoverEvent) return;
+            const rect = canvas.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            const mx = (hoverEvent.clientX - rect.left) * (canvas.width / rect.width);
+            const my = (hoverEvent.clientY - rect.top) * (canvas.height / rect.height);
+            setHover(hitTest(mx, my));
+        });
+    }
+
     function resetToWaiting() {
         state = null;
         lineup = new Map();
         placements = new Map();
         rows = new Map();
+        hoveredSlot = null;
+        canvas.style.cursor = "";
         if (legendEl) {
             // Muted placeholder holds the "Playing now" layout until the
             // first lineup arrives (renderLegend clears it).
@@ -212,6 +301,12 @@ function init_spectator(canvasId) {
     }
 
     resetToWaiting();
+
+    canvas.addEventListener("mousemove", onCanvasHover);
+    canvas.addEventListener("mouseleave", () => {
+        hoverEvent = null;
+        setHover(null);
+    });
 
     const es = new EventSource("/spectator/watch");
 
@@ -227,6 +322,7 @@ function init_spectator(canvasId) {
             lineup.set(s.slot, { agent_id: s.agent_id, name: s.name });
         }
         placements = new Map();
+        hoveredSlot = null;
         renderLegend();
     });
 
