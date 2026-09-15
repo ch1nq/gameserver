@@ -34,7 +34,23 @@ impl Render for HeroLive {
                         span class="eyebrow" {
                             "Playing now"
                         }
-                        ul id="spectator-legend" class="legend" {}
+                        ul id="spectator-legend" class="legend" {
+                            li class="legend-empty" { "No game running." }
+                        }
+                        // spectator.js clones these templates and only fills
+                        // in data (data-slot, name text, meta text) plus
+                        // state classes (is-dead / is-winner). All colors and
+                        // dimming live in app.css via --player-* tokens.
+                        template id="spectator-legend-template" {
+                            li class="legend-row" {
+                                span class="legend-bar" {}
+                                span class="legend-name" {}
+                                span class="legend-meta" {}
+                            }
+                        }
+                        template id="spectator-empty-template" {
+                            li class="legend-empty" { "No game running." }
+                        }
                     }
                     div class="cta-col" {
                         p class="cta-title" {

@@ -52,7 +52,16 @@
 
 /* ---------- landing ---------- */
 .hero{ display:flex; flex-wrap:wrap; gap:22px; align-items:flex-start; }
-.hero-media{ flex:2 1 460px; min-width:0; width:100%; max-width:760px; aspect-ratio:1; position:relative; background:#0A0B10; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+/* Spectator design tokens. Single source of truth for player colors and the
+   board palette: the legend resolves them purely in CSS via `data-slot`, and
+   `spectator.js` reads the same vars via `getComputedStyle` for canvas
+   bitmap drawing (canvas cannot use `var()` directly). */
+:root{
+  --player-0:#5fc9ff; --player-1:#ff6fa8; --player-2:#ffd84a; --player-3:#7bf0a8;
+  --player-4:#b78cff; --player-5:#ff9a4d; --player-6:#4de0d0; --player-7:#f45b5b;
+  --spectator-board:#0A0B10; --spectator-muted:#8890b5;
+}
+.hero-media{ flex:2 1 460px; min-width:0; width:100%; max-width:760px; aspect-ratio:1; position:relative; background:var(--spectator-board); border:1px solid var(--line); border-radius:4px; overflow:hidden; }
 .hero-canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; }
 .hero-side{ flex:1; min-width:280px; display:flex; flex-direction:column; gap:34px; }
 .live-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -60,7 +69,19 @@
 .legend{ display:flex; flex-direction:column; gap:5px; list-style:none; margin:0; padding:0; }
 .legend-row{ height:26px; display:flex; align-items:center; gap:9px; padding:0 10px; border:1px solid var(--line); border-radius:4px; background:var(--surface); }
 .legend-row.is-dead{ background:transparent; }
-.legend-bar{ display:block; flex:none; width:16px; height:3px; border-radius:2px; }
+/* Per-slot colors resolve from the `:root` tokens above via `data-slot`
+   (set by spectator.js, normalized with `% 8` so larger games wrap).
+   No inline `backgroundColor`/`opacity` in JS. */
+.legend-row[data-slot="0"]{ --player-color:var(--player-0); }
+.legend-row[data-slot="1"]{ --player-color:var(--player-1); }
+.legend-row[data-slot="2"]{ --player-color:var(--player-2); }
+.legend-row[data-slot="3"]{ --player-color:var(--player-3); }
+.legend-row[data-slot="4"]{ --player-color:var(--player-4); }
+.legend-row[data-slot="5"]{ --player-color:var(--player-5); }
+.legend-row[data-slot="6"]{ --player-color:var(--player-6); }
+.legend-row[data-slot="7"]{ --player-color:var(--player-7); }
+.legend-bar{ display:block; flex:none; width:16px; height:3px; border-radius:2px; background:var(--player-color); }
+.legend-row.is-dead .legend-bar{ opacity:0.35; }
 .legend-name{ flex:1; min-width:0; font-weight:600; font-size:12px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .legend-row.is-dead .legend-name{ color:var(--muted); }
 .legend-meta{ flex:none; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
