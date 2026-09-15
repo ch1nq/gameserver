@@ -1,8 +1,12 @@
 use maud::{Markup, Render, html};
 
-/// Creates a complete table with headers and body rows
+/// Creates a complete table with headers and body rows.
+///
+/// Stays generic: headers/cells only carry presentation flags (`numeric`,
+/// `is_primary`), never domain data. Numeric columns render right-aligned
+/// with tabular figures via `.tbl .num`.
 pub struct Table<'a> {
-    pub headers: Vec<&'a str>,
+    pub headers: Vec<HeaderCell<'a>>,
     pub rows: Markup,
     pub extra_classes: Option<&'a str>,
 }
@@ -15,7 +19,6 @@ impl<'a> Render for Table<'a> {
         let headers = self
             .headers
             .iter()
-            .map(|h| HeaderCell { text: h })
             .fold(html! {}, |acc, h| html! { (acc) (h) });
 
         html! {
@@ -33,12 +36,39 @@ impl<'a> Render for Table<'a> {
 
 pub struct HeaderCell<'a> {
     pub text: &'a str,
+    pub numeric: bool,
+}
+
+impl<'a> HeaderCell<'a> {
+    pub fn plain(text: &'a str) -> Self {
+        Self {
+            text,
+            numeric: false,
+        }
+    }
+
+    pub fn numeric(text: &'a str) -> Self {
+        Self {
+            text,
+            numeric: true,
+        }
+    }
+}
+
+impl<'a> From<&'a str> for HeaderCell<'a> {
+    fn from(text: &'a str) -> Self {
+        Self::plain(text)
+    }
 }
 
 impl<'a> Render for HeaderCell<'a> {
     fn render(&self) -> Markup {
         html! {
-            th scope="col" { (self.text) }
+            @if self.numeric {
+                th scope="col" class="num" { (self.text) }
+            } @else {
+                th scope="col" { (self.text) }
+            }
         }
     }
 }
@@ -46,15 +76,59 @@ impl<'a> Render for HeaderCell<'a> {
 pub struct Cell {
     pub content: Markup,
     pub is_primary: bool,
+    pub numeric: bool,
+}
+
+impl Cell {
+    pub fn plain(content: Markup) -> Self {
+        Self {
+            content,
+            is_primary: false,
+            numeric: false,
+        }
+    }
+
+    pub fn primary(content: Markup) -> Self {
+        Self {
+            content,
+            is_primary: true,
+            numeric: false,
+        }
+    }
+
+    pub fn numeric(content: Markup) -> Self {
+        Self {
+            content,
+            is_primary: false,
+            numeric: true,
+        }
+    }
+
+    pub fn numeric_primary(content: Markup) -> Self {
+        Self {
+            content,
+            is_primary: true,
+            numeric: true,
+        }
+    }
 }
 
 impl Render for Cell {
     fn render(&self) -> Markup {
         html! {
-            @if self.is_primary {
-                td class="primary" { (self.content) }
-            } @else {
-                td { (self.content) }
+            @match (self.numeric, self.is_primary) {
+                (true, true) => {
+                    td class="num primary" { (self.content) }
+                }
+                (true, false) => {
+                    td class="num" { (self.content) }
+                }
+                (false, true) => {
+                    td class="primary" { (self.content) }
+                }
+                (false, false) => {
+                    td { (self.content) }
+                }
             }
         }
     }

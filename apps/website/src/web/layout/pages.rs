@@ -82,7 +82,7 @@ pub fn settings<'a>(
                 div {
                     h1 class="page-title" { "Profile settings" }
                     div id="profile-picture" class="profile-row" {
-                        img class="avatar-lg" src=(components::profile_picture_url(&user)) alt="user photo";
+                        (components::avatar::GithubAvatar::large(&user.username))
                         div {
                             p { "Username: " (&*user.username) }
                         }
@@ -181,18 +181,14 @@ fn token_created_page(
 
             (components::alert::Alert::warning("Important!", "Make sure to copy your token now. You won't be able to see it again!"))
 
-            p class="lede" {
-                (description)
-            }
+            (components::section::Lede { content: html! { (description) } })
 
             input type="text" id="token-value" readonly="" value=(plaintext_token) class="token-value" {}
 
             (usage_snippet)
 
             div class="form-actions" {
-                a href="/settings" class="btn" {
-                    "Done"
-                }
+                (components::button::Primary { text: "Done", url: "/settings", icon: None })
             }
         }
     };
@@ -229,7 +225,11 @@ fn token_section(
             (components::form::HelperText { text: description })
 
             (components::table::Table {
-                headers: vec!["Name", "Created", "Actions"],
+                headers: vec![
+                    components::table::HeaderCell::plain("Name"),
+                    components::table::HeaderCell::plain("Created"),
+                    components::table::HeaderCell::plain("Actions"),
+                ],
                 rows: html! {
                     @if tokens.is_empty() {
                         (components::table::EmptyRow { colspan: 3, message: empty_message })
@@ -237,13 +237,14 @@ fn token_section(
                         @for token in tokens {
                             (components::table::Row {
                                 content: html! {
-                                    (components::table::Cell { content: html! { (token.name) }, is_primary: true })
+                                    (components::table::Cell { content: html! { (token.name) }, is_primary: true, numeric: false })
                                     @let format = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]");
                                     (components::table::Cell {
                                         content: html! {
                                             (token.created_at.format(&format).unwrap_or_else(|_| "Invalid date".to_string()))
                                         },
-                                        is_primary: false
+                                        is_primary: false,
+                                        numeric: false,
                                     })
                                     (components::table::Cell {
                                         content: html! {
@@ -253,7 +254,8 @@ fn token_section(
                                                 }
                                             }
                                         },
-                                        is_primary: false
+                                        is_primary: false,
+                                        numeric: false,
                                     })
                                 }
                             })
@@ -304,14 +306,15 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
     let rows = agents.iter().map(|agent| {
         components::table::Row {
             content: html! {
-                (components::table::Cell { content: html! { (&*agent.name) }, is_primary: true })
+                (components::table::Cell { content: html! { (&*agent.name) }, is_primary: true, numeric: false })
                 (components::table::Cell {
                     content: html! {
                         span class="mono" {
                             (agent.image_url.as_ref())
                         }
                     },
-                    is_primary: false
+                    is_primary: false,
+                    numeric: false,
                 })
                 (components::table::Cell {
                     content: html! {
@@ -322,7 +325,8 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
                         span class=(dot_class) {}
                         span { (format!("{:?}", agent.status)) }
                     },
-                    is_primary: false
+                    is_primary: false,
+                    numeric: false,
                 })
                 (components::table::Cell {
                     content: html! {
@@ -344,13 +348,19 @@ pub fn agents(session: &AuthSession, agents: Vec<Agent>) -> Page<'_> {
                             }
                         }
                     },
-                    is_primary: false
+                    is_primary: false,
+                    numeric: false,
                 })
             }
         }
     });
     let table = components::table::Table {
-        headers: vec!["Name", "Image", "Status", "Actions"],
+        headers: vec![
+            components::table::HeaderCell::plain("Name"),
+            components::table::HeaderCell::plain("Image"),
+            components::table::HeaderCell::plain("Status"),
+            components::table::HeaderCell::plain("Actions"),
+        ],
         rows: html! {
             @if agents.is_empty() {
                 (components::table::EmptyRow { colspan: 4, message: "No agents yet." })

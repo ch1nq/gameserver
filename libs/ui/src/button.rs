@@ -38,6 +38,23 @@ impl<'a> Render for FormSubmit<'a> {
     }
 }
 
+/// Accent-colored text link (e.g. secondary actions next to a primary button).
+/// Generic: only carries text + url, no domain knowledge.
+pub struct AccentLink<'a> {
+    pub text: &'a str,
+    pub url: &'a str,
+}
+
+impl<'a> Render for AccentLink<'a> {
+    fn render(&self) -> Markup {
+        html! {
+            a href=(self.url) class="link-accent" {
+                (self.text)
+            }
+        }
+    }
+}
+
 pub struct ModalTrigger<'a> {
     pub modal_id: &'a str,
     pub text: &'a str,
