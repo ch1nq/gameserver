@@ -119,7 +119,7 @@ impl<'a> Render for Navbar<'a> {
                     div class="nav-links" {
                         a href="#board" class="nav-link" { "Leaderboard" }
                         a href="#bot-file" class="nav-link" { "Docs" }
-                        a href="https://github.com" class="nav-link" {
+                        a href="https://github.com/ch1nq/gameserver" class="nav-link" {
                             (Icon::GithubLogo)
                             "Star"
                         }
