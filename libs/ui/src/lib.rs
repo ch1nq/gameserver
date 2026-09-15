@@ -8,6 +8,7 @@ pub mod error;
 pub mod form;
 pub mod icon;
 pub mod modal;
+pub mod section;
 pub mod styles;
 pub mod table;
 pub mod tabs;

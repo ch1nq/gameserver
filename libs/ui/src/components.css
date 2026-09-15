@@ -36,6 +36,7 @@ a:hover{ color:var(--accent-hover); }
 .btn{ display:inline-flex; align-items:center; gap:8px; font-weight:600; font-size:14px; border-radius:3px; padding:10px 20px; text-align:center; color:var(--accent-ink); background:var(--accent); border:none; cursor:pointer; text-decoration:none; }
 .btn:hover{ background:var(--accent-hover); color:var(--accent-ink); }
 .btn:focus-visible{ outline:4px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset:1px; }
+.link-accent{ font-size:14px; color:var(--accent); font-weight:600; }
 .icon-btn{ display:inline-flex; justify-content:center; align-items:center; width:32px; height:32px; margin-left:auto; border-radius:8px; font-size:14px; color:var(--muted); background:transparent; border:none; cursor:pointer; text-decoration:none; }
 .icon-btn:hover{ background:var(--hover); color:var(--ink); }
 .icon{ width:16px; height:16px; flex:none; }
@@ -49,8 +50,20 @@ a:hover{ color:var(--accent-hover); }
 .avatar{ position:relative; display:block; width:20px; height:20px; flex:none; }
 .avatar-fallback{ position:absolute; inset:0; border-radius:999px; background:var(--avatar); color:var(--muted); font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; }
 .avatar-img{ position:relative; width:20px; height:20px; border-radius:999px; display:block; object-fit:cover; }
+.avatar.is-lg{ width:64px; height:64px; }
+.avatar.is-lg .avatar-fallback{ font-size:24px; }
+.avatar.is-lg .avatar-img{ width:64px; height:64px; }
 .code{ background:var(--surface-2); border:1px solid var(--line); border-radius:4px; padding:16px 18px; max-width:760px; overflow-x:auto; font-family:ui-monospace,monospace; font-size:13.5px; line-height:1.75; color:var(--mid); }
 .code pre{ white-space:pre; margin:0; }
+
+/* ---------- sections / typography ---------- */
+.section{ border-top:1px solid var(--line); padding-top:26px; display:flex; flex-direction:column; gap:14px; }
+.section-head{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+.section-title{ margin:0; font-family:Geologica,system-ui,sans-serif; font-weight:600; font-size:19px; letter-spacing:-0.025em; color:var(--ink); }
+.section-sub{ font-size:14px; color:var(--muted); }
+.lede{ margin:0; font-size:15px; line-height:1.6; color:var(--mid); max-width:68ch; }
+.note{ margin:0; font-size:13px; color:var(--muted); }
+.actions-row{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding-top:2px; }
 
 /* ---------- tables (incl. cell adornments used by callers) ---------- */
 .tbl-wrap{ position:relative; overflow-x:auto; background:var(--surface); border:1px solid var(--line); border-radius:4px; }

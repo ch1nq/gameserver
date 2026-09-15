@@ -2,12 +2,16 @@ use crate::users::{AuthSession, User};
 use achtung_ui::error::Error;
 use maud::{Markup, Render, html};
 
-// Re-export components from the shared library for convenience
+// Re-export components from the shared library for convenience.
+// `achtung-ui` stays standalone (only `maud`): apps compose these
+// primitives with domain data, never the other way around.
 pub use achtung_ui::Icon;
 pub use achtung_ui::alert;
+pub use achtung_ui::avatar;
 pub use achtung_ui::button;
 pub use achtung_ui::form;
 pub use achtung_ui::modal;
+pub use achtung_ui::section;
 pub use achtung_ui::table;
 
 pub struct Page<'a> {
@@ -47,10 +51,6 @@ impl<'a> Render for Page<'a> {
     }
 }
 
-pub fn profile_picture_url(user: &User) -> String {
-    format!("https://github.com/{}.png", user.username)
-}
-
 struct UserDropdown<'a> {
     user: &'a User,
 }
@@ -61,7 +61,7 @@ impl<'a> Render for UserDropdown<'a> {
             details class="dropdown" {
                 summary class="dropdown-toggle" {
                     span class="sr-only" { "Open user menu" }
-                    img src=(profile_picture_url(self.user)) alt="user photo";
+                    img src=(avatar::github_avatar_url_default(&self.user.username)) alt="user photo";
                     (&*self.user.username)
                     svg class="icon" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 10 6" {
                         path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m1 1 4 4 4-4";
