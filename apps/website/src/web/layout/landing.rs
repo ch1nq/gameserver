@@ -64,7 +64,7 @@ impl Render for LeaderboardSection<'_> {
                 content: html! {
                     (SectionHead {
                         title: html! { "Leaderboard" },
-                        sub: Some(html! { (self.entries.len()) " bots ranked" }),
+                        sub: None,
                     })
                     (Table {
                         headers: vec![
