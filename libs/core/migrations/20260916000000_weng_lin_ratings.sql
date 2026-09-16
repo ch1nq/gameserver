@@ -1,10 +1,11 @@
 -- Weng-Lin (OpenSkill) ratings for issue #66.
 --
--- Raw scale: new players start at rating=25.0, uncertainty=25/3. ratings live
--- in agent_ratings (one row per agent, created on first finished match);
--- matches + match_placements keep the full history with before/after
--- snapshots so ratings can be audited or recomputed. Failed games are not
--- recorded here at all (only Finished games move ratings).
+-- Elo scale (raw OpenSkill × 60): new players start at rating=1500,
+-- uncertainty=500. Ratings live in agent_ratings (one row per agent,
+-- created on first finished match); matches + match_placements keep the
+-- full history with before/after snapshots so ratings can be audited or
+-- recomputed. Failed games are not recorded here at all (only Finished
+-- games move ratings).
 
 CREATE TABLE matches (
     id          BIGSERIAL PRIMARY KEY NOT NULL,
@@ -17,8 +18,8 @@ CREATE TABLE matches (
 
 CREATE TABLE agent_ratings (
     agent_id      BIGINT NOT NULL PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
-    rating        DOUBLE PRECISION NOT NULL DEFAULT 25.0,
-    uncertainty   DOUBLE PRECISION NOT NULL DEFAULT 8.333333333333334,
+    rating        DOUBLE PRECISION NOT NULL DEFAULT 1500.0,
+    uncertainty   DOUBLE PRECISION NOT NULL DEFAULT 500.0,
     matches_played INT NOT NULL DEFAULT 0,
     wins          INT NOT NULL DEFAULT 0,
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
