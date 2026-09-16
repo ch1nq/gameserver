@@ -37,4 +37,4 @@ CREATE TABLE match_placements (
 );
 
 CREATE INDEX idx_match_placements_agent_id ON match_placements(agent_id);
-CREATE INDEX idx_matches_external_id ON matches(external_id);
+-- No index on matches(external_id): the UNIQUE constraint already indexes it.

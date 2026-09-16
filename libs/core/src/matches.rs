@@ -10,10 +10,9 @@ use sqlx::{PgPool, Row};
 use crate::agents::agent::{Agent, AgentImageUrl, AgentName, AgentStatus};
 use crate::users::{UserId, Username};
 
-/// Mu for agents with no recorded match.
-pub const DEFAULT_RATING: f64 = 25.0;
-/// Sigma for agents with no recorded match (25/3).
-pub const DEFAULT_UNCERTAINTY: f64 = 25.0 / 3.0;
+/// Canonical rating defaults live in `common` (single source of truth);
+/// re-exported here so callers don't need a second import.
+pub use common::{DEFAULT_RATING, DEFAULT_UNCERTAINTY, PROVISIONAL_MATCHES};
 
 #[derive(Debug, Clone)]
 pub struct MatchManager {
@@ -24,6 +23,10 @@ pub struct MatchManager {
 pub enum MatchManagerError {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
+    #[error("cannot record a match with no placements")]
+    EmptyPlacements,
+    #[error("duplicate agent {0} in match placements")]
+    DuplicateAgent(AgentId),
 }
 
 /// One leaderboard row: agent + owner + current rating.
@@ -35,6 +38,22 @@ pub struct LeaderboardEntry {
     pub uncertainty: f64,
     pub matches_played: i32,
     pub wins: i32,
+}
+
+impl LeaderboardEntry {
+    /// Still calibrating: fewer than [`PROVISIONAL_MATCHES`] games.
+    pub fn is_provisional(&self) -> bool {
+        StoredRating::is_provisional(self.matches_played)
+    }
+
+    /// Display rating, formatted identically to `ranking::format_rating`.
+    pub fn formatted_rating(&self) -> String {
+        StoredRating {
+            rating: self.rating,
+            uncertainty: self.uncertainty,
+        }
+        .format()
+    }
 }
 
 impl MatchManager {
@@ -91,12 +110,28 @@ impl MatchManager {
     /// Persist one finished match and upsert current ratings, atomically.
     ///
     /// `placements` carries before/after snapshots (computed by the caller via
-    /// `achtung-ranking`); a win is `position == 1`. Returns the `matches.id`.
+    /// `achtung-ranking`); a win is `position == 1`, so tied winners each
+    /// record a win. Returns the `matches.id`.
+    ///
+    /// Fails fast on an empty list (no orphan `matches` row) or a duplicate
+    /// `agent_id` (which would otherwise surface as an opaque primary-key
+    /// violation mid-transaction).
     pub async fn record_finished_match(
         &self,
         external_id: &str,
         placements: &[FinishedPlacement],
     ) -> Result<i64, MatchManagerError> {
+        if placements.is_empty() {
+            return Err(MatchManagerError::EmptyPlacements);
+        }
+        {
+            let mut seen = std::collections::HashSet::with_capacity(placements.len());
+            for p in placements {
+                if !seen.insert(p.agent_id) {
+                    return Err(MatchManagerError::DuplicateAgent(p.agent_id));
+                }
+            }
+        }
         let mut tx = self.db_pool.begin().await?;
         let match_id: i64 = sqlx::query(
             r#"
