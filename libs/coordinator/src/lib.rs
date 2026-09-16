@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,7 +10,7 @@ use common::{AgentId, AgentInfo, AgentRepository, ContainerImageUrl, DeployToken
 use common::{FinishedPlacement, MatchRecorder, StoredRating};
 use game_host::game_host_client::GameHostClient;
 use game_host::{AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest};
-use ranking::{FfaPlayer, WengLinConfig, WengLinRating};
+use ranking::{FfaPlayer, Rank, ValidatedFfaPlayers, WengLinConfig, WengLinRating};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
@@ -302,37 +303,79 @@ impl<P: MachineProvider> GameCoordinator<P> {
     /// Load current ratings, compute Weng-Lin updates for a `Finished` game,
     /// and persist them. Failed games never reach here, so every placement
     /// moves ratings. Ties share a `position` and are scored as tied.
+    ///
+    /// Best-effort with bounded retries: rating I/O is retried a few times
+    /// with backoff, but a persistent failure only logs — it never fails the
+    /// match loop (infra is already cleaned up). A skipped match leaves a
+    /// gap in history by design; see the retry constants below.
     async fn update_ratings(&self, match_id: &str, result: &GameResult) {
         if result.placements.is_empty() {
             return;
         }
+        // Fail fast before any I/O: duplicates would otherwise rate one
+        // agent twice and die opaquely on the DB primary key.
+        {
+            let mut seen = HashSet::with_capacity(result.placements.len());
+            for p in &result.placements {
+                if !seen.insert(p.agent_id) {
+                    tracing::warn!(
+                        match_id,
+                        agent_id = p.agent_id,
+                        "Skipping rating update: duplicate agent in placements"
+                    );
+                    return;
+                }
+            }
+        }
+        // Parse wire positions into `Rank` (non-zero by construction) before
+        // any I/O: a host reporting `position == 0` fails the whole match
+        // rather than silently shifting every other agent's update.
+        let mut ranks: Vec<(AgentId, Rank)> = Vec::with_capacity(result.placements.len());
+        for p in &result.placements {
+            match Rank::new(p.position) {
+                Some(rank) => ranks.push((p.agent_id, rank)),
+                None => {
+                    tracing::warn!(
+                        match_id,
+                        agent_id = p.agent_id,
+                        position = p.position,
+                        "Skipping rating update: rank must be >= 1"
+                    );
+                    return;
+                }
+            }
+        }
         let ids: Vec<AgentId> = result.placements.iter().map(|p| p.agent_id).collect();
-        let stored = match self.match_recorder.load_ratings(&ids).await {
+        let stored = match self.load_ratings_retry(&ids).await {
             Ok(s) => s,
             Err(e) => {
                 tracing::error!(match_id, error = %e, "Failed to load ratings; skipping update");
                 return;
             }
         };
-        let fallback = ranking::default_rating();
+        let fallback = StoredRating::default_rating();
         let players: Vec<FfaPlayer> = result
             .placements
             .iter()
-            .map(|p| {
-                let s = stored.get(&p.agent_id).copied().unwrap_or(StoredRating {
-                    rating: fallback.rating,
-                    uncertainty: fallback.uncertainty,
-                });
+            .zip(ranks.iter())
+            .map(|(p, (_, rank))| {
+                let s = stored.get(&p.agent_id).copied().unwrap_or(fallback);
                 FfaPlayer {
                     agent_id: p.agent_id,
                     rating: WengLinRating {
                         rating: s.rating,
                         uncertainty: s.uncertainty,
                     },
-                    rank: p.position,
+                    rank: *rank,
                 }
             })
             .collect();
+        // Defense in depth: already checked above, but `rate_ffa` re-checks
+        // length and uniqueness so a future caller can't bypass them.
+        if let Err(e) = ValidatedFfaPlayers::try_from(players.as_slice()) {
+            tracing::warn!(match_id, error = %e, "Skipping rating update");
+            return;
+        }
         let rated = match ranking::rate_ffa(&players, &self.config.weng_lin_config) {
             Ok(r) => r,
             Err(e) => {
@@ -340,30 +383,100 @@ impl<P: MachineProvider> GameCoordinator<P> {
                 return;
             }
         };
-        let placements: Vec<FinishedPlacement> = result
-            .placements
-            .iter()
-            .zip(rated.iter())
-            .map(|(p, r)| FinishedPlacement {
-                agent_id: p.agent_id,
-                position: p.position,
-                score: p.score,
-                old_rating: StoredRating {
-                    rating: r.old_rating.rating,
-                    uncertainty: r.old_rating.uncertainty,
-                },
-                new_rating: StoredRating {
-                    rating: r.new_rating.rating,
-                    uncertainty: r.new_rating.uncertainty,
-                },
-            })
-            .collect();
-        if let Err(e) = self
-            .match_recorder
-            .record_finished_match(match_id, &placements)
-            .await
-        {
+        // Join on `agent_id`, not positionally: correct even if the rating
+        // backend ever reordered its output.
+        let rated_by_id: HashMap<AgentId, ranking::RatedPlayer> =
+            rated.into_iter().map(|r| (r.agent_id, r)).collect();
+        let mut placements: Vec<FinishedPlacement> = Vec::with_capacity(result.placements.len());
+        for p in &result.placements {
+            match rated_by_id.get(&p.agent_id) {
+                Some(r) => placements.push(FinishedPlacement {
+                    agent_id: p.agent_id,
+                    position: p.position,
+                    score: p.score,
+                    old_rating: StoredRating {
+                        rating: r.old_rating.rating,
+                        uncertainty: r.old_rating.uncertainty,
+                    },
+                    new_rating: StoredRating {
+                        rating: r.new_rating.rating,
+                        uncertainty: r.new_rating.uncertainty,
+                    },
+                }),
+                None => {
+                    tracing::error!(
+                        match_id,
+                        agent_id = p.agent_id,
+                        "Skipping rating update: rated output missing agent"
+                    );
+                    return;
+                }
+            }
+        }
+        if let Err(e) = self.record_match_retry(match_id, &placements).await {
             tracing::error!(match_id, error = %e, "Failed to record match ratings");
+        }
+    }
+
+    /// Retry delays for best-effort rating I/O. Short enough to not stall
+    /// the match loop, long enough to ride out a DB blip.
+    fn rating_retry_delays() -> [Duration; 3] {
+        [
+            Duration::from_millis(100),
+            Duration::from_millis(400),
+            Duration::from_millis(1000),
+        ]
+    }
+
+    async fn load_ratings_retry(
+        &self,
+        ids: &[AgentId],
+    ) -> Result<HashMap<AgentId, StoredRating>, Box<dyn std::error::Error + Send + Sync>> {
+        let delays = Self::rating_retry_delays();
+        let mut attempt = 0usize;
+        loop {
+            match self.match_recorder.load_ratings(ids).await {
+                Ok(s) => return Ok(s),
+                Err(e) if attempt < delays.len() => {
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        error = %e,
+                        "load_ratings failed; retrying"
+                    );
+                    tokio::time::sleep(delays[attempt]).await;
+                    attempt += 1;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    async fn record_match_retry(
+        &self,
+        match_id: &str,
+        placements: &[FinishedPlacement],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let delays = Self::rating_retry_delays();
+        let mut attempt = 0usize;
+        loop {
+            match self
+                .match_recorder
+                .record_finished_match(match_id, placements)
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(e) if attempt < delays.len() => {
+                    tracing::warn!(
+                        match_id,
+                        attempt = attempt + 1,
+                        error = %e,
+                        "record_finished_match failed; retrying"
+                    );
+                    tokio::time::sleep(delays[attempt]).await;
+                    attempt += 1;
+                }
+                Err(e) => return Err(e),
+            }
         }
     }
 
@@ -815,18 +928,10 @@ mod tests {
             agent_ids: &[AgentId],
         ) -> Result<HashMap<AgentId, StoredRating>, Box<dyn std::error::Error + Send + Sync>>
         {
-            let fallback = ranking::default_rating();
+            let fallback = StoredRating::default_rating();
             Ok(agent_ids
                 .iter()
-                .map(|id| {
-                    (
-                        *id,
-                        self.ratings.get(id).copied().unwrap_or(StoredRating {
-                            rating: fallback.rating,
-                            uncertainty: fallback.uncertainty,
-                        }),
-                    )
-                })
+                .map(|id| (*id, self.ratings.get(id).copied().unwrap_or(fallback)))
                 .collect())
         }
 
@@ -1035,5 +1140,143 @@ mod tests {
             .await;
 
         assert!(recorder.recorded.lock().unwrap().is_empty());
+    }
+
+    /// The mirrored default-rating literals stay in sync: canonical values
+    /// live in `common`, `achtung-ranking` keeps a leaf-local copy.
+    #[test]
+    fn default_ratings_match_common() {
+        let math = ranking::default_rating();
+        let stored = StoredRating::default_rating();
+        assert!((math.rating - stored.rating).abs() < f64::EPSILON);
+        assert!((math.uncertainty - stored.uncertainty).abs() < 1e-12);
+        assert!((ranking::DEFAULT_RATING - common::DEFAULT_RATING).abs() < f64::EPSILON);
+        assert!(
+            (ranking::DEFAULT_UNCERTAINTY - common::DEFAULT_UNCERTAINTY).abs() < 1e-12,
+            "ranking/common default uncertainty diverged"
+        );
+        assert_eq!(
+            ranking::format_rating(&math),
+            StoredRating {
+                rating: math.rating,
+                uncertainty: math.uncertainty,
+            }
+            .format()
+        );
+    }
+
+    /// A zero rank from the host fails the match before any I/O — no
+    /// ratings and no history row for that match.
+    #[tokio::test]
+    async fn update_ratings_skips_invalid_rank() {
+        let (coordinator, recorder) = test_coordinator(StubRecorder::with_defaults());
+        let mut bad = finished_result();
+        bad.placements[1].position = 0;
+        coordinator.update_ratings("match-bad-rank", &bad).await;
+
+        assert!(recorder.recorded.lock().unwrap().is_empty());
+    }
+
+    /// A duplicated agent fails the match before any I/O instead of dying
+    /// opaquely on the DB primary key.
+    #[tokio::test]
+    async fn update_ratings_skips_duplicate_agent() {
+        let (coordinator, recorder) = test_coordinator(StubRecorder::with_defaults());
+        let mut dup = finished_result();
+        dup.placements[1].agent_id = dup.placements[0].agent_id;
+        coordinator.update_ratings("match-dup", &dup).await;
+
+        assert!(recorder.recorded.lock().unwrap().is_empty());
+    }
+
+    /// A single placement cannot be rated and records nothing.
+    #[tokio::test]
+    async fn update_ratings_skips_single_player() {
+        let (coordinator, recorder) = test_coordinator(StubRecorder::with_defaults());
+        coordinator
+            .update_ratings(
+                "match-solo",
+                &GameResult {
+                    winner_agent_id: Some(1),
+                    placements: vec![AgentPlacement {
+                        agent_id: 1,
+                        position: 1,
+                        score: 100,
+                    }],
+                },
+            )
+            .await;
+
+        assert!(recorder.recorded.lock().unwrap().is_empty());
+    }
+
+    /// Transient load failures are retried: a recorder that fails twice
+    /// then succeeds still records the match.
+    #[tokio::test]
+    async fn update_ratings_retries_transient_load_failure() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Flaky {
+            calls: AtomicUsize,
+            inner: StubRecorder,
+        }
+        #[async_trait::async_trait]
+        impl MatchRecorder for Flaky {
+            async fn load_ratings(
+                &self,
+                ids: &[AgentId],
+            ) -> Result<HashMap<AgentId, StoredRating>, Box<dyn std::error::Error + Send + Sync>>
+            {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                if n < 2 {
+                    return Err("blip".into());
+                }
+                self.inner.load_ratings(ids).await
+            }
+            async fn record_finished_match(
+                &self,
+                id: &str,
+                placements: &[FinishedPlacement],
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                self.inner.record_finished_match(id, placements).await
+            }
+        }
+
+        let flaky = Arc::new(Flaky {
+            calls: AtomicUsize::new(0),
+            inner: StubRecorder::with_defaults(),
+        });
+        struct Shared(Arc<Flaky>);
+        #[async_trait::async_trait]
+        impl MatchRecorder for Shared {
+            async fn load_ratings(
+                &self,
+                ids: &[AgentId],
+            ) -> Result<HashMap<AgentId, StoredRating>, Box<dyn std::error::Error + Send + Sync>>
+            {
+                self.0.load_ratings(ids).await
+            }
+            async fn record_finished_match(
+                &self,
+                id: &str,
+                placements: &[FinishedPlacement],
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                self.0.record_finished_match(id, placements).await
+            }
+        }
+        let coordinator = GameCoordinator::new(
+            test_config(),
+            Arc::new(StubProvider),
+            Box::new(StubRepo),
+            Box::new(StubTokens),
+            Box::new(Shared(flaky.clone())),
+            Arc::new(RwLock::new(SpectatorMatch::default())),
+        );
+        coordinator
+            .update_ratings("match-retry", &finished_result())
+            .await;
+
+        assert_eq!(flaky.calls.load(Ordering::SeqCst), 3);
+        assert_eq!(flaky.inner.recorded.lock().unwrap().len(), 1);
     }
 }
