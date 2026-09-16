@@ -1,9 +1,11 @@
 //! Landing page sections, mirroring `mockup/Landing.dc.html`.
 //!
 //! Renders live Weng-Lin ratings (`LeaderboardEntry`): raw mu ± sigma plus
-//! win / match counts. Bot names and `@author` come from the same rows.
+//! win / match counts, best first. Bots under [`PROVISIONAL_MATCHES`]
+//! games render a provisional marker. Bot names and `@author` come from
+//! the same rows.
 
-use achtung_core::matches::LeaderboardEntry;
+use achtung_core::matches::{LeaderboardEntry, PROVISIONAL_MATCHES};
 use achtung_ui::avatar::GithubAvatar;
 use achtung_ui::badge::Badge;
 use achtung_ui::button::{AccentLink, Primary};
@@ -80,6 +82,12 @@ impl Render for LeaderboardSection<'_> {
                                 (EmptyRow { colspan: 7, message: "No bots yet — upload the first one." })
                             }
                             @for (i, entry) in self.entries.iter().enumerate() {
+                                @let rating_title = if entry.is_provisional() {
+                                    format!("provisional — uncertainty ±{:.1}", entry.uncertainty)
+                                } else {
+                                    format!("uncertainty ±{:.1}", entry.uncertainty)
+                                };
+                                @let provisional_title = format!("fewer than {PROVISIONAL_MATCHES} matches");
                                 (Row {
                                     content: html! {
                                         (Cell::numeric(html! { (i + 1) }))
@@ -92,8 +100,13 @@ impl Render for LeaderboardSection<'_> {
                                         }))
                                         (Cell::plain(html! { "—" }))
                                         (Cell::numeric_primary(html! {
-                                            span title=(format!("uncertainty ±{:.1}", entry.uncertainty)) {
-                                                (format!("{:.1} ± {:.1}", entry.rating, entry.uncertainty))
+                                            span title=(rating_title) {
+                                                (entry.formatted_rating())
+                                            }
+                                            @if entry.is_provisional() {
+                                                span class="provisional" title=(provisional_title) {
+                                                    "provisional"
+                                                }
                                             }
                                         }))
                                         (Cell::numeric(html! {
