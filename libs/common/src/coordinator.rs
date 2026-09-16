@@ -33,6 +33,18 @@ pub trait DeployTokenProvider: Send + Sync {
     ) -> Result<RegistryToken, Box<dyn std::error::Error + Send + Sync>>;
 }
 
+/// Canonical default mu for an agent with no recorded matches.
+///
+/// Raw Weng-Lin scale (matches `skillratings::WengLinRating::new()`).
+/// Defined here so `core` and `coordinator` share one source of truth;
+/// `achtung-ranking` keeps a mirrored literal to stay a pure math leaf
+/// without depending on this crate (see the sync test in `coordinator`).
+pub const DEFAULT_RATING: f64 = 25.0;
+/// Canonical default sigma for an agent with no recorded matches (25/3).
+pub const DEFAULT_UNCERTAINTY: f64 = 25.0 / 3.0;
+/// Matches played below this count render as provisional on the leaderboard.
+pub const PROVISIONAL_MATCHES: i32 = 20;
+
 /// Current Weng-Lin rating of one agent (raw scale: 25.0 ± 8.33 for new
 /// players). Plain floats so `core` and `coordinator` share the shape without
 /// depending on the `skillratings` crate directly.
@@ -40,6 +52,32 @@ pub trait DeployTokenProvider: Send + Sync {
 pub struct StoredRating {
     pub rating: f64,
     pub uncertainty: f64,
+}
+
+impl StoredRating {
+    /// Default rating for agents with no history.
+    pub fn default_rating() -> Self {
+        Self {
+            rating: DEFAULT_RATING,
+            uncertainty: DEFAULT_UNCERTAINTY,
+        }
+    }
+
+    /// Human-readable raw rating, e.g. `"24.1 ± 3.2"`.
+    pub fn format(&self) -> String {
+        format_rating(self.rating, self.uncertainty)
+    }
+
+    /// Agents below [`PROVISIONAL_MATCHES`] games are still calibrating.
+    pub fn is_provisional(matches_played: i32) -> bool {
+        matches_played < PROVISIONAL_MATCHES
+    }
+}
+
+/// Human-readable raw rating, e.g. `"24.1 ± 3.2"`. Shared helper so the
+/// website and the rating crate format identically.
+pub fn format_rating(rating: f64, uncertainty: f64) -> String {
+    format!("{:.1} ± {:.1}", rating, uncertainty)
 }
 
 /// One placement with before/after rating snapshots, ready to persist.
