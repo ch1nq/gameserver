@@ -1,6 +1,6 @@
 //! Finished-match history and Weng-Lin ratings (`matches`, `match_placements`,
 //! `agent_ratings`). Only `Finished` games are recorded — failed games never
-//! touch ratings. Ratings are raw Weng-Lin scale (new players 25.0 ± 8.33).
+//! touch ratings. Ratings are Elo-scale Weng-Lin (new players 1500 ± 500).
 
 use std::collections::HashMap;
 
@@ -62,7 +62,7 @@ impl MatchManager {
     }
 
     /// Current ratings for `agent_ids`. Agents without a row get the default
-    /// (25.0 ± 8.33) so first-match math needs no special casing.
+    /// (1500 ± 500) so first-match math needs no special casing.
     pub async fn get_ratings(
         &self,
         agent_ids: &[AgentId],
@@ -193,7 +193,7 @@ impl MatchManager {
     }
 
     /// All agents with their current rating, best first. Agents that never
-    /// played sort as default (25.0). Used by the landing leaderboard.
+    /// played sort as default (1500). Used by the landing leaderboard.
     pub async fn get_leaderboard(&self) -> Result<Vec<LeaderboardEntry>, MatchManagerError> {
         let rows = sqlx::query(
             r#"

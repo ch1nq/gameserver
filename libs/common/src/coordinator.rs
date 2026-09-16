@@ -35,17 +35,18 @@ pub trait DeployTokenProvider: Send + Sync {
 
 /// Canonical default mu for an agent with no recorded matches.
 ///
-/// Raw Weng-Lin scale (matches `skillratings::WengLinRating::new()`).
-/// Defined here so `core` and `coordinator` share one source of truth;
-/// `achtung-ranking` keeps a mirrored literal to stay a pure math leaf
-/// without depending on this crate (see the sync test in `coordinator`).
-pub const DEFAULT_RATING: f64 = 25.0;
-/// Canonical default sigma for an agent with no recorded matches (25/3).
-pub const DEFAULT_UNCERTAINTY: f64 = 25.0 / 3.0;
+/// Elo-scale Weng-Lin (raw OpenSkill 25.0 × 60). Defined here so `core`
+/// and `coordinator` share one source of truth; `achtung-ranking` keeps
+/// a mirrored literal to stay a pure math leaf without depending on this
+/// crate (see the sync test in `coordinator`).
+pub const DEFAULT_RATING: f64 = 1500.0;
+/// Canonical default sigma for an agent with no recorded matches
+/// (raw 25/3 × 60).
+pub const DEFAULT_UNCERTAINTY: f64 = 500.0;
 /// Matches played below this count render as provisional on the leaderboard.
 pub const PROVISIONAL_MATCHES: i32 = 20;
 
-/// Current Weng-Lin rating of one agent (raw scale: 25.0 ± 8.33 for new
+/// Current Weng-Lin rating of one agent (Elo scale: 1500 ± 500 for new
 /// players). Plain floats so `core` and `coordinator` share the shape without
 /// depending on the `skillratings` crate directly.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,7 +64,7 @@ impl StoredRating {
         }
     }
 
-    /// Human-readable raw rating, e.g. `"24.1 ± 3.2"`.
+    /// Human-readable Elo-scale rating, e.g. `"1500 ± 500"`.
     pub fn format(&self) -> String {
         format_rating(self.rating, self.uncertainty)
     }
@@ -74,10 +75,10 @@ impl StoredRating {
     }
 }
 
-/// Human-readable raw rating, e.g. `"24.1 ± 3.2"`. Shared helper so the
-/// website and the rating crate format identically.
+/// Human-readable Elo-scale rating, e.g. `"1500 ± 500"`. Shared helper
+/// so the website and the rating crate format identically.
 pub fn format_rating(rating: f64, uncertainty: f64) -> String {
-    format!("{:.1} ± {:.1}", rating, uncertainty)
+    format!("{:.0} ± {:.0}", rating, uncertainty)
 }
 
 /// One placement with before/after rating snapshots, ready to persist.
