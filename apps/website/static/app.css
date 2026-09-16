@@ -57,7 +57,7 @@
 .hero-side{ flex:1; min-width:280px; display:flex; flex-direction:column; gap:34px; }
 .live-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .round-label{ font-size:13px; color:var(--mid); font-weight:600; font-variant-numeric:tabular-nums; }
-.legend{ display:flex; flex-direction:column; list-style:none; margin:0; padding:0; }
+.legend{ display:flex; flex-direction:column; gap:5px; list-style:none; margin:0; padding:0; }
 .legend-row{ height:26px; display:flex; align-items:center; gap:9px; padding:0 10px; border:1px solid var(--line); border-radius:4px; background:var(--surface); }
 .legend-row.is-dead{ background:transparent; }
 .legend-row.is-hover{ border-color:var(--accent); background:var(--hover); }

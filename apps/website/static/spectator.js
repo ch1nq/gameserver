@@ -55,10 +55,9 @@ function init_spectator(canvasId) {
             if (s === null || s === undefined) continue;
             const row = rows.get(s);
             if (!row) continue;
-            const base = row.li.className.replace(" is-hover", "");
-            row.li.className = rowClass(base, s);
+            row.li.classList.toggle("is-hover", s === hoveredSlot);
         }
-        canvas.style.cursor = slot === null ? "" : "pointer";
+        // Highlight-only: no click handler, so leave the default cursor.
         draw();
     }
 
@@ -129,7 +128,6 @@ function init_spectator(canvasId) {
         const slots = [...lineup.entries()].sort((a, b) => a[0] - b[0]);
         for (const [slot, entry] of slots) {
             const li = document.createElement("li");
-            li.dataset.slot = String(slot);
             li.addEventListener("mouseenter", () => setHover(slot));
             li.addEventListener("mouseleave", () => setHover(null));
             const bar = document.createElement("span");
@@ -287,7 +285,6 @@ function init_spectator(canvasId) {
         placements = new Map();
         rows = new Map();
         hoveredSlot = null;
-        canvas.style.cursor = "";
         if (legendEl) {
             // Muted placeholder holds the "Playing now" layout until the
             // first lineup arrives (renderLegend clears it).
