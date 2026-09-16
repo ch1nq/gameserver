@@ -12,9 +12,44 @@ pub use skillratings::MultiTeamOutcome;
 pub use skillratings::weng_lin::{WengLinConfig, WengLinRating};
 
 /// Default mu for a player with no recorded matches.
+///
+/// Mirrored from `common::DEFAULT_RATING` (this crate stays a pure math
+/// leaf without depending on `common`; a sync test in `coordinator`
+/// asserts they match).
 pub const DEFAULT_RATING: f64 = 25.0;
 /// Default sigma for a player with no recorded matches (25/3).
+/// Mirrored from `common::DEFAULT_UNCERTAINTY` (see above).
 pub const DEFAULT_UNCERTAINTY: f64 = 25.0 / 3.0;
+
+/// 1-based placement. Non-zero by construction: a `Rank` cannot represent
+/// the proto default `0`, so `rate_ffa` never has to defensively re-check
+/// the lower bound. Equal ranks represent ties.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Rank(std::num::NonZeroU32);
+
+impl Rank {
+    /// 1-based placement, or `None` for `0`.
+    pub fn new(position: u32) -> Option<Self> {
+        std::num::NonZeroU32::new(position).map(Self)
+    }
+
+    /// 1-based placement as stored on the wire.
+    pub fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl From<Rank> for u32 {
+    fn from(rank: Rank) -> Self {
+        rank.get()
+    }
+}
+
+impl From<Rank> for usize {
+    fn from(rank: Rank) -> Self {
+        rank.get() as usize
+    }
+}
 
 /// One entrant in a finished free-for-all match.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -24,14 +59,14 @@ pub struct FfaPlayer {
     pub agent_id: i64,
     pub rating: WengLinRating,
     /// 1-based placement. Equal ranks represent ties.
-    pub rank: u32,
+    pub rank: Rank,
 }
 
 /// Rating update for one entrant, in the same order as the input.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RatedPlayer {
     pub agent_id: i64,
-    pub rank: u32,
+    pub rank: Rank,
     pub old_rating: WengLinRating,
     pub new_rating: WengLinRating,
 }
@@ -42,6 +77,47 @@ pub enum RatingError {
     NotEnoughPlayers(usize),
     #[error("rank must be >= 1, got {0} for agent {1}")]
     InvalidRank(u32, i64),
+    #[error("duplicate agent {0} in match placements")]
+    DuplicateAgent(i64),
+}
+
+/// A placement list checked once at the boundary: at least 2 players and
+/// no duplicate `agent_id`. Lets callers fail fast (e.g. before loading
+/// ratings) instead of discovering a corrupt list mid-pipeline.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ValidatedFfaPlayers<'a> {
+    players: &'a [FfaPlayer],
+}
+
+impl<'a> TryFrom<&'a [FfaPlayer]> for ValidatedFfaPlayers<'a> {
+    type Error = RatingError;
+
+    fn try_from(players: &'a [FfaPlayer]) -> Result<Self, Self::Error> {
+        validate_players(players)?;
+        Ok(Self { players })
+    }
+}
+
+impl<'a> ValidatedFfaPlayers<'a> {
+    /// The checked players, in the original order.
+    pub fn as_slice(&self) -> &'a [FfaPlayer] {
+        self.players
+    }
+}
+
+fn validate_players(players: &[FfaPlayer]) -> Result<(), RatingError> {
+    if players.len() < 2 {
+        return Err(RatingError::NotEnoughPlayers(players.len()));
+    }
+    // `agent_id` must be unique: duplicates would otherwise pair one agent
+    // with two rating updates and fail opaquely at the DB primary key.
+    let mut seen = std::collections::HashSet::with_capacity(players.len());
+    for p in players {
+        if !seen.insert(p.agent_id) {
+            return Err(RatingError::DuplicateAgent(p.agent_id));
+        }
+    }
+    Ok(())
 }
 
 /// Default rating for agents with no history.
@@ -58,26 +134,22 @@ pub fn default_rating() -> WengLinRating {
 /// (1 = winner). Agents sharing a rank are scored as tied by the
 /// underlying `weng_lin_multi_team` call.
 ///
-/// Returns updates in input order.
+/// Returns updates in input order. Rank validity (`>= 1`) is guaranteed
+/// by the [`Rank`] type; the remaining list invariants (at least 2
+/// players, unique agents) are checked here — or upfront via
+/// [`ValidatedFfaPlayers::try_from`] to fail fast before doing I/O.
 pub fn rate_ffa(
     players: &[FfaPlayer],
     config: &WengLinConfig,
 ) -> Result<Vec<RatedPlayer>, RatingError> {
-    if players.len() < 2 {
-        return Err(RatingError::NotEnoughPlayers(players.len()));
-    }
-    for p in players {
-        if p.rank < 1 {
-            return Err(RatingError::InvalidRank(p.rank, p.agent_id));
-        }
-    }
+    validate_players(players)?;
 
     // One single-player team per agent; borrow ratings without cloning the vec.
     let singles: Vec<[WengLinRating; 1]> = players.iter().map(|p| [p.rating]).collect();
     let teams_and_ranks: Vec<(&[WengLinRating], MultiTeamOutcome)> = singles
         .iter()
         .zip(players.iter())
-        .map(|(team, p)| (&team[..], MultiTeamOutcome::new(p.rank as usize)))
+        .map(|(team, p)| (&team[..], MultiTeamOutcome::new(usize::from(p.rank))))
         .collect();
 
     let new_teams = skillratings::weng_lin::weng_lin_multi_team(&teams_and_ranks, config);
@@ -95,6 +167,8 @@ pub fn rate_ffa(
 }
 
 /// Human-readable raw rating, e.g. `"24.1 ± 3.2"`.
+/// Formats identically to `common::format_rating` (kept local so this
+/// crate has no dependency on `common`).
 pub fn format_rating(rating: &WengLinRating) -> String {
     format!("{:.1} ± {:.1}", rating.rating, rating.uncertainty)
 }
@@ -110,6 +184,18 @@ mod tests {
         }
     }
 
+    fn rank(position: u32) -> Rank {
+        Rank::new(position).expect("test rank must be >= 1")
+    }
+
+    fn player(agent_id: i64, position: u32) -> FfaPlayer {
+        FfaPlayer {
+            agent_id,
+            rating: WengLinRating::new(),
+            rank: rank(position),
+        }
+    }
+
     #[test]
     fn new_players_start_at_default() {
         let r = WengLinRating::new();
@@ -119,19 +205,14 @@ mod tests {
     }
 
     #[test]
+    fn rank_rejects_zero() {
+        assert!(Rank::new(0).is_none());
+        assert_eq!(Rank::new(1).unwrap().get(), 1);
+    }
+
+    #[test]
     fn winner_gains_loser_loses_and_uncertainty_shrinks() {
-        let players = vec![
-            FfaPlayer {
-                agent_id: 1,
-                rating: WengLinRating::new(),
-                rank: 1,
-            },
-            FfaPlayer {
-                agent_id: 2,
-                rating: WengLinRating::new(),
-                rank: 2,
-            },
-        ];
+        let players = vec![player(1, 1), player(2, 2)];
         let out = rate_ffa(&players, &WengLinConfig::new()).unwrap();
         assert_eq!(out.len(), 2);
         // Input order preserved.
@@ -153,12 +234,12 @@ mod tests {
                 FfaPlayer {
                     agent_id: 1,
                     rating: weak,
-                    rank: 1,
+                    rank: rank(1),
                 },
                 FfaPlayer {
                     agent_id: 2,
                     rating: strong,
-                    rank: 2,
+                    rank: rank(2),
                 },
             ],
             &config,
@@ -171,12 +252,12 @@ mod tests {
                 FfaPlayer {
                     agent_id: 1,
                     rating: strong,
-                    rank: 1,
+                    rank: rank(1),
                 },
                 FfaPlayer {
                     agent_id: 2,
                     rating: weak,
-                    rank: 2,
+                    rank: rank(2),
                 },
             ],
             &config,
@@ -190,28 +271,7 @@ mod tests {
 
     #[test]
     fn four_player_ffa_is_zero_sum_ordered() {
-        let players = vec![
-            FfaPlayer {
-                agent_id: 1,
-                rating: WengLinRating::new(),
-                rank: 1,
-            },
-            FfaPlayer {
-                agent_id: 2,
-                rating: WengLinRating::new(),
-                rank: 2,
-            },
-            FfaPlayer {
-                agent_id: 3,
-                rating: WengLinRating::new(),
-                rank: 3,
-            },
-            FfaPlayer {
-                agent_id: 4,
-                rating: WengLinRating::new(),
-                rank: 4,
-            },
-        ];
+        let players = vec![player(1, 1), player(2, 2), player(3, 3), player(4, 4)];
         let out = rate_ffa(&players, &WengLinConfig::new()).unwrap();
         let deltas: Vec<f64> = out
             .iter()
@@ -227,77 +287,53 @@ mod tests {
     #[test]
     fn tie_moves_less_than_decisive_result() {
         let config = WengLinConfig::new();
-        let decisive = rate_ffa(
-            &[
-                FfaPlayer {
-                    agent_id: 1,
-                    rating: WengLinRating::new(),
-                    rank: 1,
-                },
-                FfaPlayer {
-                    agent_id: 2,
-                    rating: WengLinRating::new(),
-                    rank: 2,
-                },
-            ],
-            &config,
-        )
-        .unwrap();
-        let tied = rate_ffa(
-            &[
-                FfaPlayer {
-                    agent_id: 1,
-                    rating: WengLinRating::new(),
-                    rank: 1,
-                },
-                FfaPlayer {
-                    agent_id: 2,
-                    rating: WengLinRating::new(),
-                    rank: 1,
-                },
-            ],
-            &config,
-        )
-        .unwrap();
+        let decisive = rate_ffa(&[player(1, 1), player(2, 2)], &config).unwrap();
+        let tied = rate_ffa(&[player(1, 1), player(2, 1)], &config).unwrap();
         let decisive_delta = (decisive[0].new_rating.rating - decisive[0].old_rating.rating).abs();
         let tie_delta = (tied[0].new_rating.rating - tied[0].old_rating.rating).abs();
         assert!(tie_delta < decisive_delta);
     }
 
     #[test]
-    fn rejects_too_few_players_and_bad_rank() {
+    fn rejects_too_few_players_and_duplicates() {
         assert_eq!(
             rate_ffa(&[], &WengLinConfig::new()),
             Err(RatingError::NotEnoughPlayers(0))
         );
         assert_eq!(
-            rate_ffa(
-                &[FfaPlayer {
-                    agent_id: 1,
-                    rating: WengLinRating::new(),
-                    rank: 1
-                }],
-                &WengLinConfig::new()
-            ),
+            rate_ffa(&[player(1, 1)], &WengLinConfig::new()),
             Err(RatingError::NotEnoughPlayers(1))
         );
+        // A zero rank cannot be constructed: the type makes it unrepresentable.
+        // The error variant survives for wire parsing at the boundary.
         assert_eq!(
-            rate_ffa(
-                &[
-                    FfaPlayer {
-                        agent_id: 1,
-                        rating: WengLinRating::new(),
-                        rank: 0
-                    },
-                    FfaPlayer {
-                        agent_id: 2,
-                        rating: WengLinRating::new(),
-                        rank: 1
-                    },
-                ],
-                &WengLinConfig::new()
-            ),
-            Err(RatingError::InvalidRank(0, 1))
+            RatingError::InvalidRank(0, 1).to_string(),
+            "rank must be >= 1, got 0 for agent 1"
+        );
+        assert_eq!(
+            rate_ffa(&[player(1, 1), player(1, 2)], &WengLinConfig::new()),
+            Err(RatingError::DuplicateAgent(1))
+        );
+    }
+
+    #[test]
+    fn validated_players_fails_fast_before_io() {
+        let players = vec![player(1, 1), player(1, 2)];
+        assert_eq!(
+            ValidatedFfaPlayers::try_from(players.as_slice()),
+            Err(RatingError::DuplicateAgent(1))
+        );
+        let solo = vec![player(1, 1)];
+        assert_eq!(
+            ValidatedFfaPlayers::try_from(solo.as_slice()),
+            Err(RatingError::NotEnoughPlayers(1))
+        );
+        let ok = vec![player(1, 1), player(2, 2)];
+        assert_eq!(
+            ValidatedFfaPlayers::try_from(ok.as_slice())
+                .unwrap()
+                .as_slice(),
+            ok.as_slice()
         );
     }
 
