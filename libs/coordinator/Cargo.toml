@@ -10,6 +10,7 @@ common = { path = "../common" }
 futures-util = { workspace = true }
 prost = { workspace = true }
 rand = { workspace = true }
+ranking = { path = "../ranking", package = "achtung-ranking" }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

@@ -6,8 +6,10 @@ use agent_infra::{
     MachineProvider, MatchLayout,
 };
 use common::{AgentId, AgentInfo, AgentRepository, ContainerImageUrl, DeployTokenProvider};
+use common::{FinishedPlacement, MatchRecorder, StoredRating};
 use game_host::game_host_client::GameHostClient;
 use game_host::{AgentEndpoint, GameConfig, GameState, GetStatusRequest, StartGameRequest};
+use ranking::{FfaPlayer, WengLinConfig, WengLinRating};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
@@ -175,6 +177,11 @@ pub struct CoordinatorConfig {
     /// a retry loop rather than a fixed sleep. A single guessed sleep is either
     /// too short (spurious failures) or too slow (wasted on every match).
     pub game_host_connect_timeout: Duration,
+
+    /// Weng-Lin rating parameters (beta = skill-class width). Defaults to
+    /// `WengLinConfig::new()`; surfaced here so tests and future config can
+    /// tune it without touching the rating call sites.
+    pub weng_lin_config: WengLinConfig,
 }
 
 /// The game coordinator that orchestrates matches.
@@ -187,6 +194,7 @@ pub struct GameCoordinator<P: MachineProvider> {
     machine_provider: Arc<P>,
     agent_repo: Box<dyn AgentRepository>,
     token_provider: Box<dyn DeployTokenProvider>,
+    match_recorder: Box<dyn MatchRecorder>,
     /// Publishes the current game host address for the spectator relay.
     spectator_registry: SpectatorRegistry,
 }
@@ -197,6 +205,7 @@ impl<P: MachineProvider> GameCoordinator<P> {
         machine_provider: Arc<P>,
         agent_repo: Box<dyn AgentRepository>,
         token_provider: Box<dyn DeployTokenProvider>,
+        match_recorder: Box<dyn MatchRecorder>,
         spectator_registry: SpectatorRegistry,
     ) -> Self {
         Self {
@@ -204,6 +213,7 @@ impl<P: MachineProvider> GameCoordinator<P> {
             machine_provider,
             agent_repo,
             token_provider,
+            match_recorder,
             spectator_registry,
         }
     }
@@ -280,10 +290,80 @@ impl<P: MachineProvider> GameCoordinator<P> {
         match game_result {
             Ok(result) => {
                 tracing::info!("Game finished: {:?}", result);
-                // TODO: Record results in database
+                // Ratings are best-effort: a persistence failure is logged but
+                // doesn't fail the match loop (infra is already cleaned up).
+                self.update_ratings(&match_id, &result).await;
                 Ok(())
             }
             Err(e) => Err(e),
+        }
+    }
+
+    /// Load current ratings, compute Weng-Lin updates for a `Finished` game,
+    /// and persist them. Failed games never reach here, so every placement
+    /// moves ratings. Ties share a `position` and are scored as tied.
+    async fn update_ratings(&self, match_id: &str, result: &GameResult) {
+        if result.placements.is_empty() {
+            return;
+        }
+        let ids: Vec<AgentId> = result.placements.iter().map(|p| p.agent_id).collect();
+        let stored = match self.match_recorder.load_ratings(&ids).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!(match_id, error = %e, "Failed to load ratings; skipping update");
+                return;
+            }
+        };
+        let fallback = ranking::default_rating();
+        let players: Vec<FfaPlayer> = result
+            .placements
+            .iter()
+            .map(|p| {
+                let s = stored.get(&p.agent_id).copied().unwrap_or(StoredRating {
+                    rating: fallback.rating,
+                    uncertainty: fallback.uncertainty,
+                });
+                FfaPlayer {
+                    agent_id: p.agent_id,
+                    rating: WengLinRating {
+                        rating: s.rating,
+                        uncertainty: s.uncertainty,
+                    },
+                    rank: p.position,
+                }
+            })
+            .collect();
+        let rated = match ranking::rate_ffa(&players, &self.config.weng_lin_config) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(match_id, error = %e, "Skipping rating update");
+                return;
+            }
+        };
+        let placements: Vec<FinishedPlacement> = result
+            .placements
+            .iter()
+            .zip(rated.iter())
+            .map(|(p, r)| FinishedPlacement {
+                agent_id: p.agent_id,
+                position: p.position,
+                score: p.score,
+                old_rating: StoredRating {
+                    rating: r.old_rating.rating,
+                    uncertainty: r.old_rating.uncertainty,
+                },
+                new_rating: StoredRating {
+                    rating: r.new_rating.rating,
+                    uncertainty: r.new_rating.uncertainty,
+                },
+            })
+            .collect();
+        if let Err(e) = self
+            .match_recorder
+            .record_finished_match(match_id, &placements)
+            .await
+        {
+            tracing::error!(match_id, error = %e, "Failed to record match ratings");
         }
     }
 
@@ -629,6 +709,218 @@ pub enum CoordinatorError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    struct StubProvider;
+
+    #[async_trait::async_trait]
+    impl agent_infra::MachineProvider for StubProvider {
+        type MatchContext = ();
+
+        async fn init_match(
+            &self,
+            _match_id: &str,
+            _layout: MatchLayout,
+        ) -> Result<Self::MatchContext, MachineError> {
+            Ok(())
+        }
+
+        async fn spawn_host(
+            &self,
+            _ctx: &Self::MatchContext,
+            _config: agent_infra::HostSpawnConfig,
+        ) -> Result<MachineHandle, MachineError> {
+            Err(MachineError::MachineCreation("stub".into()))
+        }
+
+        async fn spawn_agent(
+            &self,
+            _ctx: &Self::MatchContext,
+            _config: agent_infra::AgentSpawnConfig,
+        ) -> Result<MachineHandle, MachineError> {
+            Err(MachineError::MachineCreation("stub".into()))
+        }
+
+        async fn destroy(
+            &self,
+            _ctx: &Self::MatchContext,
+            _handle: &MachineHandle,
+        ) -> Result<(), MachineError> {
+            Ok(())
+        }
+
+        async fn cleanup_match(&self, _ctx: Self::MatchContext) -> Result<(), MachineError> {
+            Ok(())
+        }
+
+        async fn list_orphaned(
+            &self,
+            _prefix: &str,
+            _max_age: Duration,
+        ) -> Result<Vec<agent_infra::OrphanedResource>, MachineError> {
+            Ok(vec![])
+        }
+
+        async fn destroy_orphaned(
+            &self,
+            _resource: &agent_infra::OrphanedResource,
+        ) -> Result<(), MachineError> {
+            Ok(())
+        }
+    }
+
+    struct StubRepo;
+
+    #[async_trait::async_trait]
+    impl AgentRepository for StubRepo {
+        async fn get_random_active_agents(
+            &self,
+            _count: usize,
+        ) -> Result<Vec<AgentInfo>, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(vec![])
+        }
+    }
+
+    struct StubTokens;
+
+    #[async_trait::async_trait]
+    impl DeployTokenProvider for StubTokens {
+        async fn get_deploy_token(
+            &self,
+            _image: &(dyn ContainerImageUrl + Send + Sync),
+        ) -> Result<common::RegistryToken, Box<dyn std::error::Error + Send + Sync>> {
+            Err("stub".into())
+        }
+    }
+
+    struct StubRecorder {
+        ratings: HashMap<AgentId, StoredRating>,
+        recorded: Mutex<Vec<(String, Vec<FinishedPlacement>)>>,
+    }
+
+    impl StubRecorder {
+        fn with_defaults() -> Self {
+            Self {
+                ratings: HashMap::new(),
+                recorded: Mutex::new(vec![]),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MatchRecorder for StubRecorder {
+        async fn load_ratings(
+            &self,
+            agent_ids: &[AgentId],
+        ) -> Result<HashMap<AgentId, StoredRating>, Box<dyn std::error::Error + Send + Sync>>
+        {
+            let fallback = ranking::default_rating();
+            Ok(agent_ids
+                .iter()
+                .map(|id| {
+                    (
+                        *id,
+                        self.ratings.get(id).copied().unwrap_or(StoredRating {
+                            rating: fallback.rating,
+                            uncertainty: fallback.uncertainty,
+                        }),
+                    )
+                })
+                .collect())
+        }
+
+        async fn record_finished_match(
+            &self,
+            external_match_id: &str,
+            placements: &[FinishedPlacement],
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.recorded
+                .lock()
+                .unwrap()
+                .push((external_match_id.to_string(), placements.to_vec()));
+            Ok(())
+        }
+    }
+
+    fn test_config() -> CoordinatorConfig {
+        CoordinatorConfig {
+            game_host_image: ImageUrl::new("test/host:latest".to_string()).unwrap(),
+            agents_per_game: 4,
+            tick_rate_ms: 50,
+            arena_width: 1000,
+            arena_height: 1000,
+            game_interval: Duration::from_secs(1),
+            poll_interval: Duration::from_millis(10),
+            game_host_grpc_port: 50051,
+            agent_grpc_port: 50052,
+            game_host_connect_timeout: Duration::from_secs(1),
+            weng_lin_config: WengLinConfig::new(),
+        }
+    }
+
+    fn test_coordinator(
+        recorder: StubRecorder,
+    ) -> (GameCoordinator<StubProvider>, Arc<StubRecorder>) {
+        let recorder = Arc::new(recorder);
+        // The coordinator boxes its own handle; share the stub through an
+        // `Arc` wrapper so the test can inspect recorded calls afterwards.
+        struct Shared(Arc<StubRecorder>);
+        #[async_trait::async_trait]
+        impl MatchRecorder for Shared {
+            async fn load_ratings(
+                &self,
+                ids: &[AgentId],
+            ) -> Result<HashMap<AgentId, StoredRating>, Box<dyn std::error::Error + Send + Sync>>
+            {
+                self.0.load_ratings(ids).await
+            }
+            async fn record_finished_match(
+                &self,
+                id: &str,
+                placements: &[FinishedPlacement],
+            ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+                self.0.record_finished_match(id, placements).await
+            }
+        }
+        let coordinator = GameCoordinator::new(
+            test_config(),
+            Arc::new(StubProvider),
+            Box::new(StubRepo),
+            Box::new(StubTokens),
+            Box::new(Shared(recorder.clone())),
+            Arc::new(RwLock::new(SpectatorMatch::default())),
+        );
+        (coordinator, recorder)
+    }
+
+    fn finished_result() -> GameResult {
+        GameResult {
+            winner_agent_id: Some(1),
+            placements: vec![
+                AgentPlacement {
+                    agent_id: 1,
+                    position: 1,
+                    score: 100,
+                },
+                AgentPlacement {
+                    agent_id: 2,
+                    position: 2,
+                    score: 70,
+                },
+                AgentPlacement {
+                    agent_id: 3,
+                    position: 3,
+                    score: 40,
+                },
+                AgentPlacement {
+                    agent_id: 4,
+                    position: 4,
+                    score: 10,
+                },
+            ],
+        }
+    }
 
     /// The guard clears the address on drop (stale hosts never linger) but
     /// retains the lineup + terminal result for the spectator overlay.
@@ -684,5 +976,64 @@ mod tests {
             );
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+    }
+
+    /// A finished game records one rating update per placement: the winner
+    /// gains, the loser loses, and the external match id is passed through.
+    #[tokio::test]
+    async fn update_ratings_records_ffa_result() {
+        let (coordinator, recorder) = test_coordinator(StubRecorder::with_defaults());
+        coordinator
+            .update_ratings("match-1", &finished_result())
+            .await;
+
+        let recorded = recorder.recorded.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].0, "match-1");
+        let placements = &recorded[0].1;
+        assert_eq!(placements.len(), 4);
+        for (placed, recorded) in finished_result().placements.iter().zip(placements.iter()) {
+            assert_eq!(placed.agent_id, recorded.agent_id);
+            assert_eq!(placed.position, recorded.position);
+            assert_eq!(placed.score, recorded.score);
+        }
+        let winner = placements.iter().find(|p| p.agent_id == 1).unwrap();
+        let loser = placements.iter().find(|p| p.agent_id == 4).unwrap();
+        assert!(winner.new_rating.rating > winner.old_rating.rating);
+        assert!(loser.new_rating.rating < loser.old_rating.rating);
+    }
+
+    /// Agents with no stored rating are scored from the default (25.0) and
+    /// still recorded — first matches need no special casing.
+    #[tokio::test]
+    async fn update_ratings_defaults_missing_ratings() {
+        let (coordinator, recorder) = test_coordinator(StubRecorder::with_defaults());
+        coordinator
+            .update_ratings("match-2", &finished_result())
+            .await;
+
+        let recorded = recorder.recorded.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        for p in &recorded[0].1 {
+            assert!((p.old_rating.rating - 25.0).abs() < f64::EPSILON);
+        }
+    }
+
+    /// An empty result records nothing instead of erroring (e.g. a game that
+    /// finished with no usable placements).
+    #[tokio::test]
+    async fn update_ratings_skips_empty_result() {
+        let (coordinator, recorder) = test_coordinator(StubRecorder::with_defaults());
+        coordinator
+            .update_ratings(
+                "match-3",
+                &GameResult {
+                    winner_agent_id: None,
+                    placements: vec![],
+                },
+            )
+            .await;
+
+        assert!(recorder.recorded.lock().unwrap().is_empty());
     }
 }

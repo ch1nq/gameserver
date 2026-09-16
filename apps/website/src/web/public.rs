@@ -17,11 +17,11 @@ mod get {
         auth_session: AuthSession,
         State(state): State<AppState>,
     ) -> impl IntoResponse {
-        let (agents, error) = match state.agent_manager.get_agents_with_authors().await {
+        let (agents, error) = match state.match_manager.get_leaderboard().await {
             Ok(agents) => (agents, None),
             Err(_) => (
                 vec![],
-                Some(Error::internal_error("Failed to fetch agents")),
+                Some(Error::internal_error("Failed to fetch leaderboard")),
             ),
         };
         pages::home(&auth_session, agents)

@@ -95,6 +95,10 @@ dependencies = [
 [[package]]
 name = "achtung-ranking"
 version = "0.1.0"
+dependencies = [
+ "skillratings",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "achtung-ui"
@@ -1314,6 +1318,7 @@ name = "coordinator"
 version = "0.1.0"
 dependencies = [
  "achtung-agent-infra",
+ "achtung-ranking",
  "async-trait",
  "common",
  "futures-util",
@@ -2762,7 +2767,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "system-configuration 0.5.1",
  "tokio",
  "tower-service",
@@ -4758,7 +4763,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.36",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4797,7 +4802,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
  "windows-sys 0.61.2",
 ]
@@ -6028,6 +6033,12 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
 ]
+
+[[package]]
+name = "skillratings"
+version = "0.29.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e948550eed18870bdcb199bfb98b0b7252c3af7bfe1c23f12d0f47b1841fbdc5"
 
 [[package]]
 name = "slab"
@@ -7738,7 +7749,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

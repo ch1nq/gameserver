@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{AgentId, AgentImageUrl, ContainerImageUrl, RegistryToken};
 
 /// Agent info needed for a match
@@ -29,4 +31,43 @@ pub trait DeployTokenProvider: Send + Sync {
         &self,
         image: &(dyn ContainerImageUrl + Send + Sync),
     ) -> Result<RegistryToken, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Current Weng-Lin rating of one agent (raw scale: 25.0 ± 8.33 for new
+/// players). Plain floats so `core` and `coordinator` share the shape without
+/// depending on the `skillratings` crate directly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StoredRating {
+    pub rating: f64,
+    pub uncertainty: f64,
+}
+
+/// One placement with before/after rating snapshots, ready to persist.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FinishedPlacement {
+    pub agent_id: AgentId,
+    pub position: u32,
+    pub score: u32,
+    pub old_rating: StoredRating,
+    pub new_rating: StoredRating,
+}
+
+/// Trait for loading and persisting Weng-Lin ratings. Implemented by
+/// `achtung-core`'s `MatchManager`; consumed by the coordinator after a
+/// `Finished` game. Failed games never reach this trait.
+#[async_trait::async_trait]
+pub trait MatchRecorder: Send + Sync {
+    /// Current ratings for `agent_ids`; agents with no history get the
+    /// default rating from the implementation.
+    async fn load_ratings(
+        &self,
+        agent_ids: &[AgentId],
+    ) -> Result<HashMap<AgentId, StoredRating>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Persist one finished match (history rows + current-rating upserts).
+    async fn record_finished_match(
+        &self,
+        external_match_id: &str,
+        placements: &[FinishedPlacement],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }

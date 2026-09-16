@@ -271,6 +271,7 @@ impl CoordinatorSettings {
             game_host_grpc_port: GAME_HOST_GRPC_PORT,
             agent_grpc_port: AGENT_GRPC_PORT,
             game_host_connect_timeout: Duration::from_secs(self.connect_timeout_secs),
+            weng_lin_config: Default::default(),
         }
     }
 

@@ -4,13 +4,13 @@ use crate::web::layout::{
     landing,
 };
 use achtung_core::agents::agent::{Agent, AgentImageUrl, AgentStatus};
-use achtung_core::agents::manager::AgentWithAuthor;
 use achtung_core::api_tokens::ApiToken;
+use achtung_core::matches::LeaderboardEntry;
 use achtung_core::registry::RegistryToken;
 use achtung_ui::error::Error;
 use maud::{Markup, Render, html};
 
-pub fn home(session: &AuthSession, entries: Vec<AgentWithAuthor>) -> Page<'_> {
+pub fn home(session: &AuthSession, entries: Vec<LeaderboardEntry>) -> Page<'_> {
     Page {
         title: "Achtung, die Bots",
         content: html! {
