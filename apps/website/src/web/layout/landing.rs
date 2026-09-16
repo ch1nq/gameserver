@@ -1,10 +1,11 @@
 //! Landing page sections, mirroring `mockup/Landing.dc.html`.
 //!
-//! Only renders data the backend actually has: bot names, `@author`
-//! (via [`AgentWithAuthor`]) and the live spectator stream. Elo, lang,
-//! win-rate and match counts render as em-dashes until ranking lands.
+//! Renders live Weng-Lin ratings (`LeaderboardEntry`): Elo-scale means plus
+//! win / match counts, best first. Bots under [`PROVISIONAL_MATCHES`]
+//! games render a provisional marker. Bot names and `@author` come from
+//! the same rows.
 
-use achtung_core::agents::manager::AgentWithAuthor;
+use achtung_core::matches::{LeaderboardEntry, PROVISIONAL_MATCHES};
 use achtung_ui::avatar::GithubAvatar;
 use achtung_ui::badge::Badge;
 use achtung_ui::button::{AccentLink, Primary};
@@ -53,7 +54,7 @@ impl Render for HeroLive {
 }
 
 pub struct LeaderboardSection<'a> {
-    pub entries: &'a [AgentWithAuthor],
+    pub entries: &'a [LeaderboardEntry],
 }
 
 impl Render for LeaderboardSection<'_> {
@@ -72,7 +73,7 @@ impl Render for LeaderboardSection<'_> {
                             HeaderCell::plain("Bot"),
                             HeaderCell::plain("Author"),
                             HeaderCell::plain("Lang"),
-                            HeaderCell::numeric("Elo"),
+                            HeaderCell::numeric("Rating"),
                             HeaderCell::numeric("Win"),
                             HeaderCell::numeric("Matches"),
                         ],
@@ -81,6 +82,7 @@ impl Render for LeaderboardSection<'_> {
                                 (EmptyRow { colspan: 7, message: "No bots yet — upload the first one." })
                             }
                             @for (i, entry) in self.entries.iter().enumerate() {
+                                @let provisional_title = format!("fewer than {PROVISIONAL_MATCHES} matches");
                                 (Row {
                                     content: html! {
                                         (Cell::numeric(html! { (i + 1) }))
@@ -92,9 +94,22 @@ impl Render for LeaderboardSection<'_> {
                                             }
                                         }))
                                         (Cell::plain(html! { "—" }))
-                                        (Cell::numeric_primary(html! { "—" }))
-                                        (Cell::numeric(html! { "—" }))
-                                        (Cell::numeric(html! { "—" }))
+                                        (Cell::numeric_primary(html! {
+                                            (entry.formatted_rating())
+                                            @if entry.is_provisional() {
+                                                span class="provisional" title=(provisional_title) {
+                                                    "provisional"
+                                                }
+                                            }
+                                        }))
+                                        (Cell::numeric(html! {
+                                            @if entry.matches_played > 0 {
+                                                (format!("{:.0}%", 100.0 * entry.wins as f64 / entry.matches_played as f64))
+                                            } @else {
+                                                "—"
+                                            }
+                                        }))
+                                        (Cell::numeric(html! { (entry.matches_played) }))
                                     }
                                 })
                             }
@@ -102,7 +117,7 @@ impl Render for LeaderboardSection<'_> {
                         extra_classes: None,
                     })
                     (Note {
-                        content: html! { "New bots start at 1200 and stay provisional for 20 matches." }
+                        content: html! { "New bots start at 1500 and stay provisional for 20 matches." }
                     })
                 }
             })
@@ -123,7 +138,7 @@ impl Render for ExplainerSection {
                         sub: None,
                     })
                     (Lede {
-                        content: html! { "A bot is one function: it gets the board each tick and returns -1, 0 or 1 to steer. Upload one and it plays ranked rounds against everyone else's, with its Elo moving after each result." }
+                        content: html! { "A bot is one function: it gets the board each tick and returns -1, 0 or 1 to steer. Upload one and it plays ranked rounds against everyone else's, with its Weng-Lin rating moving after each result." }
                     })
                     (ActionsRow {
                         content: html! {

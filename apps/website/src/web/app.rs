@@ -7,6 +7,7 @@ use crate::{
 use achtung_api::ApiState;
 use achtung_core::agents::manager::AgentManager;
 use achtung_core::api_tokens::ApiTokenManager;
+use achtung_core::matches::MatchManager;
 use achtung_core::registry::{RegistryClient, RegistryTokenManager};
 use achtung_core::users::UserManager;
 use agent_infra::{MachineProvider, Reaper};
@@ -28,6 +29,7 @@ use tower_sessions_sqlx_store::PostgresStore;
 pub struct AppState {
     pub agent_manager: AgentManager,
     pub api_token_manager: ApiTokenManager,
+    pub match_manager: MatchManager,
     pub registry_token_manager: RegistryTokenManager,
     pub registry_client: RegistryClient,
     /// Host users type into `docker login/tag/push` (reachable from their
@@ -66,6 +68,7 @@ impl App {
         let user_manager = UserManager::new(db.clone());
         let agent_manager = AgentManager::new(db.clone());
         let api_token_manager = ApiTokenManager::new(db.clone());
+        let match_manager = MatchManager::new(db.clone());
         let registry_token_manager =
             RegistryTokenManager::new(db.clone(), registry_auth_config.clone());
         let registry_client = RegistryClient::new(config.registry.url);
@@ -73,6 +76,7 @@ impl App {
         let state = AppState {
             agent_manager: agent_manager.clone(),
             api_token_manager: api_token_manager.clone(),
+            match_manager: match_manager.clone(),
             registry_token_manager: registry_token_manager.clone(),
             registry_client: registry_client.clone(),
             registry_public_host: config.registry.public_host,
@@ -226,6 +230,7 @@ impl App {
             provider,
             Box::new(self.state.agent_manager.clone()),
             Box::new(self.state.registry_token_manager.clone()),
+            Box::new(self.state.match_manager.clone()),
             spectator_registry,
         );
         coordinator.spawn();

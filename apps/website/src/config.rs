@@ -271,6 +271,9 @@ impl CoordinatorSettings {
             game_host_grpc_port: GAME_HOST_GRPC_PORT,
             agent_grpc_port: AGENT_GRPC_PORT,
             game_host_connect_timeout: Duration::from_secs(self.connect_timeout_secs),
+            // Elo-scale beta (never `Default::default()`: the raw upstream
+            // beta would saturate win probabilities at this scale).
+            weng_lin_config: coordinator::default_weng_lin_config(),
         }
     }
 

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{AgentId, AgentImageUrl, ContainerImageUrl, RegistryToken};
 
 /// Agent info needed for a match
@@ -29,4 +31,85 @@ pub trait DeployTokenProvider: Send + Sync {
         &self,
         image: &(dyn ContainerImageUrl + Send + Sync),
     ) -> Result<RegistryToken, Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Canonical default mu for an agent with no recorded matches.
+///
+/// Elo-scale Weng-Lin (raw OpenSkill 25.0 × 60). Defined here so `core`
+/// and `coordinator` share one source of truth; `achtung-ranking` keeps
+/// a mirrored literal to stay a pure math leaf without depending on this
+/// crate (see the sync test in `coordinator`).
+pub const DEFAULT_RATING: f64 = 1500.0;
+/// Canonical default sigma for an agent with no recorded matches
+/// (raw 25/3 × 60).
+pub const DEFAULT_UNCERTAINTY: f64 = 500.0;
+/// Matches played below this count render as provisional on the leaderboard.
+pub const PROVISIONAL_MATCHES: i32 = 20;
+
+/// Current Weng-Lin rating of one agent (Elo scale: 1500 ± 500 for new
+/// players). Plain floats so `core` and `coordinator` share the shape without
+/// depending on the `skillratings` crate directly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StoredRating {
+    pub rating: f64,
+    pub uncertainty: f64,
+}
+
+impl StoredRating {
+    /// Default rating for agents with no history.
+    pub fn default_rating() -> Self {
+        Self {
+            rating: DEFAULT_RATING,
+            uncertainty: DEFAULT_UNCERTAINTY,
+        }
+    }
+
+    /// Human-readable Elo-scale mean, e.g. `"1500"`. Uncertainty is
+    /// deliberately kept out of the display; it remains stored and drives
+    /// the rating math and the leaderboard sort tiebreak.
+    pub fn format(&self) -> String {
+        format_rating(self.rating, self.uncertainty)
+    }
+
+    /// Agents below [`PROVISIONAL_MATCHES`] games are still calibrating.
+    pub fn is_provisional(matches_played: i32) -> bool {
+        matches_played < PROVISIONAL_MATCHES
+    }
+}
+
+/// Human-readable Elo-scale mean, e.g. `"1500"`. The uncertainty argument
+/// is kept so call sites don't change, but it is not displayed. Shared
+/// helper so the website and the rating crate format identically.
+pub fn format_rating(rating: f64, _uncertainty: f64) -> String {
+    format!("{rating:.0}")
+}
+
+/// One placement with before/after rating snapshots, ready to persist.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FinishedPlacement {
+    pub agent_id: AgentId,
+    pub position: u32,
+    pub score: u32,
+    pub old_rating: StoredRating,
+    pub new_rating: StoredRating,
+}
+
+/// Trait for loading and persisting Weng-Lin ratings. Implemented by
+/// `achtung-core`'s `MatchManager`; consumed by the coordinator after a
+/// `Finished` game. Failed games never reach this trait.
+#[async_trait::async_trait]
+pub trait MatchRecorder: Send + Sync {
+    /// Current ratings for `agent_ids`; agents with no history get the
+    /// default rating from the implementation.
+    async fn load_ratings(
+        &self,
+        agent_ids: &[AgentId],
+    ) -> Result<HashMap<AgentId, StoredRating>, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Persist one finished match (history rows + current-rating upserts).
+    async fn record_finished_match(
+        &self,
+        external_match_id: &str,
+        placements: &[FinishedPlacement],
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 }
