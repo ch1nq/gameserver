@@ -180,9 +180,18 @@ pub struct CoordinatorConfig {
     pub game_host_connect_timeout: Duration,
 
     /// Weng-Lin rating parameters (beta = skill-class width). Defaults to
-    /// `WengLinConfig::new()`; surfaced here so tests and future config can
-    /// tune it without touching the rating call sites.
+    /// [`default_weng_lin_config`]; surfaced here so tests and future
+    /// config can tune it without touching the rating call sites.
     pub weng_lin_config: WengLinConfig,
+}
+
+/// Default [`WengLinConfig`] for Elo-scale ratings (beta = 250, matching
+/// the ×60 rescale). Re-exported so the website can build its
+/// `CoordinatorConfig` without depending on `achtung-ranking` directly.
+/// Never use `WengLinConfig::new()` here — its raw beta would saturate
+/// every win probability at this scale and cause wild rating swings.
+pub fn default_weng_lin_config() -> WengLinConfig {
+    ranking::default_config()
 }
 
 /// The game coordinator that orchestrates matches.
@@ -960,7 +969,7 @@ mod tests {
             game_host_grpc_port: 50051,
             agent_grpc_port: 50052,
             game_host_connect_timeout: Duration::from_secs(1),
-            weng_lin_config: WengLinConfig::new(),
+            weng_lin_config: default_weng_lin_config(),
         }
     }
 
@@ -1108,7 +1117,7 @@ mod tests {
         assert!(loser.new_rating.rating < loser.old_rating.rating);
     }
 
-    /// Agents with no stored rating are scored from the default (25.0) and
+    /// Agents with no stored rating are scored from the default (1500) and
     /// still recorded — first matches need no special casing.
     #[tokio::test]
     async fn update_ratings_defaults_missing_ratings() {
@@ -1120,7 +1129,8 @@ mod tests {
         let recorded = recorder.recorded.lock().unwrap();
         assert_eq!(recorded.len(), 1);
         for p in &recorded[0].1 {
-            assert!((p.old_rating.rating - 25.0).abs() < f64::EPSILON);
+            assert!((p.old_rating.rating - 1500.0).abs() < f64::EPSILON);
+            assert!((p.old_rating.uncertainty - 500.0).abs() < f64::EPSILON);
         }
     }
 
@@ -1162,6 +1172,21 @@ mod tests {
                 uncertainty: math.uncertainty,
             }
             .format()
+        );
+        assert_eq!(ranking::format_rating(&math), "1500 ± 500");
+    }
+
+    /// The shipped config matches the Elo-scale defaults (never the raw
+    /// upstream beta, which would saturate win probabilities at this scale).
+    #[test]
+    fn default_config_is_elo_scaled() {
+        // `WengLinConfig` has no `PartialEq`; compare field by field.
+        let (shipped, canonical) = (default_weng_lin_config(), ranking::default_config());
+        assert_eq!(shipped.beta, 250.0);
+        assert_eq!(shipped.beta, canonical.beta);
+        assert_eq!(
+            shipped.uncertainty_tolerance,
+            canonical.uncertainty_tolerance
         );
     }
 
