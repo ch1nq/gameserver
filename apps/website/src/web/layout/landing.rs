@@ -1,7 +1,7 @@
 //! Landing page sections, mirroring `mockup/Landing.dc.html`.
 //!
-//! Renders live Weng-Lin ratings (`LeaderboardEntry`): raw mu ± sigma plus
-//! win / match counts, best first. Bots under [`PROVISIONAL_MATCHES`]
+//! Renders live Weng-Lin ratings (`LeaderboardEntry`): Elo-scale mu ± sigma
+//! plus win / match counts, best first. Bots under [`PROVISIONAL_MATCHES`]
 //! games render a provisional marker. Bot names and `@author` come from
 //! the same rows.
 
@@ -83,9 +83,9 @@ impl Render for LeaderboardSection<'_> {
                             }
                             @for (i, entry) in self.entries.iter().enumerate() {
                                 @let rating_title = if entry.is_provisional() {
-                                    format!("provisional — uncertainty ±{:.1}", entry.uncertainty)
+                                    format!("provisional — uncertainty ±{:.0}", entry.uncertainty)
                                 } else {
-                                    format!("uncertainty ±{:.1}", entry.uncertainty)
+                                    format!("uncertainty ±{:.0}", entry.uncertainty)
                                 };
                                 @let provisional_title = format!("fewer than {PROVISIONAL_MATCHES} matches");
                                 (Row {
@@ -124,7 +124,7 @@ impl Render for LeaderboardSection<'_> {
                         extra_classes: None,
                     })
                     (Note {
-                        content: html! { "New bots start at 25.0 ± 8.3 and stay provisional for 20 matches." }
+                        content: html! { "New bots start at 1500 ± 500 and stay provisional for 20 matches." }
                     })
                 }
             })
