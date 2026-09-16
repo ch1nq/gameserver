@@ -1,7 +1,7 @@
 //! Landing page sections, mirroring `mockup/Landing.dc.html`.
 //!
-//! Renders live Weng-Lin ratings (`LeaderboardEntry`): Elo-scale mu ± sigma
-//! plus win / match counts, best first. Bots under [`PROVISIONAL_MATCHES`]
+//! Renders live Weng-Lin ratings (`LeaderboardEntry`): Elo-scale means plus
+//! win / match counts, best first. Bots under [`PROVISIONAL_MATCHES`]
 //! games render a provisional marker. Bot names and `@author` come from
 //! the same rows.
 
@@ -82,11 +82,6 @@ impl Render for LeaderboardSection<'_> {
                                 (EmptyRow { colspan: 7, message: "No bots yet — upload the first one." })
                             }
                             @for (i, entry) in self.entries.iter().enumerate() {
-                                @let rating_title = if entry.is_provisional() {
-                                    format!("provisional — uncertainty ±{:.0}", entry.uncertainty)
-                                } else {
-                                    format!("uncertainty ±{:.0}", entry.uncertainty)
-                                };
                                 @let provisional_title = format!("fewer than {PROVISIONAL_MATCHES} matches");
                                 (Row {
                                     content: html! {
@@ -100,9 +95,7 @@ impl Render for LeaderboardSection<'_> {
                                         }))
                                         (Cell::plain(html! { "—" }))
                                         (Cell::numeric_primary(html! {
-                                            span title=(rating_title) {
-                                                (entry.formatted_rating())
-                                            }
+                                            (entry.formatted_rating())
                                             @if entry.is_provisional() {
                                                 span class="provisional" title=(provisional_title) {
                                                     "provisional"
@@ -124,7 +117,7 @@ impl Render for LeaderboardSection<'_> {
                         extra_classes: None,
                     })
                     (Note {
-                        content: html! { "New bots start at 1500 ± 500 and stay provisional for 20 matches." }
+                        content: html! { "New bots start at 1500 and stay provisional for 20 matches." }
                     })
                 }
             })

@@ -186,11 +186,12 @@ pub fn rate_ffa(
         .collect())
 }
 
-/// Human-readable Elo-scale rating, e.g. `"1500 ± 500"`.
-/// Formats identically to `common::format_rating` (kept local so this
-/// crate has no dependency on `common`).
+/// Human-readable Elo-scale mean, e.g. `"1500"`. Uncertainty is
+/// deliberately kept out of the display; it remains stored and drives the
+/// rating math. Formats identically to `common::format_rating` (kept local
+/// so this crate has no dependency on `common`).
 pub fn format_rating(rating: &WengLinRating) -> String {
-    format!("{:.0} ± {:.0}", rating.rating, rating.uncertainty)
+    format!("{:.0}", rating.rating)
 }
 
 #[cfg(test)]
@@ -369,8 +370,8 @@ mod tests {
     }
 
     #[test]
-    fn format_rating_renders_elo_scale() {
-        assert_eq!(format_rating(&default_rating()), "1500 ± 500");
+    fn format_rating_renders_mean_only() {
+        assert_eq!(format_rating(&default_rating()), "1500");
     }
 
     #[test]

@@ -1173,7 +1173,7 @@ mod tests {
             }
             .format()
         );
-        assert_eq!(ranking::format_rating(&math), "1500 ± 500");
+        assert_eq!(ranking::format_rating(&math), "1500");
     }
 
     /// The shipped config matches the Elo-scale defaults (never the raw

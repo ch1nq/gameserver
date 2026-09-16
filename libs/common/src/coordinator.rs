@@ -64,7 +64,9 @@ impl StoredRating {
         }
     }
 
-    /// Human-readable Elo-scale rating, e.g. `"1500 ± 500"`.
+    /// Human-readable Elo-scale mean, e.g. `"1500"`. Uncertainty is
+    /// deliberately kept out of the display; it remains stored and drives
+    /// the rating math and the leaderboard sort tiebreak.
     pub fn format(&self) -> String {
         format_rating(self.rating, self.uncertainty)
     }
@@ -75,10 +77,11 @@ impl StoredRating {
     }
 }
 
-/// Human-readable Elo-scale rating, e.g. `"1500 ± 500"`. Shared helper
-/// so the website and the rating crate format identically.
-pub fn format_rating(rating: f64, uncertainty: f64) -> String {
-    format!("{:.0} ± {:.0}", rating, uncertainty)
+/// Human-readable Elo-scale mean, e.g. `"1500"`. The uncertainty argument
+/// is kept so call sites don't change, but it is not displayed. Shared
+/// helper so the website and the rating crate format identically.
+pub fn format_rating(rating: f64, _uncertainty: f64) -> String {
+    format!("{rating:.0}")
 }
 
 /// One placement with before/after rating snapshots, ready to persist.
