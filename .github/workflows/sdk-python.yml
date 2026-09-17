@@ -1,0 +1,48 @@
+# Checks the Python agent SDK: codegen from protos, lint, format, types, tests.
+name: Python SDK
+
+on:
+  push:
+    paths:
+      - 'sdk/python/**'
+      - 'protos/achtung_agent.proto'
+      - '.github/workflows/sdk-python.yml'
+  pull_request:
+    paths:
+      - 'sdk/python/**'
+      - 'protos/achtung_agent.proto'
+      - '.github/workflows/sdk-python.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --locked --group dev
+
+      - name: Generate stubs from protos
+        run: uv run python scripts/codegen.py
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run ty check
+
+      - name: Tests
+        run: uv run pytest

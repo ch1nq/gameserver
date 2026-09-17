@@ -17,3 +17,25 @@ repos:
         language: system
         types: [rust]
         pass_filenames: false
+
+  # Python agent SDK (sdk/python is uv-managed; hooks run from the repo root)
+  - repo: local
+    hooks:
+      - id: sdk-python-ruff-check
+        name: sdk-python ruff check
+        entry: bash -c 'cd sdk/python && uv run --frozen ruff check .'
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: sdk-python-ruff-format
+        name: sdk-python ruff format check
+        entry: bash -c 'cd sdk/python && uv run --frozen ruff format --check .'
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: sdk-python-ty
+        name: sdk-python ty check
+        entry: bash -c 'cd sdk/python && uv run --frozen ty check'
+        language: system
+        types: [python]
+        pass_filenames: false

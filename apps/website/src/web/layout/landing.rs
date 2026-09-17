@@ -152,7 +152,7 @@ impl Render for ExplainerSection {
     }
 }
 
-const PYTHON_CODE: &str = "from achtung import Bot, run\n\nclass Hugger(Bot):\n    def step(self, view):\n        # turn away when something is close ahead\n        if view.distance_ahead() < 20:\n            return 1 if view.distance_right() > view.distance_left() else -1\n        return 0\n\nrun(Hugger())";
+const PYTHON_CODE: &str = "from achtung import Action, Bot, run\n\nclass Hugger(Bot):\n    def step(self, state):\n        me = state.me()\n        # turn left near the left wall, otherwise straight\n        return Action.LEFT if me.position.x < 100 else Action.STRAIGHT\n\nrun(Hugger())";
 const PYTHON_INSTALL: &str = "$ pip install achtung-cli\n$ achtung init --python        # writes a Dockerfile\n$ achtung push                 # builds the image, pushes to registry.achtung.bot";
 
 const RUST_CODE: &str = "use achtung::{run, View};\n\nfn step(view: &View) -> i8 {\n    // turn away when something is close ahead\n    if view.distance_ahead() < 20.0 {\n        if view.distance_right() > view.distance_left() { 1 } else { -1 }\n    } else {\n        0\n    }\n}\n\nfn main() {\n    run(step);\n}";
