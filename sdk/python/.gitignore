@@ -1,0 +1,3 @@
+# Generated protobuf/gRPC stubs (scripts/codegen.py); protos/ is the source of truth.
+# Their .pyi stubs still provide types; linters skip them via .gitignore.
+/src/achtung/_generated/

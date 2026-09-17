@@ -4,6 +4,10 @@
 .claude
 .gitignore
 .venv/
+**/.venv/
+# Generated protobuf/gRPC stubs are rebuilt inside the image (see
+# sdk/python/examples/Dockerfile); never copy stale local ones.
+**/_generated/
 **/target/
 .ruff_cache/
 */.ruff_cache/
