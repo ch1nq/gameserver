@@ -8,7 +8,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY sdk/python /sdk
-COPY sdk/python/examples/wall_avoider.py /app/bot.py
+COPY sdk/python/examples/wall_avoider.py /app/agent.py
 
 RUN pip install --no-cache-dir /sdk
 
@@ -16,4 +16,4 @@ EXPOSE 50052
 ENV PORT=50052
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "/app/bot.py"]
+CMD ["python", "/app/agent.py"]

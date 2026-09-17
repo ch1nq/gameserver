@@ -1,6 +1,6 @@
 # Achtung Python agent SDK
 
-Write a `Bot`, call `run`, package it as a container image. The host dials
+Write a `Agent`, call `run`, package it as a container image. The host dials
 your agent over gRPC (`Initialize` once, then the `Play` tick stream).
 
 ## Quickstart
@@ -14,10 +14,10 @@ uv run python scripts/codegen.py   # generate stubs from ../../protos (gitignore
 ```
 
 ```python
-from achtung import Action, Bot, GameState, run
+from achtung import Action, Agent, GameState, run
 
 
-class WallAvoider(Bot):
+class WallAvoider(Agent):
     def step(self, state: GameState) -> Action:
         me = state.me()
         if me.position.x < 100:
@@ -28,14 +28,14 @@ class WallAvoider(Bot):
 run(WallAvoider())  # serves on PORT env, else 50052
 ```
 
-`Bot` is a structural interface: subclassing it is optional — any object
+`Agent` is a structural interface: subclassing it is optional — any object
 with a `step(state) -> Action` method works.
 
-See `examples/wall_avoider.py` for a runnable bot and `examples/Dockerfile`
+See `examples/wall_avoider.py` for a runnable agent and `examples/Dockerfile`
 for packaging (`docker build -f sdk/python/examples/Dockerfile -t my-agent .`
 from the repo root).
 
-## Slow bots
+## Slow agents
 
 `step` runs off the event loop, so blocking compute is safe. While one `step`
 call is still running, the server keeps answering every tick with the latest

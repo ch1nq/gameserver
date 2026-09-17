@@ -1,9 +1,9 @@
-"""gRPC serving loop: implements `achtung.agent.Agent` for a `Bot`.
+"""gRPC serving loop: implements the `achtung.agent` game service for an `Agent`.
 
 Pacing is fully automatic. The handler reads every tick the host sends and
 answers every tick immediately with the latest finished action, while at most
-one `Bot.step` call runs in the background on the newest state. Fast bots get
-a fresh decision (nearly) every tick; slow bots act every N ticks without any
+one `Agent.step` call runs in the background on the newest state. Fast agents get
+a fresh decision (nearly) every tick; slow agents act every N ticks without any
 special-casing. A `step` that raises or returns garbage never breaks the
 stream — the previous action is held, since the host eliminates agents whose
 stream breaks but tolerates stale answers.
@@ -20,7 +20,7 @@ import grpc
 
 from achtung._generated import achtung_agent_pb2 as pb2
 from achtung._generated import achtung_agent_pb2_grpc as pb2_grpc
-from achtung.bot import Bot
+from achtung.agent import Agent
 from achtung.types import Action, ArenaConfig, arena_from_proto, game_state_from_proto
 
 __all__ = ["DEFAULT_PORT", "resolve_port", "run"]
@@ -40,14 +40,14 @@ _ACTION_TO_DIRECTION = {
 
 
 class _AgentServicer(pb2_grpc.AgentServicer):
-    """Serves a single game for one bot."""
+    """Serves a single game for one agent."""
 
-    def __init__(self, bot: Bot) -> None:
-        # Bot is structural (Protocol), so a missing step would otherwise
+    def __init__(self, agent: Agent) -> None:
+        # Agent is structural (Protocol), so a missing step would otherwise
         # surface as an AttributeError mid-game. Fail fast with a clear error.
-        if not callable(getattr(bot, "step", None)):
-            raise TypeError(f"bot must define step(state) -> Action, got {type(bot).__name__}")
-        self._bot = bot
+        if not callable(getattr(agent, "step", None)):
+            raise TypeError(f"agent must define step(state) -> Action, got {type(agent).__name__}")
+        self._agent = agent
         self._me_id = 0
         self._arena = DEFAULT_ARENA
 
@@ -76,7 +76,7 @@ class _AgentServicer(pb2_grpc.AgentServicer):
         # Answer the stream immediately: the host resolves its opening `Play`
         # call on response headers, which grpc only sends once this handler
         # starts yielding — but the host pushes tick 0 only after *every*
-        # agent's stream is open. Without this, both sides wait forever.
+        # agent's stream is open. Without this, agenth sides wait forever.
         await context.send_initial_metadata(())
         loop = asyncio.get_running_loop()
         latest = Action.STRAIGHT
@@ -88,17 +88,17 @@ class _AgentServicer(pb2_grpc.AgentServicer):
             try:
                 result = future.result()
             except Exception:
-                logger.exception("Bot.step raised; holding %s", latest)
+                logger.exception("Agent.step raised; holding %s", latest)
                 return
             if isinstance(result, Action):
                 latest = result
             else:
-                logger.warning("Bot.step returned %r; holding %s", result, latest)
+                logger.warning("Agent.step returned %r; holding %s", result, latest)
 
         async for request in request_iterator:
             state = game_state_from_proto(request, self._me_id, self._arena)
             if pending is None:
-                future = loop.run_in_executor(None, self._bot.step, state)
+                future = loop.run_in_executor(None, self._agent.step, state)
                 future.add_done_callback(on_done)
                 pending = future
             yield pb2.PlayResponse(
@@ -107,9 +107,9 @@ class _AgentServicer(pb2_grpc.AgentServicer):
             )
 
 
-async def _serve(bot: Bot, port: int) -> None:
+async def _serve(agent: Agent, port: int) -> None:
     server = grpc.aio.server()
-    pb2_grpc.add_AgentServicer_to_server(_AgentServicer(bot), server)
+    pb2_grpc.add_AgentServicer_to_server(_AgentServicer(agent), server)
     bound = server.add_insecure_port(f"0.0.0.0:{port}")
     if bound == 0:
         raise OSError(f"could not bind port {port}")
@@ -126,7 +126,7 @@ def resolve_port(explicit: int | None = None) -> int:
     return explicit if explicit is not None else DEFAULT_PORT
 
 
-def run(bot: Bot, port: int | None = None) -> None:
-    """Serve `bot` forever (blocking)."""
+def run(agent: Agent, port: int | None = None) -> None:
+    """Serve `agent` forever (blocking)."""
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(_serve(bot, resolve_port(port)))
+    asyncio.run(_serve(agent, resolve_port(port)))

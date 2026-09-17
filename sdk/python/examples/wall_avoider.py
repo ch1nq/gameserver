@@ -1,4 +1,4 @@
-"""Example bot: drive straight, turn left near walls.
+"""Example agent: drive straight, turn left near walls.
 
 Raw-state only: it steers on its own head position versus the arena bounds.
 Run locally against a game host pointed at this agent:
@@ -6,12 +6,12 @@ Run locally against a game host pointed at this agent:
     uv run python examples/wall_avoider.py
 """
 
-from achtung import Action, Bot, GameState, run
+from achtung import Action, Agent, GameState, run
 
 MARGIN = 100.0
 
 
-class WallAvoider(Bot):
+class WallAvoider(Agent):
     def step(self, state: GameState) -> Action:
         me = state.me()
         near_left = me.position.x < MARGIN

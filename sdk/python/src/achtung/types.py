@@ -1,6 +1,6 @@
 """Core data types for the Achtung agent SDK.
 
-`Action` is what `Bot.step` returns. The `GameState`/`PlayerState` dataclasses
+`Action` is what `Agent.step` returns. The `GameState`/`PlayerState` dataclasses
 are plain snapshots of the newest tick the host sent; conversion helpers map
 them to and from the generated proto messages without this module importing
 the generated code.
@@ -27,7 +27,7 @@ __all__ = [
 
 
 class Action(enum.Enum):
-    """Steering decision returned by `Bot.step`."""
+    """Steering decision returned by `Agent.step`."""
 
     STRAIGHT = "straight"
     LEFT = "left"
@@ -70,7 +70,7 @@ def action_from_proto(direction: int) -> Action:
 
 
 def coerce_action(value: object) -> Action:
-    """Coerce a `Bot.step` return value to `Action`; anything else goes straight."""
+    """Coerce a `Agent.step` return value to `Action`; anything else goes straight."""
     return value if isinstance(value, Action) else Action.STRAIGHT
 
 
@@ -105,7 +105,7 @@ class GameState:
     arena: ArenaConfig
 
     def me(self) -> PlayerState:
-        """This bot's own player state; raises `LookupError` if absent."""
+        """This agent's own player state; raises `LookupError` if absent."""
         player = self.get(self.me_id)
         if player is None:
             raise LookupError(f"own player id {self.me_id} missing from game state")

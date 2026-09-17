@@ -1,4 +1,4 @@
-"""Bot interface: the one function an agent author implements."""
+"""Agent interface: the one function an agent author implements."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ from typing import Protocol
 
 from achtung.types import Action, GameState
 
-__all__ = ["Bot"]
+__all__ = ["Agent"]
 
 
-class Bot(Protocol):
+class Agent(Protocol):
     """Agent logic.
 
     A structural interface: subclassing is optional, any object with a

@@ -1,4 +1,4 @@
-"""Slow-bot test: a step slower than the tick rate acts every N ticks.
+"""Slow-agent test: a step slower than the tick rate acts every N ticks.
 
 The stream must stay healthy throughout: every request gets its tick echoed,
 thinking coalesces (one step call covers many ticks), and the finished
@@ -13,7 +13,7 @@ import grpc
 
 from achtung._generated import achtung_agent_pb2 as pb2
 from achtung._generated import achtung_agent_pb2_grpc as pb2_grpc
-from achtung.bot import Bot
+from achtung.agent import Agent
 from achtung.server import _AgentServicer
 from achtung.types import Action, GameState
 
@@ -23,7 +23,7 @@ STRAIGHT_PROTO = 1
 RIGHT_PROTO = 3
 
 
-class SlowBot(Bot):
+class SlowAgent(Agent):
     def __init__(self) -> None:
         self.calls = 0
 
@@ -34,9 +34,9 @@ class SlowBot(Bot):
 
 
 async def test_slow_step_coalesces_ticks_and_lands_later() -> None:
-    bot = SlowBot()
+    agent = SlowAgent()
     server = grpc.aio.server()
-    pb2_grpc.add_AgentServicer_to_server(_AgentServicer(bot), server)
+    pb2_grpc.add_AgentServicer_to_server(_AgentServicer(agent), server)
     port = server.add_insecure_port("127.0.0.1:0")
     await server.start()
     try:
@@ -64,4 +64,4 @@ async def test_slow_step_coalesces_ticks_and_lands_later() -> None:
     assert responses[0].action.direction == STRAIGHT_PROTO
     # The finished decision lands on later ticks; each burst needed one think.
     assert responses[-1].action.direction == RIGHT_PROTO
-    assert bot.calls == 2
+    assert agent.calls == 2

@@ -1,6 +1,6 @@
 """Minimal Python agent SDK for Achtung! Die Kurve."""
 
-from achtung.bot import Bot
+from achtung.agent import Agent
 from achtung.server import run
 from achtung.types import (
     Action,
@@ -12,8 +12,8 @@ from achtung.types import (
 
 __all__ = [
     "Action",
+    "Agent",
     "ArenaConfig",
-    "Bot",
     "GameState",
     "PlayerState",
     "Position",
