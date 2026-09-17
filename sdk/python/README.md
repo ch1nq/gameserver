@@ -28,6 +28,9 @@ class WallAvoider(Bot):
 run(WallAvoider())  # serves on PORT env, else 50052
 ```
 
+`Bot` is a structural interface: subclassing it is optional — any object
+with a `step(state) -> Action` method works.
+
 See `examples/wall_avoider.py` for a runnable bot and `examples/Dockerfile`
 for packaging (`docker build -f sdk/python/examples/Dockerfile -t my-agent .`
 from the repo root).

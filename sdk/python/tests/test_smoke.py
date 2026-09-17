@@ -2,8 +2,10 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import cast
 
 import grpc
+import pytest
 
 from achtung._generated import achtung_agent_pb2 as pb2
 from achtung._generated import achtung_agent_pb2_grpc as pb2_grpc
@@ -120,3 +122,33 @@ async def test_raising_bot_holds_default_and_survives() -> None:
 
     assert [r.tick for r in responses] == [1, 2]
     assert all(r.action.direction == 1 for r in responses)  # STRAIGHT default held
+
+
+async def test_duck_typed_bot_needs_no_base_class() -> None:
+    # Bot is a Protocol: any object with step(state) -> Action works.
+
+    class PlainBot:
+        def step(self, state: GameState) -> Action:
+            return Action.RIGHT
+
+    server, port = await _serve(PlainBot())
+    try:
+        async with grpc.aio.insecure_channel(f"127.0.0.1:{port}") as channel:
+            stub = pb2_grpc.AgentStub(channel)
+            await stub.Initialize(pb2.InitializeRequest(player_id=0, num_players=1))
+
+            async def requests() -> AsyncIterator[pb2.PlayRequest]:
+                for tick in range(1, 3):
+                    yield pb2.PlayRequest(tick=tick, state=pb2.GameState(tick=tick))
+
+            responses = [response async for response in stub.Play(requests())]
+    finally:
+        await server.stop(None)
+
+    assert [r.tick for r in responses] == [1, 2]
+    assert responses[-1].action.direction == 3  # RIGHT
+
+
+async def test_bot_without_step_fails_fast() -> None:
+    with pytest.raises(TypeError, match="must define step"):
+        _AgentServicer(cast(Bot, object()))

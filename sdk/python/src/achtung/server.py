@@ -43,6 +43,10 @@ class _AgentServicer(pb2_grpc.AgentServicer):
     """Serves a single game for one bot."""
 
     def __init__(self, bot: Bot) -> None:
+        # Bot is structural (Protocol), so a missing step would otherwise
+        # surface as an AttributeError mid-game. Fail fast with a clear error.
+        if not callable(getattr(bot, "step", None)):
+            raise TypeError(f"bot must define step(state) -> Action, got {type(bot).__name__}")
         self._bot = bot
         self._me_id = 0
         self._arena = DEFAULT_ARENA
