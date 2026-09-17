@@ -6,7 +6,6 @@
 pub mod docker;
 pub mod microsandbox;
 pub mod reaper;
-pub mod slot;
 
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
@@ -15,12 +14,12 @@ use common::{ImageUrl, RegistryToken};
 use rand::{Rng, distr::Alphanumeric};
 
 // Re-export key types
+pub use common::{AgentSlot, MatchLayout, SlotError};
 pub use docker::{DockerMachineProvider, DockerMachineProviderConfig};
 pub use microsandbox::{
     MicrosandboxMachineProvider, MicrosandboxMachineProviderConfig, ensure_runtime_installed,
 };
 pub use reaper::{Reaper, ReaperConfig};
-pub use slot::{AgentSlot, MatchLayout};
 
 #[derive(Debug, Clone)]
 pub enum ContainerImage {
@@ -179,6 +178,12 @@ pub enum MachineError {
 
     #[error("failed to destroy infrastructure: {0}")]
     Destruction(String),
+}
+
+impl From<SlotError> for MachineError {
+    fn from(error: SlotError) -> Self {
+        Self::MatchInit(error.to_string())
+    }
 }
 
 /// Provisions and tears down the machines that make up a single game match.

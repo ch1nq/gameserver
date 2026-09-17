@@ -49,8 +49,23 @@ impl std::fmt::Display for GameHostAddr {
     }
 }
 
-/// One player slot in the current match, in `StartGame` order (slot `i` is
-/// controlled by `agents[i]` and renders with `PLAYER_COLORS[i]` in the browser).
+/// One agent's bindings for a match: roster identity, slot, and machine
+/// handle travel together in a single value.
+///
+/// Previously the roster (`&[AgentInfo]`), the slot (an `enumerate()` index),
+/// and the spawned handles (`Vec<(AgentId, MachineHandle)>`) were three
+/// parallel structures re-zipped by position at every use — the same shape
+/// of bug that once mis-steered agents on the game host. Everything
+/// downstream (endpoints, lineup, teardown) reads seats instead of indexes.
+struct MatchSeat {
+    slot: AgentSlot,
+    agent: AgentInfo,
+    handle: MachineHandle,
+}
+
+/// One player slot in the current match. The slot number is explicit (see
+/// `MatchSeat`); nothing here relies on position within the lineup vec.
+/// Renders with `PLAYER_COLORS[slot]` in the browser.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LineupEntry {
     pub slot: usize,
@@ -282,7 +297,8 @@ impl<P: MachineProvider> GameCoordinator<P> {
         let match_id = agent_infra::generate_id();
         // Validated once: rejects zero agents and counts that would overflow
         // the u8 wire slot or the relay port range.
-        let layout = MatchLayout::new(agents.len()).map_err(CoordinatorError::MachineSpawn)?;
+        let layout =
+            MatchLayout::new(agents.len()).map_err(|e| CoordinatorError::MachineSpawn(e.into()))?;
         let ctx = self
             .machine_provider
             .init_match(&match_id, layout)
@@ -502,10 +518,11 @@ impl<P: MachineProvider> GameCoordinator<P> {
         let game_host_handle = self.spawn_game_host(ctx).await?;
         tracing::info!("Game host spawned at {}", game_host_handle.private_ip);
 
-        // Spawn agents, cleaning up on failure. Slots come from the validated
-        // layout, so they are always in range — no manual `i + 1` arithmetic.
+        // Spawn agents, cleaning up on failure. Each seat binds roster
+        // identity, slot, and machine together once — downstream reads
+        // seats instead of re-zipping parallel vecs by index.
         debug_assert_eq!(agents.len(), layout.all_agent_slots().len());
-        let mut agent_handles: Vec<(AgentId, MachineHandle)> = Vec::new();
+        let mut seats: Vec<MatchSeat> = Vec::with_capacity(agents.len());
         for (agent, slot) in agents.iter().zip(layout.all_agent_slots()) {
             match self.spawn_agent(ctx, agent, slot).await {
                 Ok(handle) => {
@@ -515,25 +532,26 @@ impl<P: MachineProvider> GameCoordinator<P> {
                         slot = slot.raw_slot(),
                         "Agent spawned"
                     );
-                    agent_handles.push((agent.id, handle));
+                    seats.push(MatchSeat {
+                        slot,
+                        agent: agent.clone(),
+                        handle,
+                    });
                 }
                 Err(e) => {
                     tracing::error!(agent_id = agent.id, "Failed to spawn agent: {}", e);
-                    self.destroy_all(ctx, Some(&game_host_handle), &agent_handles)
-                        .await;
+                    self.destroy_all(ctx, Some(&game_host_handle), &seats).await;
                     return Err(e);
                 }
             }
         }
 
-        // Run the game (lineup order == StartGame agent order == player slots).
-        let game_result = self
-            .run_game(&game_host_handle, &agent_handles, agents)
-            .await;
+        // Run the game. Seats carry slot identity explicitly, so lineup order
+        // and StartGame order cannot drift apart by index.
+        let game_result = self.run_game(&game_host_handle, &seats).await;
 
         // Destroy machines regardless of game outcome
-        self.destroy_all(ctx, Some(&game_host_handle), &agent_handles)
-            .await;
+        self.destroy_all(ctx, Some(&game_host_handle), &seats).await;
 
         game_result
     }
@@ -584,8 +602,7 @@ impl<P: MachineProvider> GameCoordinator<P> {
     async fn run_game(
         &self,
         game_host: &MachineHandle,
-        agents: &[(AgentId, MachineHandle)],
-        lineup_info: &[AgentInfo],
+        seats: &[MatchSeat],
     ) -> Result<GameResult, CoordinatorError> {
         // A backend that relays through a published host port reports the port
         // to dial; otherwise the machine is addressed directly on the port its
@@ -600,17 +617,21 @@ impl<P: MachineProvider> GameCoordinator<P> {
 
         let mut client = self.connect_game_host(&game_host_addr).await?;
 
-        let agent_endpoints: Vec<AgentEndpoint> = agents
+        let agent_endpoints: Vec<AgentEndpoint> = seats
             .iter()
-            .map(|(id, handle)| AgentEndpoint {
-                agent_id: *id,
+            .map(|seat| AgentEndpoint {
+                agent_id: seat.agent.id,
                 // Consumed by the game host, which dials agents itself and
                 // retries while they boot.
                 address: format!(
                     "{}:{}",
-                    handle.private_ip,
-                    handle.grpc_port.unwrap_or(self.config.agent_grpc_port)
+                    seat.handle.private_ip,
+                    seat.handle.grpc_port.unwrap_or(self.config.agent_grpc_port)
                 ),
+                // Explicit on the wire: the host binds this endpoint to the
+                // engine player with the same slot instead of trusting Vec
+                // position.
+                slot: u32::from(seat.slot.index()),
             })
             .collect();
 
@@ -636,13 +657,12 @@ impl<P: MachineProvider> GameCoordinator<P> {
         // panic — so a stale game host never lingers between games, while the
         // lineup + terminal result are retained for the overlay. Reuse the exact
         // address form used to dial above.
-        let lineup: Vec<LineupEntry> = lineup_info
+        let lineup: Vec<LineupEntry> = seats
             .iter()
-            .enumerate()
-            .map(|(slot, a)| LineupEntry {
-                slot,
-                agent_id: a.id,
-                name: a.name.clone(),
+            .map(|seat| LineupEntry {
+                slot: usize::from(seat.slot.index()),
+                agent_id: seat.agent.id,
+                name: seat.agent.name.clone(),
             })
             .collect();
         let registry_guard = SpectatorRegistryGuard::publish(
@@ -773,17 +793,17 @@ impl<P: MachineProvider> GameCoordinator<P> {
         &self,
         ctx: &P::MatchContext,
         game_host: Option<&MachineHandle>,
-        agents: &[(AgentId, MachineHandle)],
+        seats: &[MatchSeat],
     ) {
         use futures_util::future::join_all;
 
         let mut targets: Vec<(String, &MachineHandle)> =
-            Vec::with_capacity(agents.len() + usize::from(game_host.is_some()));
+            Vec::with_capacity(seats.len() + usize::from(game_host.is_some()));
         if let Some(handle) = game_host {
             targets.push(("game host".to_string(), handle));
         }
-        for (agent_id, handle) in agents {
-            targets.push((format!("agent {agent_id}"), handle));
+        for seat in seats {
+            targets.push((format!("agent {}", seat.agent.id), &seat.handle));
         }
 
         join_all(targets.into_iter().map(|(label, handle)| async move {

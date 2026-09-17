@@ -8,7 +8,24 @@
 use std::num::NonZeroU8;
 use std::ops::RangeInclusive;
 
-use crate::MachineError;
+/// Validation failure from [`MatchLayout`] constructors.
+///
+/// Kept in `common` (instead of reusing the infra `MachineError`) so the
+/// slot types stay usable by crates that never touch machines — like the
+/// game host, which names slots without provisioning anything. Convert into
+/// richer errors at the boundary (`From` impls where needed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SlotError {
+    /// Agent count does not fit the `u8` wire slot (or exceeds 254 agents).
+    #[error("agent count {0} exceeds the 254-agent limit")]
+    TooManyAgents(usize),
+    /// A match is host + >= 1 agent.
+    #[error("a match needs at least one agent")]
+    NoAgents,
+    /// Relay port range overflows `u16`.
+    #[error("relay ports {0}+1..={1} overflow u16")]
+    RelayPortOverflow(u16, u8),
+}
 
 /// 0-based agent index. The host is unrepresentable here by construction.
 ///
@@ -56,20 +73,12 @@ impl MatchLayout {
     /// Validate an agent count. Rejects 0 (a match is host + >=1 agent) and
     /// counts above 254 (host + 255 agents would be 256 slots, which does not
     /// fit the `u8` wire slot).
-    pub fn new(num_agents: usize) -> Result<Self, MachineError> {
-        let n = u8::try_from(num_agents).map_err(|_| {
-            MachineError::MatchInit(format!(
-                "agent count {num_agents} exceeds the 254-agent limit"
-            ))
-        })?;
+    pub fn new(num_agents: usize) -> Result<Self, SlotError> {
+        let n = u8::try_from(num_agents).map_err(|_| SlotError::TooManyAgents(num_agents))?;
         if n > 254 {
-            return Err(MachineError::MatchInit(format!(
-                "agent count {num_agents} exceeds the 254-agent limit"
-            )));
+            return Err(SlotError::TooManyAgents(num_agents));
         }
-        let num_agents = NonZeroU8::new(n).ok_or_else(|| {
-            MachineError::MatchInit("a match needs at least one agent".to_string())
-        })?;
+        let num_agents = NonZeroU8::new(n).ok_or(SlotError::NoAgents)?;
         Ok(Self { num_agents })
     }
 
@@ -100,20 +109,15 @@ impl MatchLayout {
     /// Relay port range fronting the agents: `base+1 ..= base+num_agents`.
     ///
     /// Always non-empty (zero-agent matches are rejected in `new`), so callers
-    /// no longer branch on `num_slots > 1`. Returns a `MatchInit` error when
+    /// no longer branch on `num_slots > 1`. Returns a [`SlotError`] when
     /// the range would overflow `u16` instead of silently colliding ports.
-    pub fn relay_range(self, base: u16) -> Result<RangeInclusive<u16>, MachineError> {
-        let lo = base.checked_add(1).ok_or_else(|| {
-            MachineError::MatchInit(format!("relay port base {base} is at the u16 limit"))
-        })?;
+    pub fn relay_range(self, base: u16) -> Result<RangeInclusive<u16>, SlotError> {
+        let lo = base
+            .checked_add(1)
+            .ok_or(SlotError::RelayPortOverflow(base, self.num_agents.get()))?;
         let hi = base
             .checked_add(u16::from(self.num_agents.get()))
-            .ok_or_else(|| {
-                MachineError::MatchInit(format!(
-                    "relay ports {base}+1..={} overflow u16",
-                    self.num_agents.get()
-                ))
-            })?;
+            .ok_or(SlotError::RelayPortOverflow(base, self.num_agents.get()))?;
         Ok(lo..=hi)
     }
 }

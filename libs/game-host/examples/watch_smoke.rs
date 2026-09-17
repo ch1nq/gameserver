@@ -21,10 +21,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 AgentEndpoint {
                     agent_id: 1,
                     address: "127.0.0.1:50052".into(),
+                    slot: 0,
                 },
                 AgentEndpoint {
                     agent_id: 2,
                     address: "127.0.0.1:50053".into(),
+                    slot: 1,
                 },
             ],
             config: Some(GameConfig {
