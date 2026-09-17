@@ -38,6 +38,12 @@ message AgentEndpoint {
 
   // Network address to connect to this agent (e.g., "[fd15:xxx::1]:50051")
   string address = 2;
+
+  // 0-based match slot. The host binds this endpoint to the engine player
+  // with the same ordinal — slot travels on the wire so neither side may
+  // rely on Vec position (which previously mis-steered every stateful
+  // agent whenever engine player order differed from request order).
+  uint32 slot = 3;
 }
 
 // Game configuration options

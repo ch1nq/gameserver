@@ -21,6 +21,8 @@ use tokio_stream::{Stream, StreamExt};
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
+use common::AgentSlot;
+
 use crate::game::{GameResult as EngineResult, GameState};
 
 pub mod gamehost {
@@ -41,7 +43,6 @@ use spectator_frame::SpectatorFrame;
 
 /// Safety cap so a stuck game can never loop forever.
 const MAX_TICKS: u64 = 100_000;
-
 /// Upper bound on per-agent setup (`Initialize` plus opening the action
 /// stream). A wedged agent fails the match fast instead of hanging it before
 /// tick 0.
@@ -50,6 +51,22 @@ pub(crate) const SETUP_TIMEOUT: Duration = Duration::from_secs(5);
 /// Buffer of spectator frames a lagging subscriber can fall behind before it is
 /// dropped and forced to reconnect (which re-snapshots).
 const SPECTATOR_BUFFER: usize = 1024;
+
+/// One agent's bindings for a game: match slot, engine player, platform
+/// identity, and network link travel together in a single value.
+///
+/// Previously these lived in three parallel `Vec`s (`links`, `player_ids`,
+/// `agent_ids`) coupled only by position — and `player_ids` came from
+/// `HashMap` order, so slot *i* silently steered the wrong engine player
+/// whenever that order differed from request order. Constructing the triple
+/// once, up front, makes that class of mismatch unrepresentable downstream:
+/// the loop below never indexes anything by slot.
+struct Seat<L, Pid> {
+    slot: AgentSlot,
+    engine_pid: Pid,
+    agent_id: i64,
+    link: L,
+}
 
 /// The per-game seam. Owns only the typed bits: how to build the engine, how to
 /// talk to this game's agents, and how the engine's `PlayerId`/`GameAction`
@@ -98,16 +115,20 @@ pub trait GameAdapter: Send + Sync + 'static {
     /// opens the action stream, and starts the background pump tasks. Slow
     /// agents are fine after this point, but a wedge *here* fails the match,
     /// so implementations must bound it with [`SETUP_TIMEOUT`].
+    ///
+    /// `slot` names the agent for `Initialize.player_id` and must be the
+    /// same slot carried on its [`Seat`]: it is a typed value (not a `usize`
+    /// index) so setup cannot silently bind the wrong engine player.
     async fn open_link(
         &self,
         client: Self::Client,
-        player_slot: usize,
+        slot: AgentSlot,
         num_players: usize,
     ) -> Result<Self::Link, String>;
 
     /// Publish this tick's observation to the agent. Never blocks: states the
     /// agent hasn't drained are skipped (latest wins).
-    fn push_state(&self, link: &Self::Link, tick: u64, engine: &Self::Engine, player_slot: usize);
+    fn push_state(&self, link: &Self::Link, tick: u64, engine: &Self::Engine);
 
     /// Latest action received from the agent, with the tick it was computed
     /// for. `None` if the agent hasn't answered yet: the game loop then uses
@@ -285,37 +306,60 @@ async fn run_game<G: GameAdapter>(
     spectator: &SpectatorState<G>,
     spectator_tx: &broadcast::Sender<SpectatorFrame>,
 ) -> Result<(), String> {
+    // Resolve the wire slots into slot order, validating instead of
+    // trusting Vec position: duplicates, gaps, or out-of-range slots fail
+    // the match loudly here rather than mis-steering silently later.
     let num_players = agents.len();
+    let mut endpoints: Vec<&AgentEndpoint> = agents.iter().collect();
+    endpoints.sort_by_key(|endpoint| endpoint.slot);
+    for (index, endpoint) in endpoints.iter().enumerate() {
+        if endpoint.slot as usize != index {
+            return Err(format!(
+                "agent {} has non-contiguous slot {} for {num_players} agents",
+                endpoint.agent_id, endpoint.slot
+            ));
+        }
+    }
+
+    let mut engine = adapter.init_engine(num_players, &cfg);
     // The tick *period*: the loop below advances on this wall-clock interval
     // no matter how fast or slow agents answer.
     let tick_period = Duration::from_millis(cfg.tick_rate_ms.max(1));
-
-    let mut engine = adapter.init_engine(num_players, &cfg);
 
     // Seed spectator state from the initial engine so joiners can snapshot even
     // before the first tick is produced.
     *spectator.lock().await = Some(adapter.init_spectator(&engine));
 
-    // Stable slot -> engine player id mapping: slot i is controlled by agents[i].
-    let player_ids = engine.get_player_ids();
-    if player_ids.len() != num_players {
+    // Engine player ids arrive in init order (trait invariant on
+    // `get_player_ids`), so the *i*-th id belongs to slot *i*. Zip them with
+    // the validated endpoints into seats: after this point nothing is
+    // addressed by bare index anymore.
+    let engine_pids = engine.get_player_ids();
+    if engine_pids.len() != num_players {
         return Err(format!(
             "engine created {} players for {num_players} agents",
-            player_ids.len()
+            engine_pids.len()
         ));
     }
-    let agent_ids: Vec<i64> = agents.iter().map(|a| a.agent_id).collect();
 
     // Connect every agent, then open its background link (setup + stream +
     // pump tasks). From here on the game loop never blocks on agents.
-    let mut links: Vec<G::Link> = Vec::with_capacity(num_players);
-    for (slot, endpoint) in agents.iter().enumerate() {
+    let mut seats: Vec<Seat<G::Link, <G::Engine as GameState>::PlayerId>> =
+        Vec::with_capacity(num_players);
+    for ((index, endpoint), engine_pid) in endpoints.into_iter().enumerate().zip(engine_pids) {
+        let slot = AgentSlot::from_index(index)
+            .ok_or_else(|| format!("too many agents for slot numbering: {num_players}"))?;
         let client = adapter.connect(&endpoint.address).await?;
         let link = adapter
             .open_link(client, slot, num_players)
             .await
             .map_err(|e| format!("agent {} setup failed: {e}", endpoint.address))?;
-        links.push(link);
+        seats.push(Seat {
+            slot,
+            engine_pid,
+            agent_id: endpoint.agent_id,
+            link,
+        });
     }
 
     progress.lock().await.state = HostGameState::Running;
@@ -338,8 +382,8 @@ async fn run_game<G: GameAdapter>(
 
     // Seed tick 0 so agents have a state before the first gears turn. The
     // first interval tick fires immediately and will mostly apply defaults.
-    for (slot, link) in links.iter().enumerate() {
-        adapter.push_state(link, 0, &engine, slot);
+    for seat in seats.iter() {
+        adapter.push_state(&seat.link, 0, &engine);
     }
 
     let final_result = loop {
@@ -348,22 +392,21 @@ async fn run_game<G: GameAdapter>(
 
         // Consume whatever each alive agent has offered. Slow agents simply
         // steer on their latest answer or the default; only a broken stream
-        // eliminates.
-        for (slot, link) in links.iter().enumerate() {
-            let pid = &player_ids[slot];
-            if !alive_set.contains(pid) {
+        // eliminates. Bindings come from the seat — never a parallel index.
+        for seat in seats.iter() {
+            if !alive_set.contains(&seat.engine_pid) {
                 continue;
             }
-            if !adapter.link_alive(link) {
-                tracing::warn!(slot, "agent link dead; dropping");
-                engine.handle_player_leave(pid.clone());
+            if !adapter.link_alive(&seat.link) {
+                tracing::warn!(slot = seat.slot.index(), "agent link dead; dropping");
+                engine.handle_player_leave(seat.engine_pid.clone());
                 continue;
             }
             let action = adapter
-                .poll_action(link)
+                .poll_action(&seat.link)
                 .map(|(_, action)| action)
                 .unwrap_or_else(|| adapter.default_action());
-            engine.handle_player_action(pid.clone(), action);
+            engine.handle_player_action(seat.engine_pid.clone(), action);
         }
 
         engine.update_game_state();
@@ -405,9 +448,9 @@ async fn run_game<G: GameAdapter>(
             None => {
                 // Publish the new state for the next tick, then account for
                 // our own cost. Finished games break above without publishing.
-                for (slot, link) in links.iter().enumerate() {
-                    if alive_set.contains(&player_ids[slot]) {
-                        adapter.push_state(link, current_tick, &engine, slot);
+                for seat in seats.iter() {
+                    if alive_set.contains(&seat.engine_pid) {
+                        adapter.push_state(&seat.link, current_tick, &engine);
                     }
                 }
                 if work_start.elapsed() > tick_period {
@@ -432,11 +475,15 @@ async fn run_game<G: GameAdapter>(
         .iter()
         .enumerate()
         .map(|(idx, pid)| {
-            let slot = player_ids.iter().position(|p| p == pid);
+            // Identity comes from the seat bound at setup — no reverse index
+            // lookup that could attribute a score to the wrong agent.
+            let agent_id = seats
+                .iter()
+                .find(|seat| seat.engine_pid == *pid)
+                .map(|seat| seat.agent_id)
+                .unwrap_or_default();
             AgentPlacement {
-                agent_id: slot
-                    .and_then(|s| agent_ids.get(s).copied())
-                    .unwrap_or_default(),
+                agent_id,
                 position: (idx + 1) as u32,
                 // Score = ticks survived (survivors get the full game length).
                 score: death_tick.get(pid).copied().unwrap_or(final_tick) as u32,
@@ -458,4 +505,203 @@ async fn run_game<G: GameAdapter>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex as StdMutex;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum FakeAction {
+        Left,
+        Right,
+    }
+
+    /// Minimal engine that records every applied action per player and ends
+    /// the game after a few ticks. Player ids are plain ordinals.
+    struct FakeEngine {
+        num_players: u32,
+        ticks: u64,
+        log: Arc<StdMutex<Vec<(u32, FakeAction)>>>,
+    }
+
+    impl GameState for FakeEngine {
+        type PlayerId = u32;
+        type GameAction = FakeAction;
+        type StateDiff = ();
+        type Config = ();
+
+        fn init_game(_config: &Self::Config, num_players: usize) -> Self {
+            Self {
+                num_players: num_players as u32,
+                ticks: 0,
+                log: Arc::new(StdMutex::new(Vec::new())),
+            }
+        }
+
+        fn get_player_ids(&self) -> Vec<Self::PlayerId> {
+            (0..self.num_players).collect()
+        }
+
+        fn update_game_state(&mut self) {
+            self.ticks += 1;
+        }
+
+        fn handle_player_action(&mut self, player_id: Self::PlayerId, action: Self::GameAction) {
+            self.log.lock().unwrap().push((player_id, action));
+        }
+
+        fn handle_player_leave(&mut self, _player_id: Self::PlayerId) {}
+
+        fn get_game_result(&self) -> Option<EngineResult<Self::PlayerId>> {
+            (self.ticks >= 3).then_some(EngineResult::Winner(0))
+        }
+
+        fn diff(&self, _other: &Self) -> Self::StateDiff {}
+    }
+
+    #[derive(Clone, Copy)]
+    struct FakeLink {
+        action: FakeAction,
+    }
+
+    struct FakeAdapter {
+        log: Arc<StdMutex<Vec<(u32, FakeAction)>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl GameAdapter for FakeAdapter {
+        type Engine = FakeEngine;
+        type Client = ();
+        type Link = FakeLink;
+        type Spectator = ();
+
+        fn init_engine(&self, num_players: usize, _cfg: &GameConfig) -> Self::Engine {
+            FakeEngine {
+                num_players: num_players as u32,
+                ticks: 0,
+                log: self.log.clone(),
+            }
+        }
+
+        fn init_spectator(&self, _engine: &Self::Engine) -> Self::Spectator {}
+
+        fn tick_spectator(&self, _spec: &mut Self::Spectator, _engine: &Self::Engine) -> Vec<u8> {
+            Vec::new()
+        }
+
+        fn encode_snapshot(&self, _spec: &Self::Spectator) -> Vec<u8> {
+            Vec::new()
+        }
+
+        fn active_players(&self, engine: &Self::Engine) -> Vec<u32> {
+            (0..engine.num_players).collect()
+        }
+
+        async fn connect(&self, _address: &str) -> Result<Self::Client, String> {
+            Ok(())
+        }
+
+        async fn open_link(
+            &self,
+            _client: Self::Client,
+            slot: AgentSlot,
+            _num_players: usize,
+        ) -> Result<Self::Link, String> {
+            // One constant action per slot, so a crossed wire is observable:
+            // slot 0 always turns left, anything else right.
+            Ok(FakeLink {
+                action: if slot.index() == 0 {
+                    FakeAction::Left
+                } else {
+                    FakeAction::Right
+                },
+            })
+        }
+
+        fn push_state(&self, _link: &Self::Link, _tick: u64, _engine: &Self::Engine) {}
+
+        fn poll_action(&self, link: &Self::Link) -> Option<(u64, FakeAction)> {
+            Some((0, link.action))
+        }
+
+        fn link_alive(&self, _link: &Self::Link) -> bool {
+            true
+        }
+
+        fn default_action(&self) -> FakeAction {
+            FakeAction::Left
+        }
+    }
+
+    fn endpoint(agent_id: i64, slot: u32) -> AgentEndpoint {
+        AgentEndpoint {
+            agent_id,
+            address: String::new(),
+            slot,
+        }
+    }
+
+    fn test_config() -> GameConfig {
+        GameConfig {
+            tick_rate_ms: 1,
+            ..Default::default()
+        }
+    }
+
+    /// Slot binding must follow the explicit wire slot, not Vec position:
+    /// endpoints arrive shuffled, yet each engine player must still get its
+    /// own slot's action and the winner's score must attribute to slot 0's
+    /// agent. (The old code indexed three parallel Vecs and trusted request
+    /// order on both counts.)
+    #[tokio::test]
+    async fn slot_binding_ignores_endpoint_order() {
+        let log = Arc::new(StdMutex::new(Vec::new()));
+        let adapter = FakeAdapter { log: log.clone() };
+        // Deliberately shuffled: slot 1 first.
+        let agents = vec![endpoint(101, 1), endpoint(100, 0)];
+        let progress: Progress = Arc::new(Mutex::new(GameProgress::default()));
+        let spectator: SpectatorState<FakeAdapter> = Arc::new(Mutex::new(None));
+        let (tx, _) = broadcast::channel(16);
+        run_game(&adapter, agents, test_config(), &progress, &spectator, &tx)
+            .await
+            .unwrap();
+
+        let log = log.lock().unwrap();
+        assert!(!log.is_empty(), "no actions were applied");
+        for (pid, action) in log.iter() {
+            let expected = if *pid == 0 {
+                FakeAction::Left
+            } else {
+                FakeAction::Right
+            };
+            assert_eq!(
+                *action, expected,
+                "engine player {pid} got the wrong slot's action"
+            );
+        }
+
+        // Winner is engine player 0 by construction; its score attributes to
+        // slot 0's agent despite the shuffled request order.
+        let result = progress.lock().await.result.clone().unwrap();
+        assert_eq!(result.placements[0].agent_id, 100);
+    }
+
+    /// Non-contiguous wire slots fail the match loudly instead of
+    /// mis-steering silently.
+    #[tokio::test]
+    async fn duplicate_slots_fail_fast() {
+        let adapter = FakeAdapter {
+            log: Arc::new(StdMutex::new(Vec::new())),
+        };
+        let agents = vec![endpoint(100, 0), endpoint(101, 0)];
+        let progress: Progress = Arc::new(Mutex::new(GameProgress::default()));
+        let spectator: SpectatorState<FakeAdapter> = Arc::new(Mutex::new(None));
+        let (tx, _) = broadcast::channel(16);
+        let err = run_game(&adapter, agents, test_config(), &progress, &spectator, &tx)
+            .await
+            .unwrap_err();
+        assert!(err.contains("non-contiguous"), "unexpected error: {err}");
+    }
 }

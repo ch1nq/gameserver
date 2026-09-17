@@ -32,6 +32,7 @@ pub mod spectpb {
 }
 
 use agentpb::agent_client::AgentClient;
+use common::AgentSlot;
 
 /// Background link to one agent. The game loop publishes tick states through
 /// `state_tx` and reads the latest action from `action_rx` without ever
@@ -293,7 +294,7 @@ impl GameAdapter for AchtungGrpc {
     async fn open_link(
         &self,
         mut client: Self::Client,
-        player_slot: usize,
+        slot: AgentSlot,
         num_players: usize,
     ) -> Result<Self::Link, String> {
         let config = self.config.get().unwrap_or(&self.default_config);
@@ -304,7 +305,10 @@ impl GameAdapter for AchtungGrpc {
         tokio::time::timeout(
             SETUP_TIMEOUT,
             client.initialize(agentpb::InitializeRequest {
-                player_id: player_slot as u32,
+                // Slot and engine player share the ordinal by construction
+                // (see run_game seats), so the slot number identifies the
+                // agent's head in every observation it receives.
+                player_id: u32::from(slot.index()),
                 num_players: num_players as u32,
                 arena,
             }),
@@ -373,7 +377,7 @@ impl GameAdapter for AchtungGrpc {
         })
     }
 
-    fn push_state(&self, link: &Self::Link, tick: u64, engine: &Achtung, _player_slot: usize) {
+    fn push_state(&self, link: &Self::Link, tick: u64, engine: &Achtung) {
         let state = build_state(engine);
         link.state_tx.send_replace(Some(agentpb::PlayRequest {
             tick,
@@ -502,10 +506,13 @@ mod tests {
         let adapter = adapter();
         let (addr, _die, server) = spawn_agent(Duration::ZERO).await;
         let client = adapter.connect(&addr).await.unwrap();
-        let link = adapter.open_link(client, 0, 1).await.unwrap();
+        let link = adapter
+            .open_link(client, AgentSlot::from_index(0).unwrap(), 1)
+            .await
+            .unwrap();
         let engine = engine();
 
-        adapter.push_state(&link, 5, &engine, 0);
+        adapter.push_state(&link, 5, &engine);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         let action = loop {
             if let Some((tick, action)) = adapter.poll_action(&link) {
@@ -528,9 +535,12 @@ mod tests {
         // Replies take an hour: effectively never within the test.
         let (addr, _die, server) = spawn_agent(Duration::from_secs(3600)).await;
         let client = adapter.connect(&addr).await.unwrap();
-        let link = adapter.open_link(client, 0, 1).await.unwrap();
+        let link = adapter
+            .open_link(client, AgentSlot::from_index(0).unwrap(), 1)
+            .await
+            .unwrap();
 
-        adapter.push_state(&link, 1, &engine(), 0);
+        adapter.push_state(&link, 1, &engine());
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(adapter.poll_action(&link).is_none());
         assert_eq!(adapter.default_action(), GameAction::Forward);
@@ -544,7 +554,10 @@ mod tests {
         let adapter = adapter();
         let (addr, die, _server) = spawn_agent(Duration::ZERO).await;
         let client = adapter.connect(&addr).await.unwrap();
-        let link = adapter.open_link(client, 0, 1).await.unwrap();
+        let link = adapter
+            .open_link(client, AgentSlot::from_index(0).unwrap(), 1)
+            .await
+            .unwrap();
         assert!(adapter.link_alive(&link));
 
         // Clean stream close from the agent side.

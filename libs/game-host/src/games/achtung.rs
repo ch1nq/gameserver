@@ -303,7 +303,12 @@ impl game::GameState for Achtung {
     }
 
     fn get_player_ids(&self) -> Vec<Self::PlayerId> {
-        self.players.keys().copied().collect()
+        // Sorted = init order (players are created as 0..num_players): the
+        // host binds slot `i` to `ids[i]`, so HashMap order here previously
+        // mis-steered stateful agents. See `GameState::get_player_ids`.
+        let mut ids: Vec<PlayerId> = self.players.keys().copied().collect();
+        ids.sort_unstable();
+        ids
     }
 
     fn diff(&self, other: &Achtung) -> AchtungDiff {
@@ -525,6 +530,19 @@ impl Achtung {
 mod tests {
     use super::*;
     use crate::game::GameState as _;
+
+    /// Slot binding depends on this order (the host maps slot `i` to
+    /// `ids[i]`): ids must come back in init order every game, regardless of
+    /// `HashMap` randomization. Guards the documented `get_player_ids`
+    /// invariant — collecting `HashMap::keys()` directly failed this.
+    #[test]
+    fn player_ids_are_in_init_order_across_seeds() {
+        for seed in [0, 1, 7, 42, 12345, 999_999] {
+            let game = Achtung::init_game_with_seed(&AchtungConfig::default(), 8, seed);
+            let ids = game.get_player_ids();
+            assert_eq!(ids, (0..8).collect::<Vec<_>>(), "seed {seed}");
+        }
+    }
 
     /// Drive one player's gap scheduler and return the 1-indexed ticks on
     /// which gaps start plus the total number of non-drawing ticks.
