@@ -32,8 +32,6 @@ exclude = ["src/achtung/_generated"]
 docstring-code-format = true
 
 [tool.ruff.lint]
-# Defaults (E4/E7/E9/F) stay on; extend rather than replace so future
-# ruff defaults apply automatically.
 extend-select = ["I", "UP", "B", "ASYNC"]
 
 [tool.ty.environment]
