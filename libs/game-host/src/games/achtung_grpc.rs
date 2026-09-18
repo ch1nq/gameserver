@@ -129,17 +129,28 @@ fn map_direction(dir: i32) -> GameAction {
 }
 
 /// Build the agent-facing GameState snapshot for the current tick.
+///
+/// Sends each player's full trail every tick. The host→agent transport is
+/// latest-wins (see [`AchtungAgentLink`]), so a full snapshot stays correct
+/// even when intermediate ticks are dropped under load — a dropped tick just
+/// yields a slightly stale but complete trail.
 fn build_state(engine: &Achtung) -> agentpb::GameState {
     agentpb::GameState {
         tick: engine.tick(),
         players: engine
-            .player_views()
+            .agent_views()
             .into_iter()
             .map(|v| agentpb::PlayerState {
                 player_id: v.player_id as u32,
                 position: Some(agentpb::Position { x: v.x, y: v.y }),
                 direction: v.direction,
                 alive: v.alive,
+                size: v.size,
+                trail: v
+                    .trail
+                    .into_iter()
+                    .map(|b| agentpb::Position { x: b.x, y: b.y })
+                    .collect(),
             })
             .collect(),
     }

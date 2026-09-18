@@ -89,10 +89,19 @@ class Position:
 @dataclass(frozen=True)
 class PlayerState:
     player_id: int
+    # The head of the trail.
     position: Position
     # Heading in radians.
     direction: float
     alive: bool
+    # The full trail behind the head, oldest point first. Gap holes are absent,
+    # so this is the exact set of solid points to avoid. Dead players keep their
+    # trail. Note: the engine ignores a player's ~10 newest own-trail points for
+    # self-collision, so when checking your own trail, skip its tail.
+    trail: tuple[Position, ...] = ()
+    # Blob radius shared by the head and every trail point; a collision happens
+    # within `size + other.size` of a point.
+    size: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -150,4 +159,6 @@ def _player_from_proto(player: Any) -> PlayerState:
         ),
         direction=float(getattr(player, "direction", 0.0)),
         alive=bool(getattr(player, "alive", False)),
+        trail=tuple(Position(x=float(p.x), y=float(p.y)) for p in getattr(player, "trail", ())),
+        size=float(getattr(player, "size", 0.0)),
     )

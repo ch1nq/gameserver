@@ -45,7 +45,7 @@ message Position {
 message PlayerState {
   uint32 player_id = 1;
 
-  // Current position
+  // Current position (the head of the trail)
   Position position = 2;
 
   // Current direction in radians
@@ -53,6 +53,16 @@ message PlayerState {
 
   // Whether this player is still alive
   bool alive = 4;
+
+  // The full trail behind the head, oldest point first. Holes left by the
+  // player's gaps are simply absent, so this is the exact set of solid points
+  // to avoid — no client-side reconstruction needed. Dead players keep their
+  // trail (it stays a wall).
+  repeated Position trail = 5;
+
+  // Blob radius shared by the head and every trail point. Collision with a
+  // point happens within `size + other.size` of it (matches the engine).
+  float size = 6;
 }
 
 enum Direction {
