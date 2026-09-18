@@ -453,6 +453,25 @@ pub struct PlayerSpectatorView {
     pub body: Vec<BlobView>,
 }
 
+/// Agent-facing view of a player: head pose plus the full trail. Unlike
+/// [`PlayerView`] (head only) it carries the trail so agents don't have to
+/// reconstruct it tick by tick; unlike [`PlayerSpectatorView`] it also carries
+/// the heading agents steer on. Gaps are absent from `trail` by construction
+/// (the engine only records trail points on drawing ticks).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentView {
+    pub player_id: PlayerId,
+    pub x: f32,
+    pub y: f32,
+    /// Heading in radians.
+    pub direction: f32,
+    pub alive: bool,
+    /// Blob radius shared by the head and every trail point.
+    pub size: f32,
+    /// Trail points behind the head, oldest first.
+    pub trail: Vec<BlobView>,
+}
+
 impl Achtung {
     /// Current tick (timestep) counter.
     pub fn tick(&self) -> u64 {
@@ -511,6 +530,27 @@ impl Achtung {
                 y: p.head.position.y,
                 direction: p.direction.radians,
                 alive: p.is_alive,
+            })
+            .collect();
+        views.sort_by_key(|v| v.player_id);
+        views
+    }
+
+    /// Agent-facing snapshot: every player's head pose plus full trail, ordered
+    /// by player id. Dead players are included so their trails still count as
+    /// walls.
+    pub fn agent_views(&self) -> Vec<AgentView> {
+        let mut views: Vec<AgentView> = self
+            .players
+            .iter()
+            .map(|(&player_id, p)| AgentView {
+                player_id,
+                x: p.head.position.x,
+                y: p.head.position.y,
+                direction: p.direction.radians,
+                alive: p.is_alive,
+                size: p.head.size,
+                trail: p.body.iter().map(|b| b.to_view()).collect(),
             })
             .collect();
         views.sort_by_key(|v| v.player_id);
